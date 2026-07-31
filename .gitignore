@@ -1,0 +1,27 @@
+# Derleme çıktıları
+build/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.dis
+*.map
+
+# Vendor edilmiş SDK — depoya girmez, cmake/setup ile çekilir
+third_party/pico-sdk/
+
+# Eğitim boru hattı (tools/) — indirilen ses verileri çok büyük
+tools/data/
+tools/downloads/
+tools/runs/
+*.wav
+*.mp3
+*.tflite
+__pycache__/
+*.pyc
+.venv/
+
+# Editör
+.vscode/
+.idea/
+compile_commands.json
