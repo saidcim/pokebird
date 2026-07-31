@@ -137,9 +137,9 @@ def main():
     ap = argparse.ArgumentParser(description="PokeBird M1 ses yakalama")
     ap.add_argument("--port", required=True, help="ornek: COM13 veya /dev/ttyACM0")
     ap.add_argument("--out", default="kayit.wav")
-    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i", "l"],
+    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i", "l", "d", "s"],
                     help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
-                         "l=canli seviye (Ctrl+C ile cik)")
+                         "l=canli seviye, d=ekran testi, s=spektrogram (Ctrl+C ile cik)")
     ap.add_argument("--spectrum", action="store_true",
                     help="bant enerjisi analizi (yavas, numpy'siz DFT)")
     args = ap.parse_args()
@@ -148,9 +148,9 @@ def main():
         time.sleep(0.3)
         ser.reset_input_buffer()
 
-        if args.cmd == "l":
+        if args.cmd in ("l", "s"):
             # Canli seviye: cihaz surekli yaziyor, Ctrl+C ile cikilir.
-            ser.write(b"l")
+            ser.write(args.cmd.encode())
             ser.flush()
             print("Canli seviye — el cirpin / konusun. Cikmak icin Ctrl+C.\n")
             try:

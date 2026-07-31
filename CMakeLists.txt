@@ -28,6 +28,7 @@ add_executable(pokebird
     src/hal/i2c_bus.c
     src/hal/display/qspi_pio.c
     src/hal/display/dev_config.c
+    src/hal/display/lcd_blit.c
     src/hal/display/LCD_3in49.c
     src/hal/display/Touch.c
     src/dsp/fft.c

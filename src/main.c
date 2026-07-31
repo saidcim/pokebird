@@ -30,6 +30,8 @@
 #include "hal/es8311.h"
 #include "hal/i2c_bus.h"
 #include "hal/display/LCD_3in49.h"
+#include "hal/display/lcd_blit.h"
+#include "hal/display/qspi_pio.h"
 #include "dsp/fft.h"
 #include "ui/spectrogram.h"
 
@@ -71,17 +73,6 @@ static uint8_t s_mic_gain = PB_MIC_GAIN;
 /* ── Ekran ────────────────────────────────────────────────────────────────
  * M1'de ekranı kullanmıyoruz ama arka ışık gürültü ölçümünün bir değişkeni:
  * AP3032 yükseltici ve PWM, mikrofonun hemen yanında anahtarlama yapıyor. */
-
-static void lcd_panel_reset(void) {
-    gpio_init(PB_PIN_LCD_RST);
-    gpio_set_dir(PB_PIN_LCD_RST, GPIO_OUT);
-    gpio_put(PB_PIN_LCD_RST, 1);
-    sleep_ms(10);
-    gpio_put(PB_PIN_LCD_RST, 0);
-    sleep_ms(20);
-    gpio_put(PB_PIN_LCD_RST, 1);
-    sleep_ms(120);
-}
 
 static void backlight_init(void) {
     gpio_init(PB_PIN_BL_EN);
@@ -375,6 +366,41 @@ static void cmd_spectrogram(void) {
     printf("cikildi\n\n");
 }
 
+/**
+ * Ekran testi — "hiçbir şey görünmüyor" durumunu ayrıştırır.
+ *
+ * Arka ışık ayrı, panel ayrı bir sorun olabilir. Bu test önce arka ışığı
+ * yakıp beyaz basıyor: ekran beyaz oluyorsa QSPI ve panel init'i çalışıyor
+ * demektir ve sorun çizim mantığındadır. Hiçbir şey olmuyorsa sorun daha
+ * aşağıda: arka ışık ya da panel başlatma.
+ */
+static void cmd_display_test(void) {
+    printf("\nEkran testi. Her renk 2 saniye.\n");
+    backlight_set(true, BL_PWM_WRAP - 1);
+
+    const struct { const char *ad; uint16_t renk; } adimlar[] = {
+        { "beyaz",     0xFFFF },
+        { "kirmizi",   0xF800 },
+        { "yesil",     0x07E0 },
+        { "mavi",      0x001F },
+        { "siyah",     0x0000 },
+    };
+
+    for (size_t i = 0; i < sizeof(adimlar) / sizeof(adimlar[0]); i++) {
+        printf("  %s\n", adimlar[i].ad);
+        pb_lcd_fill(adimlar[i].renk);
+        sleep_ms(2000);
+    }
+
+    /* Yön kontrolü: panelin SOL UST kosesine kucuk beyaz bir kare.
+     * Cihazi yatay tuttugunuzda karenin nerede oldugu, yon cevirimimizin
+     * dogru olup olmadigini soyler. */
+    static uint16_t kare[20 * 20];
+    for (int i = 0; i < 20 * 20; i++) kare[i] = 0xFFFF;
+    pb_lcd_blit(0, 0, 20, 20, kare);
+    printf("  panel (0,0) konumuna 20x20 beyaz kare cizildi\n\n");
+}
+
 static void print_help(void) {
     printf("\nKomutlar:\n");
     printf("  i  cihaz ve ses yapilandirmasi\n");
@@ -417,6 +443,27 @@ int main(void) {
         printf("[!] I2S yakalama yolu kurulamadi.\n");
     }
 
+    /* ── Ekran ──────────────────────────────────────────────────────────
+     * QSPI pio0'da, ses pio1'de — state machine çakışması yok.
+     *
+     * SIRA ZORUNLU (Waveshare örneğindeki sıra):
+     *   1. QSPI_GPIO_Init   — CS/RST/PWR_EN pin yönleri
+     *   2. QSPI_PIO_Init    — PIO programını yükle (SM'leri KAPALI bırakır)
+     *   3. QSPI_4Wrie_Mode  — 4-bit SM'i ETKİNLEŞTİR ve qspi.sm'i ayarla
+     *   4. pb_display_dma_init — DREQ doğru SM'e bağlansın diye 3'ten sonra
+     *   5. LCD_3IN49_Init   — panel reset + register dizisi
+     *
+     * 3. adım atlanırsa hiçbir SM çalışmadığı için PIO TX FIFO hiç
+     * boşalmıyor ve DMA sonsuza kadar bekliyor — ekran tamamen siyah kalıyor,
+     * üstelik ilk çizim çağrısında kilitleniyor. */
+    QSPI_GPIO_Init(qspi);
+    QSPI_PIO_Init(qspi);
+    QSPI_4Wrie_Mode(&qspi);
+    pb_display_dma_init();
+    LCD_3IN49_Init();
+    pb_lcd_fill(0x0000);
+    printf("Ekran hazir (%dx%d panel).\n", PB_PANEL_W, PB_PANEL_H);
+
     cmd_info();
     print_help();
 
@@ -434,6 +481,7 @@ int main(void) {
             case 'r': cmd_record();    break;
             case 'l': cmd_level_meter(); break;
             case 's': cmd_spectrogram(); break;
+            case 'd': cmd_display_test(); break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;
