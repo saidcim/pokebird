@@ -77,7 +77,7 @@ static uint8_t s_mic_gain = PB_MIC_GAIN;
 static void backlight_init(void) {
     gpio_init(PB_PIN_BL_EN);
     gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
-    gpio_put(PB_PIN_BL_EN, 0);          /* M1 varsayılanı: kapalı */
+    gpio_put(PB_PIN_BL_EN, 1);          /* açık başla: reset sonrası zaten yanıyor */
 
     gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_PWM);
     uint slice = pwm_gpio_to_slice_num(PB_PIN_LCD_BL);
@@ -85,14 +85,28 @@ static void backlight_init(void) {
     pwm_config_set_wrap(&cfg, BL_PWM_WRAP - 1);
     pwm_config_set_clkdiv(&cfg, 1.0f);  /* ~73 kHz — duyulabilir bandın üstünde */
     pwm_init(slice, &cfg, true);
-    pwm_set_gpio_level(PB_PIN_LCD_BL, 0);
+    pwm_set_gpio_level(PB_PIN_LCD_BL, 0);   /* ters mantık: 0 duty = TAM PARLAK */
 }
 
-/* enable: yükseltici açık mı; level: 0..BL_PWM_WRAP-1 (BL_PWM_WRAP => tam açık, PWM yok) */
-static void backlight_set(bool enable, uint16_t level) {
+/**
+ * Arka ışık.
+ *
+ * @param enable      yükseltici (BL_EN, GPIO37)
+ * @param brightness  0 = kapalı ... BL_PWM_WRAP-1 = en parlak
+ *
+ * !! PWM TERS !! AP3032'nin dimming girişi aktif-düşük: düşük duty parlak,
+ * yüksek duty karanlık. Waveshare'in kendi sürücüsü de bunu yapıyor:
+ *     pwm_set_chan_level(slice, PWM_CHAN_A, 100 - Value);
+ *
+ * Bu ilk denememde gözden kaçtı: tam parlaklık için duty'yi %100'e çektim,
+ * ki bu ters şemada en karanlık değer — ekran ışığı hiç yanmadı. M0'daki
+ * "nefes alan arka ışık" bunu yakalayamamıştı, çünkü ters de olsa nefes
+ * efekti aynı görünüyor, sadece fazı kayıyor.
+ */
+static void backlight_set(bool enable, uint16_t brightness) {
     gpio_put(PB_PIN_BL_EN, enable ? 1 : 0);
-    if (level >= BL_PWM_WRAP) level = BL_PWM_WRAP - 1;
-    pwm_set_gpio_level(PB_PIN_LCD_BL, level);
+    if (brightness >= BL_PWM_WRAP) brightness = BL_PWM_WRAP - 1;
+    pwm_set_gpio_level(PB_PIN_LCD_BL, (uint16_t)((BL_PWM_WRAP - 1) - brightness));
 }
 
 /* ── Ölçüm ───────────────────────────────────────────────────────────────
@@ -401,6 +415,52 @@ static void cmd_display_test(void) {
     printf("  panel (0,0) konumuna 20x20 beyaz kare cizildi\n\n");
 }
 
+/**
+ * Arka ışık teşhisi — hangi pin kombinasyonu ışığı yakıyor?
+ *
+ * Reset sonrası (hiçbir kodumuz çalışmadan) ışık yanıyor, bizim kod
+ * çalışınca sönüyor. Demek ki iki pinden biri yanlış sürülüyor:
+ *   GPIO36 (LCD_BL)  — parlaklık, PWM
+ *   GPIO37 (BL_EN)   — yükseltici enable
+ * Ama polariteyi ve hangisinin gerçekten enable olduğunu varsaymak yerine
+ * dört kombinasyonu tek tek deneyip hangisinde ışık yandığını soruyoruz.
+ *
+ * Ayrıca GPIO36'yı PWM yerine düz GPIO olarak da deniyoruz: PWM işlevi
+ * QSPI_GPIO_Init tarafından ezilmiş olabilir.
+ */
+static void cmd_backlight_probe(void) {
+    printf("\nArka isik teshisi. Her adim 4 saniye — EKRANA BAKIN.\n");
+    printf("Hangi adimda isik yandigini not edin.\n\n");
+
+    /* PWM işlevini bırak, düz GPIO olarak sür */
+    gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_SIO);
+    gpio_set_dir(PB_PIN_LCD_BL, GPIO_OUT);
+    gpio_init(PB_PIN_BL_EN);
+    gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
+
+    const struct { int bl_en; int lcd_bl; const char *ad; } adim[] = {
+        { 0, 0, "1) BL_EN=0  LCD_BL=0" },
+        { 0, 1, "2) BL_EN=0  LCD_BL=1" },
+        { 1, 0, "3) BL_EN=1  LCD_BL=0" },
+        { 1, 1, "4) BL_EN=1  LCD_BL=1" },
+    };
+    for (size_t i = 0; i < sizeof(adim) / sizeof(adim[0]); i++) {
+        gpio_put(PB_PIN_BL_EN, adim[i].bl_en);
+        gpio_put(PB_PIN_LCD_BL, adim[i].lcd_bl);
+        printf("  %s\n", adim[i].ad);
+        sleep_ms(4000);
+    }
+
+    /* 5. adım: PWM ile %100 */
+    printf("  5) BL_EN=1, LCD_BL PWM %%100\n");
+    gpio_put(PB_PIN_BL_EN, 1);
+    gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_PWM);
+    pwm_set_gpio_level(PB_PIN_LCD_BL, BL_PWM_WRAP - 1);
+    sleep_ms(4000);
+
+    printf("  bitti — en parlak adim hangisiydi?\n\n");
+}
+
 static void print_help(void) {
     printf("\nKomutlar:\n");
     printf("  i  cihaz ve ses yapilandirmasi\n");
@@ -482,6 +542,7 @@ int main(void) {
             case 'l': cmd_level_meter(); break;
             case 's': cmd_spectrogram(); break;
             case 'd': cmd_display_test(); break;
+            case 'b': cmd_backlight_probe(); break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;

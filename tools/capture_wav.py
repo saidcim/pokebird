@@ -137,7 +137,7 @@ def main():
     ap = argparse.ArgumentParser(description="PokeBird M1 ses yakalama")
     ap.add_argument("--port", required=True, help="ornek: COM13 veya /dev/ttyACM0")
     ap.add_argument("--out", default="kayit.wav")
-    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i", "l", "d", "s"],
+    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i", "l", "d", "s", "b"],
                     help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
                          "l=canli seviye, d=ekran testi, s=spektrogram (Ctrl+C ile cik)")
     ap.add_argument("--spectrum", action="store_true",
