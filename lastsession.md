@@ -5,7 +5,11 @@
 > içinde; burada onun özeti, şu ana kadar yapılanlar, **denenip işe yaramayanlar**
 > ve sıradaki adımlar var.
 >
-> Son güncelleme: 31 Temmuz 2026 — M1 tamamlandı, sırada M2.
+> Son güncelleme: 1 Ağustos 2026 — M1 tamam, M2a ekran hata ayıklamasında.
+>
+> **⚠ SIRADAKİ İLK İŞ:** `python tools/capture_wav.py --port COM13 --cmd d`
+> çalıştırıp ekranda renkler görünüyor mu, kullanıcıya sor. Cevaba göre
+> §8b'deki iki yoldan biri. Karta yüklü firmware bu testi içeriyor.
 
 ---
 
@@ -113,6 +117,9 @@ python tools/capture_wav.py --port COM13 --cmd i    # bilgi
 python tools/capture_wav.py --port COM13 --cmd n    # gurultu tabani
 python tools/capture_wav.py --port COM13 --cmd e    # EMI taramasi
 python tools/capture_wav.py --port COM13 --cmd l    # canli seviye
+python tools/capture_wav.py --port COM13 --cmd d    # ekran testi: dolu renkler
+python tools/capture_wav.py --port COM13 --cmd b    # arka isik teshisi (etkilesimli)
+python tools/capture_wav.py --port COM13 --cmd s    # canli spektrogram (ekranda)
 python tools/capture_wav.py --port COM13 --out a.wav  # kayit al
 ```
 
@@ -140,17 +147,28 @@ pyserial 3.5 kurulu. Python 3.14 varsayılan.
 | MCLK | 6.144 MHz (PIO), ES8311 master, 24 kHz örnekleme |
 | Yakalama | 48000/48000 örnek, düşen örnek yok |
 | Tekrarlanabilirlik | 6 ardışık ölçüm, -36.2 … -36.8 dBFS (±0.3 dB) |
-| **Arka ışık EMI** | kapalı -36.8, tam açık -37.3, PWM %50 -36.9, PWM %10 -36.6 → **en kötü +0.2 dB** |
+| ~~Arka ışık EMI~~ | ~~en kötü +0.2 dB~~ — **GEÇERSİZ, bkz. aşağıdaki uyarı** |
 | Kazanç taraması | 4→6→7 kademelerinde +12.2 ve +6.8 dB |
 | El çırpma testi | **geçti** — mikrofon sese tepki veriyor |
 
 **Yorum:** Gürültü kazançla ölçekleniyor (ES8311'in 6 dB'lik PGA adımlarıyla
 neredeyse birebir), yani PGA'dan **önce** giriyor: akustik kaynaklı, devre
 kaynaklı değil. -36 dBFS taban, kullanıcının odasındaki **fan sesi**.
-Arka ışık farkı +0.2 dB, yani ölçüm gürültüsü seviyesinde.
 
-→ **Planın en büyük riski (kart içi mikrofon SNR'ı) kapandı.** Harici I2S
-mikrofon ihtimali masadan kalktı; boş GPIO'lar (12–19, 41–47) yedekte duruyor.
+→ **Mikrofonun kendisi kuş sesi tanıma için yeterli.** Harici I2S mikrofon
+ihtimali şimdilik masadan kalktı; boş GPIO'lar (12–19, 41–47) yedekte duruyor.
+
+> ### ⚠ EMI SONUCU GEÇERSİZ — YENİDEN ÖLÇÜLMELİ
+> M1'deki arka ışık EMI taraması PWM üzerinden yapılmıştı ("kapalı / tam açık /
+> PWM %50 / PWM %10" → en kötü +0.2 dB). Sonradan anlaşıldı ki **PWM o pini hiç
+> sürmüyor** (bkz. §8b). Yani dört ölçümün dördünde de arka ışık büyük
+> olasılıkla KAPALIYDI; test hiçbir zaman "ışık açık" durumunu ölçmedi.
+>
+> Dolayısıyla *"ekran açıkken dinleme sorunsuz"* sonucu **kanıtlanmış değil**.
+> Arka ışık artık düz GPIO ile gerçekten yanıyor; `e` komutu düzeltilip
+> (aç/kapa olarak) **yeniden çalıştırılmalı**. Planın risk tablosundaki
+> "kart içi mikrofon SNR'ı" maddesi bu ölçüm yapılana kadar tam kapanmış
+> sayılmaz.
 
 Dosyalar: [`src/hal/audio_i2s.c`](src/hal/audio_i2s.c), [`.pio`](src/hal/audio_i2s.pio),
 [`src/hal/es8311.c`](src/hal/es8311.c), [`src/hal/i2c_bus.c`](src/hal/i2c_bus.c)
@@ -235,12 +253,39 @@ Oda hiçbir zaman tam sessiz değil; tek bir kapı sesi düz RMS'i yukarı çeki
 (kazanç taramasında tepe 18666 ve 32768 görüldü). Gürültü tabanı artık kısa
 pencere RMS'lerinin **10. yüzdeliği** olarak hesaplanıyor.
 
+### 5.8 Arka ışığı PWM ile sürmek
+
+`gpio_set_function(GPIO36, GPIO_FUNC_PWM)` + `pwm_set_gpio_level(36, 0)` —
+yani duty %0, pinin sürekli LOW olması — ışığı **yakmıyor**. Aynı elektriksel
+durum düz GPIO ile (`GPIO_FUNC_SIO`, çıkış, LOW) **yakıyor**. Kartta ölçüldü.
+
+PWM çevre birimi bu pini beklendiği gibi sürmüyor; muhtemelen RP2350B'de
+GPIO36'nın PWM slice eşlemesiyle ilgili. Kök neden aranmadı — arka ışık düz
+GPIO'ya alındı (aç/kapa). Parlaklık ayarı gerekirse önce bu çözülmeli.
+
+**Tuzak:** Bu hata M0'daki "nefes alan arka ışık" ile yakalanamamıştı, çünkü
+o dönem ışık zaten hiç yanmıyordu ve kimse ekrana dikkatle bakmamıştı.
+Ayrıca M1'in EMI ölçümünü de sessizce geçersiz kıldı (bkz. §4 uyarısı).
+
+### 5.9 Ekran hata ayıklamasında tahmin yürütmek
+
+Ekran tarafında dört hata üst üste çıktı ve hiçbirini seri porttan göremedim;
+hepsi ancak kullanıcı ekrana bakınca ortaya çıktı. Tahmin yürütmek her
+seferinde bir tur kaybettirdi.
+
+**İşe yarayan yöntem:** *kendi kendini raporlayan* test yazmak. Arka ışık
+sorununu çözen şey, durumları sırayla deneyip "ışığı gördüğünüzde tuşa basın"
+diyen `b` komutu oldu — cihaz hangi durumda olduğunu kendisi yazdı. Ekranla
+ilgili bir belirsizlikte önce böyle bir test yazın.
+
 ---
 
 ## 6. Açık konular / borçlar
 
 | Konu | Durum |
 |---|---|
+| **EMI ölçümü geçersiz** | M1'deki arka ışık EMI taraması PWM ile yapıldı, PWM o pini sürmüyordu → ışık hep kapalıydı. `e` komutu aç/kapa olarak düzeltilip yeniden ölçülmeli. Bkz. §4 uyarısı. |
+| **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO'ya alındı. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **es8311.c lisansı** | "ESPRESSIF MIT License" standart MIT DEĞİL; kullanımı Espressif ürünleriyle sınırlı, bizimki RP2350. Kişisel kullanımda pratik sorun yok. **Dağıtım/ticarileştirme öncesi** veri sayfasından kendi sürücümüz yazılmalı (~20 register + MCLK bölücü tablosu). Dosya başında belgelendi. |
 | **BirdNET lisansı** | CC BY-NC-SA 4.0. Damıtılan model türev sayılabilir → ticari kullanımı kısıtlar. Ticari yol için damıtmasız (yalnızca segmentasyon) varyant gerekir. Bkz. ARCHITECTURE §6. |
 | Mikrofon kazancı | Şu an 3 (varsayılan). Saha koşullarında kalibre edilmeli. |
@@ -293,7 +338,7 @@ DMA 8 + FatFS 10 + tablo 20 + yığın/heap 80 = **~360 KB**, ~160 KB pay.
 |---|---|---|
 | M0 | İskelet, derleme zinciri | ✅ |
 | M1 | Mikrofon bring-up + SNR | ✅ |
-| **M2a** | **Ekran sürücüsü + canlı spektrogram** | **🔶 kod hazır, ekran görsel olarak doğrulanmadı** |
+| **M2a** | **Ekran sürücüsü + canlı spektrogram** | **🔶 arka ışık çözüldü; panelde görüntü doğrulanmadı** |
 | M2b | LVGL entegrasyonu + dokunmatik | |
 | M3 | DSP hattı: mel + kapı, host testleriyle doğrulama | |
 | M4 | Veri boru hattı + tür listesi (PC tarafı) | |
@@ -345,6 +390,81 @@ doğru görüntü var mı — buna insan gözü gerekiyor. Yön (172×640 dikey 
    tek piksel sütun QSPI'ye gider.
 
 M2'nin doğrulaması: mikrofondan gelen ses ekranda akıyor.
+
+---
+
+## 8b. M2a — ekran hata ayıklaması (BURADA KALDIK)
+
+Ekran ilk denemede **tamamen siyahtı, ışık bile yanmıyordu**. Arka arkaya
+**dört ayrı hata** çıktı. Hepsi de "benim göremediğim çıktı" olduğu için
+ancak kullanıcı bakınca ortaya çıktı — bu bölümdeki her madde bir tur
+kaybedilen zamandır.
+
+### Çözülen dört hata
+
+| # | Hata | Çözüm |
+|---|---|---|
+| 1 | Ekran başlatma bloğu `main()`'e **hiç eklenmemişti** (toplu düzenleme sessizce eşleşmemiş) | Blok elle eklendi; artık düzenleme sonrası `grep` ile doğrulanıyor |
+| 2 | Başlatma **sırası eksikti** | `QSPI_GPIO_Init → QSPI_PIO_Init → QSPI_4Wrie_Mode → pb_display_dma_init → LCD_3IN49_Init`. 3. adım PIO state machine'i etkinleştiriyor; atlanırsa TX FIFO hiç boşalmıyor ve **DMA sonsuza kadar bekliyor** (ilk çizimde kilitlenme) |
+| 3 | **Koordinat sistemi ters** kullanılmıştı | Sürücü panelin doğal yönünde çalışıyor: **X 0–171, Y 0–639**. Yatay arayüz çevrimi `ui/spectrogram.c` içinde: arayüzdeki dikey sütun = panelde yatay satır |
+| 4 | **Arka ışık PWM ile sürülemiyor** | Aşağıya bakın |
+
+Ayrıca: `LCD_3IN49_DisplayWindows()` verilen tamponu **tam ekran framebuffer**
+sanıyor (`pixel_offset = i*WIDTH + Xstart`), küçük tampon verilince sınır dışını
+okuyor. Tam framebuffer'ı bilerek reddettiğimiz için kendi
+[`pb_lcd_blit()`](src/hal/display/lcd_blit.c) fonksiyonumuz yazıldı: düz tampon,
+kapsayıcı w/h, panelin beklediği **big-endian RGB565** çevrimi dahil.
+
+### Arka ışık — kartta ölçüldü, kesin
+
+```
+BL_EN (GPIO37) = 1   ve   LCD_BL (GPIO36) = 0   ->   IŞIK YANAR
+```
+
+LCD_BL **aktif-düşük**. Bunu üç kaynak doğruluyor: etkileşimli `b` testi
+(kullanıcı ışığı görünce tuşa bastı, cihaz durumu yazdı), `rsvpnano`'daki
+çalışan sürücünün yorumu, ve Waveshare'in kendi `pwm_set_chan_level(slice,
+CHAN_A, 100 - Value)` kodu.
+
+**Açık kalan gariplik:** PWM ile duty %0 — elektriksel olarak pinin sürekli LOW
+olması, yani ışığı yakan durumun *aynısı* — ışığı **yakmıyor**. Düz GPIO ile LOW
+yakıyor. PWM çevre birimi GPIO36'yı beklendiği gibi sürmüyor; muhtemelen
+RP2350B'de GPIO36'nın PWM slice eşlemesiyle ilgili (`pwm_gpio_to_slice_num(36)`
+doğru slice'ı veriyor mu?). **Kök neden kovalanmadı.**
+
+Karar: arka ışık **düz GPIO**, sadece aç/kapa. Parlaklık ayarı yok. Gerekçe:
+M1'deki EMI taraması arka ışığın mikrofona etkisinin +0.2 dB olduğunu gösterdi,
+yani parlaklığı kısmak için akustik bir gerekçe de yok. Kademeli parlaklık
+gerçekten istenirse (M7 ayarlar ekranı) PWM sorunu o zaman ayrıca çözülür.
+
+### Doğrulanmayan: panelde görüntü var mı?
+
+Firmware tarafında her şey çalışıyor gibi: `d` komutu beş rengi de baştan sona
+takılmadan basıyor, cihaz ayakta kalıyor. **Ama arka ışık düzeltmesinden sonra
+kullanıcı ekrana bakmadı.** Yani panelde gerçekten renk görünüyor mu bilinmiyor.
+
+**Sıradaki oturumun ilk işi bu.** Kullanıcıya sorun:
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd d
+```
+
+- **Renkler görünüyorsa** → panel tamam. `--cmd s` ile canlı spektrograma geçin,
+  yön/aynalama doğru mu bakın, sonra M2b (LVGL + dokunmatik).
+- **Işık yanıyor ama renk yoksa** → sorun AXS15231B'nin register dizisinde.
+  Karşılaştırma için elde **çalışan bir referans var**: `rsvpnano` projesinde
+  `src/display/axs15231b.cpp` aynı panelin init dizisini içeriyor (kart ESP32-S3,
+  yani pinler farklı ama panel aynı). Waveshare'in `LCD_3in49.c` içindeki
+  `LCD_3IN49_InitReg()` ile satır satır karşılaştırın.
+
+### rsvpnano referansı
+
+Kullanıcının bu modülde çalıştırdığı kitap okuma uygulaması. İki kopya var:
+- `C:\Users\hp\rsvpnano` — asıl proje
+- `pokebird/rsvpnano/` — kullanıcı buraya kopyaladı; **`.gitignore`'da**, depoya girmiyor
+
+Değerli dosyalar: `src/display/axs15231b.cpp` (panel init dizisi + arka ışık),
+`src/input/TouchHandler.cpp` (dokunmatik).
 
 ---
 
