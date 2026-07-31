@@ -35,6 +35,29 @@ static_assert(PICO_FLASH_SIZE_BYTES == 16 * 1024 * 1024,
 
 #define BL_PWM_WRAP 2048
 
+/**
+ * Ekran denetleyicisini donanımdan sıfırla.
+ *
+ * NEDEN: AXS15231B son çizilen kareyi kendi belleğinde (GRAM) tutuyor ve
+ * güç kesilmediği sürece göstermeye devam ediyor. Yeni firmware panele
+ * dokunmazsa, fabrika demosunun görüntüsü ekranda asılı kalıyor — bu da
+ * "eski kod silinmemiş" gibi görünüyor, oysa silinmiş oluyor.
+ *
+ * RST'yi darbelemek GRAM'i temizler, böylece ekranda ne olduğu ile flash'ta
+ * ne olduğu birbirine karışmaz. Panel bundan sonra başlatılmamış durumda
+ * kalıyor (M2'de LVGL sürücüsü devralacak).
+ */
+static void lcd_panel_reset(void) {
+    gpio_init(PB_PIN_LCD_RST);
+    gpio_set_dir(PB_PIN_LCD_RST, GPIO_OUT);
+    gpio_put(PB_PIN_LCD_RST, 1);
+    sleep_ms(10);
+    gpio_put(PB_PIN_LCD_RST, 0);
+    sleep_ms(20);          /* veri sayfası minimum 10 us istiyor; bol pay */
+    gpio_put(PB_PIN_LCD_RST, 1);
+    sleep_ms(120);         /* sıfırlama sonrası oturma süresi */
+}
+
 static void backlight_init(void) {
     /* Arka ışık yükselticisini (AP3032) etkinleştir */
     gpio_init(PB_PIN_BL_EN);
@@ -90,10 +113,17 @@ int main(void) {
     }
 
     print_banner();
+    lcd_panel_reset();
     backlight_init();
 
     uint32_t tick = 0;
     while (true) {
+        /* Bilgi başlığını periyodik tekrarla: seri monitör cihaz açıldıktan
+         * sonra bağlanınca da kart bilgilerini görebilsin. */
+        if (tick > 0 && tick % 500 == 0) {
+            print_banner();
+        }
+
         /* Nefes alan arka ışık: üçgen dalga, ~2 saniyelik döngü */
         uint32_t phase = tick % 100;
         uint32_t bright = (phase < 50) ? phase : (100 - phase);
