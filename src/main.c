@@ -29,6 +29,11 @@
 #include "hal/audio_i2s.h"
 #include "hal/es8311.h"
 #include "hal/i2c_bus.h"
+#include "hal/display/LCD_3in49.h"
+#include "dsp/fft.h"
+#include "ui/spectrogram.h"
+
+void pb_display_dma_init(void);   /* hal/display/dev_config.c */
 
 /* ── Derleme zamanı donanım kontrolleri ───────────────────────────────────
  * Yanlış board seçilirse bu hatalar derlemeyi durdurur. Aksi hâlde kod
@@ -350,6 +355,26 @@ static void cmd_record(void) {
     printf("#WAV-END\n\n");
 }
 
+
+/* M2 doğrulaması: mikrofondan gelen ses ekranda akıyor mu.
+ * Ekran QSPI'ye tek sütun yazarak güncelleniyor (bkz. ui/spectrogram.c). */
+static void cmd_spectrogram(void) {
+    printf("\nCanli spektrogram. Cikmak icin bir tusa basin.\n");
+    backlight_set(true, BL_PWM_WRAP - 1);
+    pb_spec_init();
+
+    uint8_t bins[PB_SPEC_HEIGHT];
+    while (getchar_timeout_us(0) < 0) {
+        pb_capture_result_t cap = pb_audio_capture(s_capture, PB_FFT_SIZE);
+        if (cap.samples < PB_FFT_SIZE) break;
+        /* -75 dBFS taban: M1'de olculen ~-36 dBFS oda gurultusunun altinda,
+         * boylece sessizlik siyah kaliyor ama zayif sesler hala goruluyor. */
+        pb_fft_spectrum(s_capture, bins, PB_SPEC_HEIGHT, -75.0f);
+        pb_spec_push_column(bins, PB_SPEC_HEIGHT);
+    }
+    printf("cikildi\n\n");
+}
+
 static void print_help(void) {
     printf("\nKomutlar:\n");
     printf("  i  cihaz ve ses yapilandirmasi\n");
@@ -368,9 +393,7 @@ int main(void) {
     printf(" PokeBird — M1: mikrofon bring-up\n");
     printf("========================================\n");
 
-    lcd_panel_reset();
     backlight_init();
-
     pb_i2c_init();
 
     /* SIRA ÖNEMLİ: ES8311'in dahili PLL'i MCLK olmadan register yazimlarina
@@ -410,6 +433,7 @@ int main(void) {
             case 'g': cmd_gain();      break;
             case 'r': cmd_record();    break;
             case 'l': cmd_level_meter(); break;
+            case 's': cmd_spectrogram(); break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;

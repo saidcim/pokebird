@@ -26,14 +26,22 @@ add_executable(pokebird
     src/hal/audio_i2s.c
     src/hal/es8311.c
     src/hal/i2c_bus.c
+    src/hal/display/qspi_pio.c
+    src/hal/display/dev_config.c
+    src/hal/display/LCD_3in49.c
+    src/hal/display/Touch.c
+    src/dsp/fft.c
+    src/ui/spectrogram.c
 )
 
 target_include_directories(pokebird PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
+    ${CMAKE_CURRENT_LIST_DIR}/src/hal/display
 )
 
 # PIO programlarını derle. Üretilen audio_i2s.pio.h build dizinine yazılır.
 pico_generate_pio_header(pokebird ${CMAKE_CURRENT_LIST_DIR}/src/hal/audio_i2s.pio)
+pico_generate_pio_header(pokebird ${CMAKE_CURRENT_LIST_DIR}/src/hal/display/qspi.pio)
 
 target_link_libraries(pokebird PRIVATE
     pico_stdlib
