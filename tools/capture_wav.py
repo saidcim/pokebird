@@ -137,8 +137,9 @@ def main():
     ap = argparse.ArgumentParser(description="PokeBird M1 ses yakalama")
     ap.add_argument("--port", required=True, help="ornek: COM13 veya /dev/ttyACM0")
     ap.add_argument("--out", default="kayit.wav")
-    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i"],
-                    help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi")
+    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i", "l"],
+                    help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
+                         "l=canli seviye (Ctrl+C ile cik)")
     ap.add_argument("--spectrum", action="store_true",
                     help="bant enerjisi analizi (yavas, numpy'siz DFT)")
     args = ap.parse_args()
@@ -146,6 +147,24 @@ def main():
     with serial.Serial(args.port, 115200, timeout=0.1) as ser:
         time.sleep(0.3)
         ser.reset_input_buffer()
+
+        if args.cmd == "l":
+            # Canli seviye: cihaz surekli yaziyor, Ctrl+C ile cikilir.
+            ser.write(b"l")
+            ser.flush()
+            print("Canli seviye — el cirpin / konusun. Cikmak icin Ctrl+C.\n")
+            try:
+                while True:
+                    data = ser.read(256).decode("utf-8", errors="replace")
+                    if data:
+                        sys.stdout.write(data)
+                        sys.stdout.flush()
+                    else:
+                        time.sleep(0.02)
+            except KeyboardInterrupt:
+                ser.write(b" ")     # cihazdaki dongunun cikis kosulu
+                print("\n")
+            return
 
         if args.cmd != "r":
             ser.write(args.cmd.encode())
