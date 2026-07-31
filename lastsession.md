@@ -293,7 +293,8 @@ DMA 8 + FatFS 10 + tablo 20 + yığın/heap 80 = **~360 KB**, ~160 KB pay.
 |---|---|---|
 | M0 | İskelet, derleme zinciri | ✅ |
 | M1 | Mikrofon bring-up + SNR | ✅ |
-| **M2** | **Ekran + dokunmatik + LVGL + canlı spektrogram** | **← SIRADA** |
+| **M2a** | **Ekran sürücüsü + canlı spektrogram** | **🔶 kod hazır, ekran görsel olarak doğrulanmadı** |
+| M2b | LVGL entegrasyonu + dokunmatik | |
 | M3 | DSP hattı: mel + kapı, host testleriyle doğrulama | |
 | M4 | Veri boru hattı + tür listesi (PC tarafı) | |
 | M5 | Model eğitimi + damıtma + INT8 | |
@@ -301,7 +302,39 @@ DMA 8 + FatFS 10 + tablo 20 + yığın/heap 80 = **~360 KB**, ~160 KB pay.
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
 | M8 | Saha kalibrasyonu | |
 
-### M2 kapsamı
+### M2a — yapılanlar (kod hazır, görsel doğrulama bekliyor)
+
+Waveshare'in **bu karta ait** LVGL örneğinden alındı
+(`files.waveshare.com/wiki/RP2350-Touch-LCD-3.49/RP2350-Touch-LCD-3.49-LVGL.zip`):
+`qspi.pio`, `qspi_pio.c`, `LCD_3in49.c` (AXS15231B), `Touch.c`. Satıcı dosyaları
+neredeyse dokunulmadan duruyor; bekledikleri semboller
+[`src/hal/display/DEV_Config.h`](src/hal/display/DEV_Config.h) uyum katmanından
+ve [`dev_config.c`](src/hal/display/dev_config.c)'deki DMA globallerinden geliyor.
+
+- **QSPI pio0'da, ses pio1'de** — state machine çakışması yok
+- `src/dsp/fft.c`: geçici radix-2 FFT (M3'te CMSIS-DSP devralacak)
+- `src/ui/spectrogram.c`: tek sütun yazan kaydırmalı spektrogram; tam
+  framebuffer (220 KB) yerine sütun başına 344 bayt
+- Seri komut: `s` → canlı spektrogram
+
+**Doğrulanan:** cihaz açılıyor, `LCD_3IN49_Init()` kilitlenmiyor, `s` komutu
+çalışıyor ve cihaz ayakta kalıyor. **Doğrulanmayan:** ekranda gerçekten
+doğru görüntü var mı — buna insan gözü gerekiyor. Yön (172×640 dikey paneli
+640×172 yatay kullanmak) ilk denemede tutmayabilir.
+
+### Bu arada doğrulanan iki şey
+
+- **Pin haritası bağımsız teyit edildi.** Waveshare'in resmi board başlığı
+  (`waveshare_rp2350_touch_lcd_3.49.h`) şematikten çıkardığımız her değerle
+  birebir tutuyor: RP2350A=0, I2C1 6/7, flash 16 MB, LCD_BL 36, dokunmatik
+  32/33/11 (adres 0x3B), BAT_ADC 40, QSPI CS 25 / SCLK 20 / D0-D3 21-24.
+- **PSRAM yok.** Örnekteki `lib/PSRAM/` başka karttan kopyalanmış ölü kod;
+  `rp_setup_psram()` hiç çağrılmıyor. 520 KB bütçe geçerli.
+
+> Waveshare örneğinden **kopyalanmayan** hata: `malloc(172*640)` ile 110 KB
+> ayırıp LVGL'e 110080 *piksel* (=220 KB) olduğunu söylüyor. Tampon taşması.
+
+### M2b kapsamı
 
 1. **AXS15231B QSPI sürücüsü** — init dizisi Waveshare'in 3.49 LVGL örneğinden
    (`files.waveshare.com/wiki/RP2350-Touch-LCD-3.49/RP2350-Touch-LCD-3.49-LVGL.zip`)
