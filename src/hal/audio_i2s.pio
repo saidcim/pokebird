@@ -1,0 +1,101 @@
+;
+; audio_i2s.pio — ES8311 için MCLK üretimi ve I2S mikrofon yakalama
+;
+; Waveshare'in RP2350-Touch-LCD-3.5 örneğindeki audio_pio.pio dosyasından
+; uyarlandı (MIT). Değişiklikler:
+;   - GPIO numaraları bu kartın şemasına göre düzeltildi (LRCK/BCLK yer değiştirdi)
+;   - Yalnızca yakalama (RX) yolu; çalma (TX) M7'ye kadar gerekmiyor
+;   - DMA ile kullanılmak üzere yapılandırıldı
+;
+; SAAT MİMARİSİ (önemli):
+;   RP2350 yalnızca MCLK üretir (GPIO3). ES8311 I2S MASTER olarak yapılandırılır
+;   ve BCLK (GPIO4) ile LRCK (GPIO5) sinyallerini MCLK'ten kendisi türetir.
+;   Dolayısıyla bu PIO programları saati SÜRMEZ, saati TAKİP EDER.
+;
+; DİKKAT: Aşağıdaki `wait ... gpio N` komutlarındaki N MUTLAK GPIO numarasıdır,
+; state machine'in pin eşlemesine göre değil. board_config.h'deki pinler
+; değişirse burası da elle güncellenmelidir — audio_i2s.c içindeki
+; static_assert'ler bunu unutmayı imkânsız kılar.
+;   GPIO4 = I2S_SCLK (BCLK),  GPIO5 = I2S_LRCK (WS)
+;
+
+; ── MCLK: GPIO3 üzerinde kare dalga ────────────────────────────────────────
+; Döngü başına 5 komut çalışır; clkdiv buna göre hesaplanır (audio_i2s.c).
+.program mclk_pio
+wrap_target:
+    set pins, 1
+    nop
+    set pins, 0
+    nop
+    jmp wrap_target
+
+; ── I2S RX: ES8311'in ürettiği BCLK/LRCK'yi takip ederek ASDOUT'u örnekle ──
+;
+; ES8311 mono olduğu için yalnızca SOL kanalı okuyoruz; sağ kanal atlanıyor.
+; Her çerçevede baştan yeniden hizalanmak, hizalamanın kaymasını imkânsız kılar
+; ve FIFO trafiğini yarıya indirir.
+;
+; ÖNEMLİ — DETERMİNİZM:
+; İlk sürümde LRCK kenarından hemen sonra `wait 1 gpio 4` vardı. WAIT komutu
+; kenar değil SEVİYE tetiklidir: BCLK o an zaten yüksekse komut anında geçiyor,
+; düşükse bekliyordu. Yani başlangıç anına göre bit ofseti değişiyordu ve
+; örnekler bir bit kaymış hâlde okunabiliyordu (tam ölçek kırpma olarak görülür).
+; Çözüm: her zaman önce BCLK'nin DÜŞMESİNİ bekle, sonra yükselen kenarı yakala.
+; Böylece nereden başlarsak başlayalım aynı hizaya oturuyoruz.
+;
+; Autopush eşiği 16: her çerçevede tek örnek FIFO'ya düşer. Sola kaydırma ile
+; ilk gelen bit (MSB) bit 15'e oturur; kelimenin alt 16 biti örnektir.
+.program i2s_rx_pio
+.wrap_target
+    wait 1 gpio 5           ; LRCK yüksek (sağ kanal ya da boşta)
+    wait 0 gpio 5           ; LRCK düşen kenarı -> sol kanal çerçevesi başlıyor
+    wait 0 gpio 4           ; BCLK'nin düşmesini bekle (hizayı sabitler)
+    wait 1 gpio 4           ; ilk yükselen kenar: I2S 1-bit gecikmesi, atılır
+    set x, 15
+bitloop:
+    wait 0 gpio 4
+    wait 1 gpio 4           ; veri BCLK yükselen kenarında geçerli
+    in pins, 1
+    jmp x-- bitloop         ; 16 kez çalışır
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+static inline void mclk_pio_program_init(PIO pio, uint sm, uint offset, uint mclk_pin) {
+    pio_sm_config c = mclk_pio_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, mclk_pin, 1);
+    sm_config_set_set_pins(&c, mclk_pin, 1);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_pindirs_with_mask(pio, sm, 1u << mclk_pin, 1u << mclk_pin);
+    pio_sm_set_pins(pio, sm, 0);
+    pio_gpio_init(pio, mclk_pin);
+}
+
+/* din_pin  : ES8311 ASDOUT  (GPIO2)
+ * bclk_pin : ES8311 SCLK    (GPIO4)  — yalnızca giriş olarak ayarlanır
+ * lrck_pin : ES8311 LRCK    (GPIO5)  — yalnızca giriş olarak ayarlanır
+ * Bu üçü PIO tarafından sürülmez; ES8311 master olduğu için hepsi girdidir. */
+static inline void i2s_rx_pio_program_init(PIO pio, uint sm, uint offset,
+                                           uint din_pin, uint bclk_pin, uint lrck_pin) {
+    pio_sm_config c = i2s_rx_pio_program_get_default_config(offset);
+
+    sm_config_set_in_pins(&c, din_pin);
+    /* 1. parametre shift_right=false, yani SOLA kaydırma: ilk gelen bit
+     *    kelimenin en üst bitine gider (I2S MSB-first ile uyumlu).
+     * autopush=true, eşik 16: her çerçevede tek mono örnek FIFO'ya düşer.
+     * Kelimenin alt 16 biti örnektir. */
+    sm_config_set_in_shift(&c, false, true, 16);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    pio_sm_init(pio, sm, offset, &c);
+
+    uint mask = (1u << din_pin) | (1u << bclk_pin) | (1u << lrck_pin);
+    pio_sm_set_pindirs_with_mask(pio, sm, 0, mask);   /* hepsi giriş */
+
+    pio_gpio_init(pio, din_pin);
+    pio_gpio_init(pio, bclk_pin);
+    pio_gpio_init(pio, lrck_pin);
+}
+%}

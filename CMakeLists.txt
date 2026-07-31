@@ -23,16 +23,25 @@ pico_sdk_init()
 
 add_executable(pokebird
     src/main.c
+    src/hal/audio_i2s.c
+    src/hal/es8311.c
+    src/hal/i2c_bus.c
 )
 
 target_include_directories(pokebird PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
 )
 
+# PIO programlarını derle. Üretilen audio_i2s.pio.h build dizinine yazılır.
+pico_generate_pio_header(pokebird ${CMAKE_CURRENT_LIST_DIR}/src/hal/audio_i2s.pio)
+
 target_link_libraries(pokebird PRIVATE
     pico_stdlib
     pico_unique_id
     hardware_pwm
+    hardware_i2c
+    hardware_pio
+    hardware_dma
 )
 
 # Hata ayıklama çıktısı USB CDC üzerinden. Kartta USB dışında kolay erişilebilir
