@@ -25,3 +25,6 @@ __pycache__/
 .vscode/
 .idea/
 compile_commands.json
+
+# Referans olarak buraya kopyalanan baska projeler
+rsvpnano/

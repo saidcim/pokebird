@@ -74,39 +74,40 @@ static uint8_t s_mic_gain = PB_MIC_GAIN;
  * M1'de ekranı kullanmıyoruz ama arka ışık gürültü ölçümünün bir değişkeni:
  * AP3032 yükseltici ve PWM, mikrofonun hemen yanında anahtarlama yapıyor. */
 
+/**
+ * Arka ışık — düz GPIO, PWM YOK.
+ *
+ * DOĞRULANMIŞ DAVRANIŞ (etkileşimli 'b' testi, kart üzerinde ölçüldü):
+ *     BL_EN (GPIO37) = 1  ve  LCD_BL (GPIO36) = 0   ->  IŞIK YANAR
+ * Yani LCD_BL aktif-düşük. rsvpnano'daki çalışan sürücü de aynısını söylüyor
+ * ("active-low PWM; lower duty is brighter"), Waveshare'in kendi kodu da
+ * (pwm_set_chan_level(slice, CHAN_A, 100 - Value)).
+ *
+ * NEDEN PWM KULLANMIYORUZ:
+ * PWM ile duty %0 — elektriksel olarak pinin sürekli LOW olması, yani yukarıda
+ * ışığı yakan durumun aynısı — ışığı YAKMIYOR. Düz GPIO ile LOW yakıyor.
+ * Demek ki PWM çevre birimi bu pini beklediğimiz gibi sürmüyor (muhtemelen
+ * RP2350B'de GPIO36'nın slice eşlemesiyle ilgili). Kök nedeni kovalamak yerine
+ * çalıştığı doğrulanmış mekanizmayı kullanıyoruz.
+ *
+ * MALİYETİ: parlaklık ayarı yok, sadece aç/kapa. Şimdilik önemsiz — M1'deki
+ * EMI taraması arka ışığın mikrofona etkisinin +0.2 dB olduğunu gösterdi,
+ * yani parlaklığı kısmak için akustik bir gerekçe de yok. Kademeli parlaklık
+ * istenirse (M7 ayarlar ekranı) PWM sorunu o zaman ayrıca çözülür.
+ */
 static void backlight_init(void) {
     gpio_init(PB_PIN_BL_EN);
     gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
-    gpio_put(PB_PIN_BL_EN, 1);          /* açık başla: reset sonrası zaten yanıyor */
+    gpio_put(PB_PIN_BL_EN, 1);
 
-    gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_PWM);
-    uint slice = pwm_gpio_to_slice_num(PB_PIN_LCD_BL);
-    pwm_config cfg = pwm_get_default_config();
-    pwm_config_set_wrap(&cfg, BL_PWM_WRAP - 1);
-    pwm_config_set_clkdiv(&cfg, 1.0f);  /* ~73 kHz — duyulabilir bandın üstünde */
-    pwm_init(slice, &cfg, true);
-    pwm_set_gpio_level(PB_PIN_LCD_BL, 0);   /* ters mantık: 0 duty = TAM PARLAK */
+    gpio_init(PB_PIN_LCD_BL);
+    gpio_set_dir(PB_PIN_LCD_BL, GPIO_OUT);
+    gpio_put(PB_PIN_LCD_BL, 0);         /* aktif-düşük: 0 = yanık */
 }
 
-/**
- * Arka ışık.
- *
- * @param enable      yükseltici (BL_EN, GPIO37)
- * @param brightness  0 = kapalı ... BL_PWM_WRAP-1 = en parlak
- *
- * !! PWM TERS !! AP3032'nin dimming girişi aktif-düşük: düşük duty parlak,
- * yüksek duty karanlık. Waveshare'in kendi sürücüsü de bunu yapıyor:
- *     pwm_set_chan_level(slice, PWM_CHAN_A, 100 - Value);
- *
- * Bu ilk denememde gözden kaçtı: tam parlaklık için duty'yi %100'e çektim,
- * ki bu ters şemada en karanlık değer — ekran ışığı hiç yanmadı. M0'daki
- * "nefes alan arka ışık" bunu yakalayamamıştı, çünkü ters de olsa nefes
- * efekti aynı görünüyor, sadece fazı kayıyor.
- */
-static void backlight_set(bool enable, uint16_t brightness) {
-    gpio_put(PB_PIN_BL_EN, enable ? 1 : 0);
-    if (brightness >= BL_PWM_WRAP) brightness = BL_PWM_WRAP - 1;
-    pwm_set_gpio_level(PB_PIN_LCD_BL, (uint16_t)((BL_PWM_WRAP - 1) - brightness));
+static void backlight_set(bool on) {
+    gpio_put(PB_PIN_BL_EN, on ? 1 : 0);
+    gpio_put(PB_PIN_LCD_BL, on ? 0 : 1);
 }
 
 /* ── Ölçüm ───────────────────────────────────────────────────────────────
@@ -196,9 +197,9 @@ static void print_stats(const char *label, const audio_stats_t *st,
 }
 
 /* Ölçüm alırken arka ışığı verilen duruma getirip bekle (güç hattı otursun) */
-static audio_stats_t measure_with_backlight(bool enable, uint16_t level,
+static audio_stats_t measure_with_backlight(bool enable,
                                             pb_capture_result_t *cap_out) {
-    backlight_set(enable, level);
+    backlight_set(enable);
     sleep_ms(250);
     pb_capture_result_t cap = pb_audio_capture(s_capture, PB_SAMPLE_RATE / 2); /* 0.5 s */
     if (cap_out) *cap_out = cap;
@@ -231,7 +232,7 @@ static void cmd_info(void) {
 
 static void cmd_noise(void) {
     printf("\nGurultu tabani olcumu (%d s). Ortami sessiz tutun...\n", CAPTURE_SECONDS);
-    backlight_set(false, 0);
+    backlight_set(false);
     sleep_ms(300);
 
     pb_capture_result_t cap = pb_audio_capture(s_capture, CAPTURE_SAMPLES);
@@ -292,19 +293,19 @@ static void cmd_emi_sweep(void) {
     printf("Her olcum 0.5 s. Ortami sessiz tutun.\n\n");
 
     pb_capture_result_t cap;
-    audio_stats_t off    = measure_with_backlight(false, 0, &cap);
+    audio_stats_t off    = measure_with_backlight(false, &cap);
     print_stats("arka isik KAPALI", &off, &cap);
 
-    audio_stats_t full   = measure_with_backlight(true, BL_PWM_WRAP, &cap);
+    audio_stats_t full   = measure_with_backlight(true, &cap);
     print_stats("tam acik (PWM yok)", &full, &cap);
 
-    audio_stats_t pwm50  = measure_with_backlight(true, BL_PWM_WRAP / 2, &cap);
+    audio_stats_t pwm50  = measure_with_backlight(true, &cap);
     print_stats("PWM %50", &pwm50, &cap);
 
-    audio_stats_t pwm10  = measure_with_backlight(true, BL_PWM_WRAP / 10, &cap);
+    audio_stats_t pwm10  = measure_with_backlight(true, &cap);
     print_stats("PWM %10", &pwm10, &cap);
 
-    backlight_set(false, 0);
+    backlight_set(false);
 
     double worst = pwm50.dbfs > pwm10.dbfs ? pwm50.dbfs : pwm10.dbfs;
     if (full.dbfs > worst) worst = full.dbfs;
@@ -365,7 +366,7 @@ static void cmd_record(void) {
  * Ekran QSPI'ye tek sütun yazarak güncelleniyor (bkz. ui/spectrogram.c). */
 static void cmd_spectrogram(void) {
     printf("\nCanli spektrogram. Cikmak icin bir tusa basin.\n");
-    backlight_set(true, BL_PWM_WRAP - 1);
+    backlight_set(true);
     pb_spec_init();
 
     uint8_t bins[PB_SPEC_HEIGHT];
@@ -390,7 +391,7 @@ static void cmd_spectrogram(void) {
  */
 static void cmd_display_test(void) {
     printf("\nEkran testi. Her renk 2 saniye.\n");
-    backlight_set(true, BL_PWM_WRAP - 1);
+    backlight_set(true);
 
     const struct { const char *ad; uint16_t renk; } adimlar[] = {
         { "beyaz",     0xFFFF },
@@ -429,37 +430,50 @@ static void cmd_display_test(void) {
  * QSPI_GPIO_Init tarafından ezilmiş olabilir.
  */
 static void cmd_backlight_probe(void) {
-    printf("\nArka isik teshisi. Her adim 4 saniye — EKRANA BAKIN.\n");
-    printf("Hangi adimda isik yandigini not edin.\n\n");
+    /* Kendi kendini raporlayan sürüm: durumları sırayla dener, ışığı
+     * gördüğünüzde bir tuşa basın; cihaz o anki durumu yazar. Önceki
+     * sürümde adımları göz kararı saymak gerekiyordu ve karışıyordu. */
+    printf("\nArka isik teshisi (etkilesimli).\n");
+    printf("EKRANA BAKIN. Isik yandigi anda bir tusa basin.\n");
+    printf("Her durum 5 saniye. Hicbiri yanmazsa test kendiliginden biter.\n\n");
 
-    /* PWM işlevini bırak, düz GPIO olarak sür */
-    gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_SIO);
-    gpio_set_dir(PB_PIN_LCD_BL, GPIO_OUT);
     gpio_init(PB_PIN_BL_EN);
     gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
 
-    const struct { int bl_en; int lcd_bl; const char *ad; } adim[] = {
-        { 0, 0, "1) BL_EN=0  LCD_BL=0" },
-        { 0, 1, "2) BL_EN=0  LCD_BL=1" },
-        { 1, 0, "3) BL_EN=1  LCD_BL=0" },
-        { 1, 1, "4) BL_EN=1  LCD_BL=1" },
+    const struct { int en; int bl; int pwm_duty; const char *ad; } durum[] = {
+        { 1, 0, -1, "BL_EN=1  LCD_BL=0 (duz GPIO)" },
+        { 1, 1, -1, "BL_EN=1  LCD_BL=1 (duz GPIO)" },
+        { 0, 0, -1, "BL_EN=0  LCD_BL=0 (duz GPIO)" },
+        { 0, 1, -1, "BL_EN=0  LCD_BL=1 (duz GPIO)" },
+        { 1, 0,  5, "BL_EN=1  PWM duty %5   (aktif-dusuk ise PARLAK)" },
+        { 1, 0, 95, "BL_EN=1  PWM duty %95  (aktif-yuksek ise PARLAK)" },
     };
-    for (size_t i = 0; i < sizeof(adim) / sizeof(adim[0]); i++) {
-        gpio_put(PB_PIN_BL_EN, adim[i].bl_en);
-        gpio_put(PB_PIN_LCD_BL, adim[i].lcd_bl);
-        printf("  %s\n", adim[i].ad);
-        sleep_ms(4000);
+
+    for (size_t i = 0; i < sizeof(durum) / sizeof(durum[0]); i++) {
+        gpio_put(PB_PIN_BL_EN, durum[i].en);
+        if (durum[i].pwm_duty < 0) {
+            gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_SIO);
+            gpio_set_dir(PB_PIN_LCD_BL, GPIO_OUT);
+            gpio_put(PB_PIN_LCD_BL, durum[i].bl);
+        } else {
+            gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_PWM);
+            pwm_set_gpio_level(PB_PIN_LCD_BL,
+                               (uint16_t)((BL_PWM_WRAP - 1) * durum[i].pwm_duty / 100));
+        }
+        printf("  [%u] %s\n", (unsigned)(i + 1), durum[i].ad);
+
+        for (int t = 0; t < 50; t++) {
+            if (getchar_timeout_us(0) >= 0) {
+                printf("\n  >>> ISIK YANAN DURUM: [%u] %s <<<\n\n",
+                       (unsigned)(i + 1), durum[i].ad);
+                return;
+            }
+            sleep_ms(100);
+        }
     }
-
-    /* 5. adım: PWM ile %100 */
-    printf("  5) BL_EN=1, LCD_BL PWM %%100\n");
-    gpio_put(PB_PIN_BL_EN, 1);
-    gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_PWM);
-    pwm_set_gpio_level(PB_PIN_LCD_BL, BL_PWM_WRAP - 1);
-    sleep_ms(4000);
-
-    printf("  bitti — en parlak adim hangisiydi?\n\n");
+    printf("  hicbir durumda tus basilmadi\n\n");
 }
+
 
 static void print_help(void) {
     printf("\nKomutlar:\n");
