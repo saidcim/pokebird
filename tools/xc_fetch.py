@@ -33,9 +33,28 @@ API ANAHTARI GEREKİYOR:
 
       "ANAHTARINIZ" | Out-File -Encoding ascii -NoNewline data\.xc_key
 
-LİSANS: Xeno-canto kayıtları Creative Commons; her kaydın kendi lisansı var.
-İndirilen her dosyanın lisansı ve kaydedeni `data/xc/kayitlar.csv`'ye
-yazılıyor — atıf yükümlülüğü için bu dosyayı saklayın.
+LİSANS — ND KAYITLARI ALINMIYOR:
+  Xeno-canto kayıtları Creative Commons ama hepsi aynı değil. Guguk'un ilk
+  300 A/B kaydında ölçülen dağılım:
+      by-nc-sa 201 · by-nc-nd 34 · by-nc 4 · CC0 2 · by 1 · by-sa 1
+  **ND = NoDerivatives**, yani eseri işleyip dağıtmak yasak. Modeli o kayıtla
+  eğitmenin türev eser sayılıp sayılmayacağı tartışmalı; %14'lük veri için
+  bu riski almaya değmez. Bu yüzden ND lisanslı kayıtlar İNDİRİLMİYOR
+  (`--nd-dahil` ile açılabilir, sorumluluk kullanıcıda).
+
+  Kalan lisansların ezici çoğunluğu BY-NC-SA: gayriticari + aynı lisansla
+  paylaşım. Projenin kişisel kullanımıyla uyumlu, ticari dağıtımıyla değil —
+  BirdNET'in CC BY-NC-SA kısıtıyla aynı sınıftan sorun (ARCHITECTURE §6).
+
+  İndirilen her dosyanın lisansı, kaydedeni ve XC kimliği
+  `data/xc/kayitlar.csv`'ye yazılıyor — atıf yükümlülüğü için saklayın.
+
+COĞRAFYA — AVRUPA ÖNCELİKLİ:
+  Türkiye kayıtları pratikte yok (ölçüldü: Guguk 1, Kızılgerdan 0, Büyük
+  Baştankara 4). Ama Avrupa kayıtları bol ve dünya toplamının ~%90'ı zaten
+  Avrupa. Kuş sesinde bölgesel lehçe gerçek bir olgu olduğu için üreme
+  bölgesi kayıtları tercih ediliyor: `area:europe`. Avrupa'da yeterli kayıt
+  bulunmayan tür için dünya geneline düşülüyor.
 """
 
 import argparse
@@ -57,8 +76,39 @@ CSV_YOL = os.path.join(DATA, "species_istanbul.csv")
 API = "https://xeno-canto.org/api/3/recordings"
 UA = {"User-Agent": "PokeBird/0.1 (kisisel arastirma projesi)"}
 
-# Nihai listeye girmek için asgari Xeno-canto kayıt sayısı (plan §6).
-VARSAYILAN_ESIK = 30
+# ── Nihai eleme kuralı ────────────────────────────────────────────────────
+#
+# Tek eşik ÇALIŞMIYOR, iki yönden de ölçüldü:
+#
+#   Sadece GBIF (görülme) eşiği: 912'de Guguk / Sarıasma / Orman Alaca
+#     Ağaçkakan eleniyor, Flamingo ve martılar kalıyor — GBIF "kaç kişi görüp
+#     bildirdi"yi ölçüyor, "ötüyor mu"yu değil.
+#
+#   Sadece XC (ses verisi) eşiği: 60'ta İbibik (1.680 GBIF, son derece ayırt
+#     edici "hüd-hüd" sesi), Kerkenez, Yeşilbaş, Küçük Ağaçkakan eleniyor —
+#     İstanbul'da yaygın ama Xeno-canto'da az kaydı olan türler.
+#
+# Bu yüzden iki boyut birleştiriliyor: İstanbul'da YAYGIN türler düşük ses
+# verisiyle de listede kalır (kullanıcı onları gerçekten duyacak), NADİR
+# türler ise ancak bol ses verisi varsa girer (yoksa sınıf zaten öğrenilemez).
+YAYGIN_GBIF = 800     # bu kadar İstanbul kaydı olan tür "yaygın" sayılır
+VARSAYILAN_ESIK = 30  # yaygın türler için asgari XC A/B kaydı
+NADIR_ESIK = 100      # yaygın olmayan türler için asgari XC A/B kaydı
+
+# Türev eser yasaklayan lisanslar — eğitim verisine alınmıyor (bkz. başlık).
+ND_ISARETI = "-nd"
+
+
+def nd_mi(lisans_url):
+    """Lisans ND (NoDerivatives) mi? URL biçimi:
+    https://creativecommons.org/licenses/by-nc-nd/4.0/"""
+    if not lisans_url:
+        return False           # lisansı bilinmeyen kayıt: metadata'da 'lic' boş
+    u = lisans_url.lower()
+    if "publicdomain" in u or "zero" in u:
+        return False
+    kod = u.rstrip("/").split("/licenses/")[-1].split("/")[0] if "/licenses/" in u else u
+    return "nd" in kod.split("-")
 
 
 def http_json(url, deneme=3):
@@ -110,7 +160,8 @@ def komut_say(key, esik):
     satirlar, sutunlar = csv_oku()
     havuz = [s for s in satirlar if s["durum"] == "dahil"]
     print(f"Havuzda {len(havuz)} tur. Xeno-canto kayit sayilari cekiliyor...")
-    print(f"(Kalite A/B, en az {esik} kayit olan turler nihai listeye girer)\n")
+    print(f"(Avrupa, kalite A/B. Yaygin tur [GBIF>={YAYGIN_GBIF}] icin >={esik} kayit,\n"
+          f" nadir tur icin >={NADIR_ESIK} kayit gerekiyor)\n")
 
     os.makedirs(CACHE, exist_ok=True)
     for i, s in enumerate(havuz, 1):
@@ -123,32 +174,48 @@ def komut_say(key, esik):
         else:
             # Sadece kayıt SAYISI lazım: per_page=1 ile tek kayıt isteyip
             # numRecordings alanını okuyoruz. Tüm sayfaları çekmek gereksiz.
+            #
+            # Üç sayı: dünya A/B, Avrupa A/B, Avrupa BY-NC-SA. Üçüncüsü
+            # lisans payını gösteriyor — negatif lisans filtresi (-lic:) API
+            # tarafından desteklenmiyor (400 dönüyor), o yüzden ND'yi burada
+            # değil indirme sırasında metadata'dan eliyoruz.
             d = {
-                "hepsi": xc_sorgu(key, f'sp:"{sci}"').get("numRecordings", "0"),
-                "ab":    xc_sorgu(key, f'sp:"{sci}" q:"<C"').get("numRecordings", "0"),
+                "ab":     xc_sorgu(key, f'sp:"{sci}" q:"<C"').get("numRecordings", "0"),
+                "ab_eu":  xc_sorgu(key, f'sp:"{sci}" q:"<C" area:europe').get("numRecordings", "0"),
+                "ab_sa":  xc_sorgu(key, f'sp:"{sci}" q:"<C" area:europe lic:"BY-NC-SA"').get("numRecordings", "0"),
             }
             with open(onbellek, "w", encoding="utf-8") as f:
                 json.dump(d, f)
             time.sleep(0.34)      # API'ye nazik davran
 
-        s["xc_kayit"] = int(d["hepsi"])
-        s["xc_kayit_ab"] = int(d["ab"])
+        s["xc_ab"] = int(d["ab"])
+        s["xc_ab_eu"] = int(d["ab_eu"])
+        s["xc_ab_sa"] = int(d["ab_sa"])
 
         if i % 20 == 0 or i == len(havuz):
             print(f"  {i}/{len(havuz)}")
 
-    # Nihai eleme
+    # Nihai eleme — birleşik kural (gerekçe: dosya başındaki sabitler).
+    # Ses verisi ölçütü Avrupa A/B sayısı; Avrupa'da hiç kayıt yoksa
+    # (İstanbul'da görülen Asya/Afrika türleri) dünya geneline düşülüyor.
     for s in satirlar:
         if s["durum"] != "dahil":
-            s.setdefault("xc_kayit", "")
-            s.setdefault("xc_kayit_ab", "")
+            for k in ("xc_ab", "xc_ab_eu", "xc_ab_sa"):
+                s.setdefault(k, "")
             continue
-        ab = int(s.get("xc_kayit_ab") or 0)
-        if ab < esik:
-            s["durum"] = "elendi"
-            s["gerekce"] = f"Xeno-canto'da yalnizca {ab} A/B kayit (esik {esik})"
+        eu = int(s.get("xc_ab_eu") or 0)
+        dunya = int(s.get("xc_ab") or 0)
+        etkin = eu if eu > 0 else dunya
+        yaygin = int(s.get("gbif_kayit") or 0) >= YAYGIN_GBIF
+        gereken = esik if yaygin else NADIR_ESIK
 
-    for k in ("xc_kayit", "xc_kayit_ab"):
+        if etkin < gereken:
+            s["durum"] = "elendi"
+            s["gerekce"] = (
+                f"{'yaygin' if yaygin else 'nadir'} tur, XC'de {etkin} A/B kayit "
+                f"(gereken {gereken}; Avrupa {eu}, dunya {dunya})")
+
+    for k in ("xc_ab", "xc_ab_eu", "xc_ab_sa"):
         if k not in sutunlar:
             sutunlar.append(k)
     csv_yaz(satirlar, sutunlar)
@@ -157,10 +224,13 @@ def komut_say(key, esik):
     print(f"\n{CSV_YOL}")
     print(f"  NIHAI LISTE: {len(nihai)} tur")
     if nihai:
+        toplam_kayit = sum(int(s["xc_ab_eu"] or 0) or int(s["xc_ab"] or 0) for s in nihai)
+        print(f"  Toplam kullanilabilir A/B kayit: {toplam_kayit:,}")
         print("\n  En az ses kaydi olan 10 tur (veri riski burada):")
-        for s in sorted(nihai, key=lambda x: int(x["xc_kayit_ab"]))[:10]:
-            print(f"    {int(s['xc_kayit_ab']):5} A/B kayit  "
-                  f"{s['turkce_ad'] or s['bilimsel_ad']}")
+        for s in sorted(nihai, key=lambda x: int(x["xc_ab_eu"] or 0) or int(x["xc_ab"] or 0))[:10]:
+            eu, dw = int(s["xc_ab_eu"] or 0), int(s["xc_ab"] or 0)
+            print(f"    {eu or dw:5} A/B  {s['turkce_ad'] or s['bilimsel_ad']}"
+                  f"{'  (dunya geneli)' if not eu else ''}")
     if len(nihai) > 130:
         print(f"\n  [i] {len(nihai)} tur planin ~110'unun uzerinde; --esik yukseltilebilir.")
     elif len(nihai) < 90:
@@ -169,7 +239,7 @@ def komut_say(key, esik):
 
 # ── İndirme ────────────────────────────────────────────────────────────────
 
-def komut_indir(key, tur_basina, sadece_ab):
+def komut_indir(key, tur_basina, sadece_ab, nd_dahil):
     satirlar, _ = csv_oku()
     nihai = [s for s in satirlar if s["durum"] == "dahil"]
     if not nihai:
@@ -188,33 +258,64 @@ def komut_indir(key, tur_basina, sadece_ab):
             w.writerow(["dosya", "bilimsel_ad", "ebird_kodu", "xc_id",
                         "kalite", "lisans", "kaydeden", "ulke", "sure_sn"])
 
+        toplam_nd_atlandi = 0
+
         for s in nihai:
             sci = s["bilimsel_ad"]
             hedef_dizin = os.path.join(XC_DIR, s["ebird_kodu"] or sci.replace(" ", "_"))
             os.makedirs(hedef_dizin, exist_ok=True)
 
-            sorgu = f'sp:"{sci}"' + (' q:"<C"' if sadece_ab else "")
-            alinan, sayfa = [], 1
-            while len(alinan) < tur_basina:
-                d = xc_sorgu(key, sorgu, sayfa=sayfa, per_page=100)
-                kayitlar = d.get("recordings", [])
-                if not kayitlar:
-                    break
-                alinan.extend(kayitlar)
-                if sayfa >= int(d.get("numPages", 1)):
-                    break
-                sayfa += 1
-                time.sleep(0.34)
+            kalite = ' q:"<C"' if sadece_ab else ""
+            # Kademeli gevşetme: en alakalı/en ucuz kayıtlardan başla, tür
+            # başına hedef dolmazsa kısıtları sırayla kaldır.
+            #
+            #   1. Avrupa + 5-120 sn   üreme bölgesi, kısa kayıt. Uzun kayıtlar
+            #                          çoğunlukla sessizlik; hem disk hem
+            #                          segmentasyon süresi israfı (ölçüldü:
+            #                          ortalama 24 sn'ye karşı 32 sn).
+            #   2. Avrupa              az kayıtlı türlerde uzunluk filtresi
+            #                          havuzu fazla daraltıyor (İbibik 37).
+            #   3. dünya geneli        Avrupa'da kaydı olmayan türler için.
+            sorgular = [
+                f'sp:"{sci}"{kalite} area:europe len:5-120',
+                f'sp:"{sci}"{kalite} area:europe',
+                f'sp:"{sci}"{kalite}',
+            ]
 
-            alinan = alinan[:tur_basina]
-            indi = 0
+            alinan, gorulen = [], set()
+            for sorgu in sorgular:
+                sayfa = 1
+                while len(alinan) < tur_basina:
+                    d = xc_sorgu(key, sorgu, sayfa=sayfa, per_page=100)
+                    kayitlar = d.get("recordings", [])
+                    if not kayitlar:
+                        break
+                    for k in kayitlar:
+                        if k.get("id") in gorulen:
+                            continue
+                        gorulen.add(k.get("id"))
+                        alinan.append(k)
+                    if sayfa >= int(d.get("numPages", 1)):
+                        break
+                    sayfa += 1
+                    time.sleep(0.34)
+                if len(alinan) >= tur_basina:
+                    break
+
+            indi, nd_atlandi = 0, 0
             for k in alinan:
+                if indi >= tur_basina:
+                    break
+                if not nd_dahil and nd_mi(k.get("lic", "")):
+                    nd_atlandi += 1
+                    continue
                 xc_id = k.get("id", "")
                 url = k.get("file", "")
                 if not url:
                     continue
                 yol = os.path.join(hedef_dizin, f"XC{xc_id}.mp3")
                 if os.path.exists(yol):
+                    indi += 1
                     continue
                 try:
                     req = urllib.request.Request(url, headers=UA)
@@ -231,11 +332,14 @@ def komut_indir(key, tur_basina, sadece_ab):
                 toplam_indi += 1
                 time.sleep(0.1)
 
-            print(f"  {s['turkce_ad'] or sci}: {indi} yeni kayit "
-                  f"({len(alinan)} bulundu)")
+            toplam_nd_atlandi += nd_atlandi
+            print(f"  {s['turkce_ad'] or sci}: {indi} kayit"
+                  f"{f' (ND atlandi: {nd_atlandi})' if nd_atlandi else ''}")
             kf.flush()
 
     print(f"\nToplam {toplam_indi} yeni kayit -> {XC_DIR}")
+    if toplam_nd_atlandi:
+        print(f"ND (turev yasak) lisansli {toplam_nd_atlandi} kayit atlandi.")
     print(f"Lisans ve atif bilgisi: {kayit_csv}")
 
 
@@ -265,6 +369,8 @@ def main():
                     help=f"nihai liste icin asgari A/B kayit (varsayilan {VARSAYILAN_ESIK})")
     ap.add_argument("--adet", type=int, default=60, help="tur basina indirilecek kayit (varsayilan 60)")
     ap.add_argument("--tum-kalite", action="store_true", help="A/B disinda C/D/E kayitlari da indir")
+    ap.add_argument("--nd-dahil", action="store_true",
+                    help="ND (turev yasak) lisansli kayitlari da indir — sorumluluk sizde")
     args = ap.parse_args()
 
     key = anahtar_bul(args.key)
@@ -281,7 +387,7 @@ def main():
     if args.say:
         komut_say(key, args.esik)
     elif args.indir:
-        komut_indir(key, args.adet, not args.tum_kalite)
+        komut_indir(key, args.adet, not args.tum_kalite, args.nd_dahil)
     else:
         ap.print_help()
 
