@@ -74,7 +74,14 @@ typedef struct{
 }LCD_3IN49_ATTRIBUTES;
 extern LCD_3IN49_ATTRIBUTES LCD_3IN49;
 
+/* POKEBIRD — baslatma varyantlari (yalnizca hata ayiklama; bkz. LCD_3in49.c) */
+#define LCD_3IN49_INIT_FULL        0  /* satici tablosu + SLPOUT/MADCTL/COLMOD/DISPON */
+#define LCD_3IN49_INIT_MINIMAL     1  /* sadece DCS kuyrugu (rsvpnano ile ayni)       */
+#define LCD_3IN49_INIT_NO_COLMOD   2  /* satici tablosu + SLPOUT/DISPON, COLMOD YOK   */
+
 void LCD_3IN49_Init();
+void LCD_3IN49_InitVariant(int variant);
+void LCD_3IN49_SendSimpleCmd(uint8_t cmd);
 void LCD_3IN49_SetWindows(uint32_t Xstart, uint32_t Ystart, uint32_t Xend, uint32_t Yend);
 void LCD_3IN49_Display(UWORD *Image);
 void LCD_3IN49_DisplayWindows(uint32_t Xstart, uint32_t Ystart, uint32_t Xend, uint32_t Yend, UWORD *Image);

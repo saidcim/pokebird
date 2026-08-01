@@ -109,32 +109,74 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] =
     // {0x29,(uint8_t []){0x00},0,100},
 };
 
+/* POKEBIRD — satici dizisindeki eksik: standart DCS kuyrugu
+ *
+ * Waveshare'in tablosu 0x11 (SLPOUT) ve 0x29 (DISPON) yorum satiri olarak
+ * bitiyor ve 0x3A (COLMOD, piksel bicimi) hic yok. COLMOD ayarlanmazsa panel
+ * reset varsayilaninda kaliyor; biz piksel basina 2 bayt (RGB565) gonderdigimiz
+ * icin panelin bekledigi bayt sayisi tutmuyor ve GRAM'a kayik veri yaziliyor.
+ * Belirti: her pikselin farkli renk oldugu, hic gitmeyen karincalanma.
+ *
+ * Ayni panelin calisan ESP32 surucusu (rsvpnano/src/display/axs15231b.cpp)
+ * tam olarak bu diziyi yolluyor.
+ */
+static const sh8601_lcd_init_cmd_t lcd_dcs_tail_cmds[] =
+{
+    {0x11, (uint8_t []){0x00}, 0, 120},   /* SLPOUT  — uyku modundan cik      */
+    {0x36, (uint8_t []){0x00}, 1, 0},     /* MADCTL  — donus/aynalama yok     */
+    {0x3A, (uint8_t []){0x55}, 1, 0},     /* COLMOD  — 16 bit/piksel RGB565   */
+    {0x29, (uint8_t []){0x00}, 0, 120},   /* DISPON  — paneli tara ve goster  */
+};
+
+/* COLMOD'suz kuyruk: karincalanmanin gercekten piksel biciminden geldigini
+ * kanitlayan kontrol grubu (bkz. LCD_3IN49_INIT_NO_COLMOD). */
+static const sh8601_lcd_init_cmd_t lcd_dcs_tail_no_colmod[] =
+{
+    {0x11, (uint8_t []){0x00}, 0, 120},
+    {0x36, (uint8_t []){0x00}, 1, 0},
+    {0x29, (uint8_t []){0x00}, 0, 120},
+};
+
+/* POKEBIRD — veri yolu teşhisi için: paneli tek, veri almayan bir DCS komutu
+ * yolla (0x28 DISPOFF, 0x29 DISPON, 0x20/0x21 INVOFF/INVON gibi). Komutlar
+ * panele ulaşıyor mu sorusunu gözle yanıtlatmak için kullanılıyor. */
+void LCD_3IN49_SendSimpleCmd(uint8_t cmd)
+{
+    QSPI_Select(qspi);
+    QSPI_REGISTER_Write(qspi, cmd);
+    QSPI_Deselect(qspi);
+}
+
+static void LCD_3IN49_SendCmds(const sh8601_lcd_init_cmd_t *cmds, size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+    {
+        const sh8601_lcd_init_cmd_t *cmd = &cmds[i];
+
+        // Send commands and data
+        QSPI_Select(qspi);
+        QSPI_REGISTER_Write(qspi, cmd->cmd);
+
+        // Write data byte
+        for (size_t j = 0; j < cmd->data_bytes; j++) {
+            QSPI_DATA_Write(qspi, cmd->data[j]);
+        }
+        QSPI_Deselect(qspi);
+
+        // Delay
+        if (cmd->delay_ms > 0) {
+            sleep_ms(cmd->delay_ms);
+        }
+    }
+}
+
 /******************************************************************************
 function :	Initialize the lcd register
 parameter:
         qspi    ：  qspi structure
 ******************************************************************************/
 static void LCD_3IN49_InitReg(){
-    // Traverse the initialization command array
-    for (int i = 0; i < sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]); i++) 
-    {
-        const sh8601_lcd_init_cmd_t *cmd = &lcd_init_cmds[i];
-        
-        // Send commands and data
-        QSPI_Select(qspi);
-        QSPI_REGISTER_Write(qspi, cmd->cmd);
-        
-        // Write data byte
-        for (int j = 0; j < cmd->data_bytes; j++) {
-            QSPI_DATA_Write(qspi, cmd->data[j]);
-        }
-        QSPI_Deselect(qspi);
-        
-        // Delay
-        if (cmd->delay_ms > 0) {
-            sleep_ms(cmd->delay_ms);
-        }
-    }
+    LCD_3IN49_SendCmds(lcd_init_cmds, sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]));
 }
 
 /********************************************************************************
@@ -158,11 +200,36 @@ parameter:
 ********************************************************************************/
 void LCD_3IN49_Init()
 {
+    LCD_3IN49_InitVariant(LCD_3IN49_INIT_FULL);
+}
+
+/******************************************************************************
+function :	POKEBIRD — secilebilir baslatma varyanti
+parameter:
+        variant :  LCD_3IN49_INIT_* (bkz. LCD_3in49.h)
+
+Varyantlar sadece hata ayiklama icin var; uretim yolu LCD_3IN49_INIT_FULL.
+Ekranda ne oldugunu seri porttan goremedigimiz icin (bkz. lastsession.md §5.9)
+hipotezleri tek tek denemek yerine hepsini tek firmware'e koyup kullaniciya
+sorabilelim diye ayrildi.
+******************************************************************************/
+void LCD_3IN49_InitVariant(int variant)
+{
     //Hardware reset
     LCD_3IN49_Reset(qspi);
-    
-    //Set the initialization register
-    LCD_3IN49_InitReg(qspi);
+
+    if (variant != LCD_3IN49_INIT_MINIMAL) {
+        //Set the initialization register
+        LCD_3IN49_InitReg(qspi);
+    }
+
+    if (variant == LCD_3IN49_INIT_NO_COLMOD) {
+        LCD_3IN49_SendCmds(lcd_dcs_tail_no_colmod,
+                           sizeof(lcd_dcs_tail_no_colmod) / sizeof(lcd_dcs_tail_no_colmod[0]));
+    } else {
+        LCD_3IN49_SendCmds(lcd_dcs_tail_cmds,
+                           sizeof(lcd_dcs_tail_cmds) / sizeof(lcd_dcs_tail_cmds[0]));
+    }
 
     LCD_3IN49.HEIGHT  = LCD_3IN49_HEIGHT;
     LCD_3IN49.WIDTH   = LCD_3IN49_WIDTH;

@@ -69,6 +69,7 @@ extern pio_qspi_t qspi;
 void QSPI_GPIO_Init(pio_qspi_t qspi);
 void QSPI_Select(pio_qspi_t qspi);
 void QSPI_Deselect(pio_qspi_t qspi);
+void QSPI_WaitIdle(pio_qspi_t qspi);
 void QSPI_PIO_Init(pio_qspi_t qspi);
 void QSPI_1Wrie_Mode(pio_qspi_t *qspi);
 void QSPI_4Wrie_Mode(pio_qspi_t *qspi);

@@ -72,11 +72,44 @@ void QSPI_Select(pio_qspi_t qspi){
 }
 
 /******************************************************************************
+function : QSPI Wait Idle  (POKEBIRD eklemesi)
+
+PIO'nun kuyruga alinan son biti de gercekten hatta cikarmasini bekler.
+
+NEDEN GEREKLI — bu, ekranin hic calismamasinin sebebiydi:
+`pio_sm_put_blocking()` yalnizca FIFO DOLU iken bekler; veriyi FIFO'ya
+koyar koymaz doner. Ayni sekilde `dma_channel_is_busy()` yanlisa dondugunde
+baytlar FIFO'ya yazilmis olur, hatta cikmis olmaz. Orijinal QSPI_Deselect
+CS'i hemen yukseltiyordu; PIO ise o sirada hala kaydiriyordu. Panel her
+islemi yarida kesilmis goruyor ve TEK BIR KOMUTU BILE kabul etmiyordu.
+(Olcum: panel 60 Hz tariyor ama TEOFF'a tepki vermiyor — bkz. `v` teshisi.)
+
+TXSTALL bayragi, SM bos OSR/FIFO ile bir OUT'ta takildiginda kurulur; yani
+"kaydirilacak bit kalmadi" demektir. Once bayragi temizleyip sonra kurulmasini
+bekliyoruz.
+
+Zaman asimi var: SM kapaliysa TXSTALL hic kurulmaz, sonsuz donguye girmeyelim.
+******************************************************************************/
+void QSPI_WaitIdle(pio_qspi_t qspi){
+    const uint32_t stall = 1u << (PIO_FDEBUG_TXSTALL_LSB + qspi.sm);
+    qspi.pio->fdebug = stall;                       /* bayragi temizle */
+    absolute_time_t bitis = make_timeout_time_ms(50);
+    while (!(qspi.pio->fdebug & stall)) {
+        if (time_reached(bitis)) return;            /* SM kapali/tikali */
+        tight_loop_contents();
+    }
+}
+
+/******************************************************************************
 function : QSPI Deselect
 parameter:
     qspi : QSPI structure
-******************************************************************************/	
+******************************************************************************/
 void QSPI_Deselect(pio_qspi_t qspi){
+    /* CS'i yukseltmeden ONCE son bitin hatta cikmasini bekle (bkz. yukarisi).
+     * Bekleme burada yapiliyor ki her cagri yeri — satici dosyalari dahil —
+     * tek bir duzeltmeden faydalansin. */
+    QSPI_WaitIdle(qspi);
     gpio_put(qspi.pin_cs,1);
 }
 
