@@ -28,9 +28,9 @@ kayıt**, hepsi **24 kHz mono 16-bit WAV** (cihazın formatı) olarak
 `data/wav/` altında. 123 tür çevrildi (4.878 WAV, 9,2 GB); kalan 55 tür
 indirilip çevriliyor. Hedef ~7.100 dosya / ~13 GB.
 
-**Sıradaki iş — M4 adım 4-5:** BirdNET ile segmentasyon + yumuşak
-etiketleme, ardından **negatif madenciliği** (plan bunu "atlanırsa cihaz
-sahada kullanılamaz" diye işaretliyor).
+**SIRADAKİ İŞ — BirdNET segmentasyonu. Adım adım tarifi §9e'de**
+(kurulum, komutlar, Python sürüm çakışması, kabul ölçütü). Ondan sonrası
+§9f: negatif madenciliği → veri artırma → M5 eğitim.
 
 ---
 
@@ -862,20 +862,150 @@ Uzun kayıt ağırlıklı bir kümede WAV daha büyük olurdu — bu yüzden öl
   olduğu için üreme bölgesi tercih edildi; Avrupa'da kaydı olmayan tür için
   dünya geneline düşülüyor.
 
-### Sıradaki adımlar (ARCHITECTURE §6)
+---
+
+## 9e. SIRADAKİ İŞ — M4 adım 3: BirdNET segmentasyonu
+
+> Bu bölüm yeni bir oturumun hiçbir şey sormadan başlayabilmesi için yazıldı.
+
+### Elimizde ne var (envanter)
+
+```
+data/species_istanbul.csv     178 tür "dahil" + 90 tür "elendi" (gerekçeli)
+                              sütunlar: ebird_kodu, bilimsel_ad, turkce_ad,
+                              ingilizce_ad, gbif_kayit, xc_ab/xc_ab_eu/xc_ab_sa,
+                              ay_01..ay_12, durum, gerekce
+data/wav/<ebird_kodu>/XC*.wav tür başına ≤40 kayıt, 24 kHz mono 16-bit
+data/xc/kayitlar.csv          her dosyanın lisansı + kaydedeni + XC kimliği
+data/.xc_key                  XC API anahtarı (git'e girmiyor)
+```
+
+Kontrol komutu:
+```bash
+python -c "import os;print(sum(len(os.listdir('data/wav/'+d)) for d in os.listdir('data/wav')),'WAV')"
+```
+
+### Neden segmentasyon şart
+
+Xeno-canto kayıtlarının büyük kısmı sessizlik, arka plan türü ve kaydedenin
+konuşması. 40 kaydın tamamını "bu tür" diye etiketlemek modeli sessizliği ve
+yanlış türü ezberlemeye iter. BirdNET her 3 saniyelik dilimde hangi tür var,
+onu söylüyor — plan §6 bunu *"veri kalitesini dramatik biçimde artırır"*
+diye işaretliyor.
+
+Ayrıca BirdNET'in **çıkış olasılıkları öğretmen sinyali** olarak saklanacak:
+M5'teki damıtma (distillation) bunları kullanacak. Yani sadece "hangi dilim"
+değil, "BirdNET ne kadar emin" de kaydedilmeli.
+
+### Kurulum — ⚠ PYTHON SÜRÜM ÇAKIŞMASI
+
+```bash
+pip install birdnet-analyzer
+```
+
+**Bu makinede Python 3.14 kurulu, BirdNET-Analyzer 3.12 istiyor.** Kurulum
+büyük olasılıkla TensorFlow bağımlılığında patlayacak. Üç seçenek, sırayla
+denenmeli:
+
+1. Ayrı bir 3.12 sanal ortamı (en temiz):
+   ```bash
+   py -3.12 -m venv .venv-birdnet     # 3.12 yoksa python.org'dan kurulur
+   .venv-birdnet\Scripts\pip install birdnet-analyzer
+   ```
+2. `pip install birdnet-analyzer` doğrudan 3.14'te — çalışırsa iş biter
+3. Docker imajı (repo'da Dockerfile var)
+
+### Komutlar (dokümantasyondan doğrulandı)
+
+```bash
+# 1. Analiz — her kayıt için 3 sn'lik dilim tespitleri
+python -m birdnet_analyzer.analyze data/wav -o data/birdnet_sonuc \
+       --slist data/birdnet_slist.txt --min_conf 0.1 --overlap 0.0
+
+# 2. Segment çıkarma — tespit edilen dilimleri ayrı dosyalara kes
+python -m birdnet_analyzer.segments data/wav -o data/segment \
+       -r data/birdnet_sonuc --min_conf 0.1 --max_segments 400
+```
+
+Bayraklar: `-o/--output`, `-r/--results`, `--min_conf` (varsayılan 0.25),
+`--overlap` [0.0–2.9], `-b/--batch_size`, `-t/--threads`, `--max_segments`
+(varsayılan 100), `--slist` **ya da** `--lat/--lon/--week` (ikisi birlikte
+kullanılamaz).
+
+**`--min_conf` neden 0.25 değil 0.1:** yumuşak etiket topluyoruz. Düşük
+güvenli dilimler de damıtma için bilgi taşıyor; eşiği eğitim tarafında
+ayarlamak, veriyi baştan atmaktan iyi.
+
+**`--slist` dosyası** `species_istanbul.csv`'den üretilmeli. Biçimi
+`Bilimsel ad_İngilizce ad` satırları olmalı (**DOĞRULANMADI** — BirdNET'in
+`labels/` dosyalarından birine bakıp teyit edin, yanlış biçimde sessizce
+boş liste kullanır). Küçük bir script yazın; İngilizce adlar CSV'de var.
+
+### ⚠ 24 kHz meselesi — bilerek böyle
+
+BirdNET 48 kHz bekliyor, bizim WAV'lar 24 kHz. BirdNET kendi yeniden
+örneklemesini yapar; yukarı örnekleme bilgi eklemez ama **bu tutarlılık
+istenen bir şey**: cihazın mikrofonu da 12 kHz üstünü hiç duymuyor
+(24 kHz örnekleme, Nyquist 12 kHz). BirdNET'i cihazın gerçekten duyacağı
+bantla besliyoruz, dolayısıyla öğretmen sinyali cihazın görebileceği
+dünyayla uyumlu oluyor.
+
+Bedeli: 9–11 kHz'de öten türlerde (Çalıkuşu, Tırmaşıkkuşu) BirdNET biraz
+daha az emin olabilir. Kabul edilmiş bir bedel — orijinal mp3'ler silindi,
+geri dönüş yok. Bu türlerde tespit sayısı çok düşük çıkarsa `--min_conf`
+onlar için ayrıca düşürülebilir.
+
+### Beklenen çıktı ve kabul ölçütü
+
+- Tür başına **≥100 segment** (3 sn) hedeflenmeli; 40 kayıt × ~39 sn ham
+  sesin makul bir kısmı hedef tür olmalı
+- Segment sayısı çok düşük çıkan türler **not edilmeli** — M5'te sınıf
+  dengesizliği olarak karşımıza çıkacak, focal loss ile ele alınacak
+- BirdNET güven skorları kayıt başına saklanmalı (öğretmen sinyali)
+- Sağlama: rastgele 10 segment dinlenip gerçekten hedef tür mü, bakılmalı.
+  *Bu projede dolaylı ölçüme fazla güvenmek iki kez pahalıya patladı (§5.10);
+  segmentasyonda da tek doğrudan gözlem dinlemektir.*
+
+---
+
+## 9f. Sonraki adımlar (ARCHITECTURE §6)
 
 1. ✅ Tür listesi — 178 tür
 2. ✅ Kayıt indirme + 24 kHz mono WAV dönüşümü
-3. ⏳ **BirdNET ile segmentasyon + yumuşak etiketleme** — XC kayıtlarının
-   büyük kısmı sessizlik ve arka plan türü; bu adım veri kalitesini
-   dramatik artırıyor
-4. ⏳ **Negatif madenciliği** — plan "atlanırsa cihaz sahada kullanılamaz"
-   diyor. Araştırıldı: **ESC-50** (CC BY-NC, GitHub, `chirping_birds`
-   sınıfı ÇIKARILMALI), Zenodo'da CC BY-4.0 şehir sesi setleri. Ama
-   ezan/vapur düdüğü/simitçi hiçbir sette yok — **cihazın kendisiyle
-   kaydedilmeli** (`r` komutu; aynı mikrofon, aynı kazanç, kanal uyumu
-   birebir). Freesound anahtar istiyor, kaçınıldı.
-5. ⏳ Veri artırma → M5 eğitim
+3. ⏳ **BirdNET segmentasyonu** — §9e
+4. ⏳ **Negatif madenciliği** — plan *"atlanırsa cihaz sahada kullanılamaz"*
+   diyor: şehir gürültüsünü sürekli kuş sanar.
+
+   Araştırıldı (anahtarsız kaynaklar):
+   | Kaynak | Lisans | Not |
+   |---|---|---|
+   | **ESC-50** (github.com/karolpiczak/ESC-50) | CC BY-NC | 2000 klip, 50 sınıf: korna, siren, motor, yağmur, rüzgâr, köpek. 879 MB. **`chirping_birds` sınıfı ÇIKARILMALI** — negatife kuş sesi karışırsa Aşama 1 bozulur |
+   | Zenodo şehir sesi setleri | CC BY-4.0 | "Isolated urban sound database", "STeLiN-US". NC kısıtı yok, lisans daha temiz |
+   | Freesound | anahtar gerekli | İkinci bir API anahtarı istememek için kaçınıldı |
+
+   **En değerli negatifler hazır sette YOK:** ezan, vapur düdüğü, simitçi,
+   İstanbul trafiği, martı gürültüsü. Bunlar **cihazın kendisiyle**
+   kaydedilmeli (`r` komutu, `python tools/capture_wav.py --port COM13
+   --out ezan.wav`). Avantajı çift: plan "İstanbul'a özgü" diyor **ve**
+   kanal uyumu birebir oluyor — aynı mikrofon, aynı ES8311 kazancı, aynı
+   DSP zinciri. Alan kaydı için cihazı yanınıza alın.
+
+   Bu negatifler iki yerde kullanılacak: Aşama 1'in negatif sınıfı ve
+   Aşama 2'nin "bilinmiyor" sınıfı.
+
+5. ⏳ **Veri artırma** — zaman kaydırma, pitch/tempo, negatiflerle çeşitli
+   SNR'lerde gürültü karıştırma, SpecAugment, oda/mesafe simülasyonu
+6. ⏳ **M5**: damıtma ile eğitim (BirdNET yumuşak çıktıları öğretmen),
+   focal loss (sınıf dengesizliği), INT8 niceleştirme, doğruluk raporu
+
+### M5'e girerken hatırlanacak kısıtlar
+
+- Girdi **64×187 int8** (mel penceresi) — cihazdaki `pb_mel_window()` çıktısı
+- Hedef **≤30 MMAC/pencere**, tensor arena **≤180 KB**
+- **`s_capture` (96 KB) hâlâ duruyor**, arena eklenmeden kaldırılmalı (§6)
+- Mel parametreleri değiştirilirse cihaz tarafı da değişmeli: HTK mel,
+  alan normalizasyonu YOK, periyodik Hann (§9c). Bu iki ayrıntı tutmazsa
+  model sessizce kötü çalışır.
 
 ---
 
