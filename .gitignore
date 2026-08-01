@@ -40,3 +40,14 @@ data/.xc_key
 data/m4_run.log
 data/wav/
 data/convert.log
+
+# BirdNET segmentasyonu (M4 adim 3)
+# .venv-birdnet: 3.11 sanal ortami + 260 MB model checkpoint'i
+# birdnet_sonuc/: kayit basina bir CSV, 7.111 dosya
+# segmentler.csv ve birdnet_slist.txt uretilebilir ciktilar
+.venv-birdnet/
+data/birdnet_sonuc/
+data/birdnet_log/
+data/segmentler.csv
+data/birdnet_slist.txt
+data/segment_ornek/
