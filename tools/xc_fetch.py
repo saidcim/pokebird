@@ -70,6 +70,7 @@ import urllib.request
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(KOK, "data")
 XC_DIR = os.path.join(DATA, "xc")
+WAV_DIR = os.path.join(DATA, "wav")      # xc_convert.py ciktisi
 CACHE = os.path.join(DATA, "cache")
 CSV_YOL = os.path.join(DATA, "species_istanbul.csv")
 
@@ -314,7 +315,12 @@ def komut_indir(key, tur_basina, sadece_ab, nd_dahil):
                 if not url:
                     continue
                 yol = os.path.join(hedef_dizin, f"XC{xc_id}.mp3")
-                if os.path.exists(yol):
+                # Çevrilmiş WAV'a da bak: xc_convert.py mp3'ü silip WAV
+                # bırakıyor. Yalnızca mp3'e bakılırsa çevrilmiş her tür
+                # sıfırdan yeniden inerdi (bir turda 26 GB boşa gidiyordu).
+                wav_yol = os.path.join(WAV_DIR, os.path.basename(hedef_dizin),
+                                       f"XC{xc_id}.wav")
+                if os.path.exists(yol) or os.path.exists(wav_yol):
                     indi += 1
                     continue
                 try:

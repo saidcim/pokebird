@@ -22,11 +22,15 @@ doğruladı:** kart doğru, spektrogram akıyor, ses çıkınca "SES ALGILANDI"
 yeşil yanıyor. Bu demo M2b'nin açık 6. maddesini de (spektrogram + LVGL
 bir arada) kapattı.
 
-**M4 BAŞLADI — tıkalı nokta var:** İstanbul tür havuzu (268 tür) ve aylık
-dağılımı GBIF'ten anahtarsız çekildi, `data/species_istanbul.csv` hazır (§9d).
-**Nihai ~110 türe daraltma ve ses kaydı indirme Xeno-canto API anahtarı
-bekliyor** — v2 kapandı, v3 anahtar istiyor. Kullanıcı anahtarı alıp
-verecek. Anahtar gelince tek komut: `python tools/xc_fetch.py --say`.
+**M4 — veri toplama neredeyse bitti (§9d):** Xeno-canto anahtarı alındı
+(`data/.xc_key`, git'e girmiyor). Nihai liste **178 tür**, tür başına **40
+kayıt**, hepsi **24 kHz mono 16-bit WAV** (cihazın formatı) olarak
+`data/wav/` altında. 123 tür çevrildi (4.878 WAV, 9,2 GB); kalan 55 tür
+indirilip çevriliyor. Hedef ~7.100 dosya / ~13 GB.
+
+**Sıradaki iş — M4 adım 4-5:** BirdNET ile segmentasyon + yumuşak
+etiketleme, ardından **negatif madenciliği** (plan bunu "atlanırsa cihaz
+sahada kullanılamaz" diye işaretliyor).
 
 ---
 
@@ -492,7 +496,7 @@ s_capture'ı kaldırmanın yolu açık.
 | M2a | Ekran sürücüsü + canlı spektrogram | ✅ (§9a) |
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
-| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 havuz + aylık veri hazır; XC anahtarı bekliyor (§9d)** |
+| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 178 tür + ses verisi indi; segmentasyon ve negatifler kaldı (§9d)** |
 | M5 | Model eğitimi + damıtma + INT8 | |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
@@ -740,8 +744,28 @@ doğruladı: kart + akan mel spektrogramı + "SES ALGILANDI" yeşil.
 | Dosya | Ne |
 |---|---|
 | [`tools/species_list.py`](tools/species_list.py) | GBIF + eBird'den İstanbul tür havuzu, **anahtarsız** |
-| [`tools/xc_fetch.py`](tools/xc_fetch.py) | Xeno-canto sayım + indirme — **anahtar bekliyor** |
-| `data/species_istanbul.csv` | 268 tür havuzu + aylık dağılım (git'e giriyor) |
+| [`tools/xc_fetch.py`](tools/xc_fetch.py) | Xeno-canto sayım (`--say`) + indirme (`--indir`) |
+| [`tools/xc_convert.py`](tools/xc_convert.py) | mp3 → 24 kHz mono WAV, tür başına kota |
+| [`tools/m4_run.py`](tools/m4_run.py) | sayım → eşik arama → indirme zinciri, gözetimsiz |
+| `data/species_istanbul.csv` | tür tablosu + aylık dağılım (git'e giriyor) |
+| `data/wav/<ebird_kodu>/XC*.wav` | eğitim verisi (git'e girmiyor) |
+| `data/xc/kayitlar.csv` | **lisans + kaydeden + XC kimliği — atıf için saklayın** |
+
+### Nihai veri kümesi
+
+```
+178 tür · tür başına 40 kayıt · 24 kHz mono 16-bit WAV
+~7.100 dosya · ~77 saat ses · ~13 GB
+```
+
+**Tür sayısı neden 178 (plan ~110 diyordu):** kalite filtresi düzeltilince
+(aşağıda) kullanılabilir A/B kayıt sayısı 7 kat arttı, en yüksek nadir-tür
+eşiği bile 178 türü geçiriyor. Cihaz tarafında sorun değil — sınıf sayısı
+yalnızca son katmanı büyütüyor (178 sınıf ≈ 22,8 KB int8; 110 olsaydı
+14 KB). Tensor arena sınıf sayısından bağımsız, mevsim tablosu 2,1 KB, tür
+isimleri flash'ta. **Bedel bellekte değil doğrulukta:** 178 sınıf daha zor
+bir problem. Eğitimden sonra karışıklık matrisine bakıp zayıf sınıfları
+budamak kolay; veri elde olduğu için sonradan indirmek gerekmeyecek.
 
 ### Veri kaynakları — hangisi anahtar istiyor
 
@@ -784,15 +808,74 @@ bunu diyor).
 ==#%@=-=**==    Serce          12 ay sabit              ✓ yerlesik
 ```
 
+### ⚠ M4'te yapılan HATALAR — tekrarlamayın
+
+**1. `q:"<C"` "C'den DÜŞÜK kalite" demek (D/E), A/B değil.**
+A/B kayıt isterken tam tersini sorguladım. Ölçüm (Büyük Baştankara, Avrupa):
+
+```
+filtresiz  9070  |  q:"<C"  703 (hepsi D)  |  q:">C"  4995 (A 947 + B 4048)
+```
+
+Deneme indirmesinde kalite sütununun `D` göstermesiyle yakalandı. **Doğrusu
+`q:">C"` ya da `q_gt:C`.** Bu hata tüm sayımları ve dolayısıyla tür listesini
+bozmuştu; sayım önbelleği ve inen dosyalar silinip baştan alındı.
+*Ders: indirilen ilk dosyanın metadata'sına bak — filtre çalışmıyor olabilir.*
+
+**2. Dosya boyutu tahmin edildi, ölçülmedi — 9 kat yanlış.**
+XC metadata'sındaki `length` alanından süreyi okuyup 128 kbps varsaydım,
+0,4 MB/dosya çıktı. **Gerçek: 3,7 MB/dosya.** 2,5 GB diye onay alınan iş
+38,8 GB'a gidiyordu; disk %99 dolu olduğu için 26,6 GB'da durduruldu.
+*Ders: birkaç dosya indirip ölç, tahmin etme. Ve indirme öncesi `df` bak.*
+
+**3. `m4_run.py` hedefi tutturamayınca yine de indirmeye geçti.**
+120 tür hedeflenmişti, eşik araması 178'de kaldı ve durup sormadan indirdi.
+*Ders: gözetimsiz zincirde hedef sapması varsa dur.*
+
+**4. `xc_fetch` yalnızca mp3'e bakıyordu.**
+`xc_convert` mp3'ü silip WAV bıraktığı için, çevrilmiş türler "inmemiş"
+sayılıp baştan inecekti (bir turda 26 GB boşa). Artık WAV'a da bakıyor.
+
+### Boyut gerçekleri (ölçüldü, tahmin değil)
+
+```
+7.244 kayıt = 78,9 saat ses · ortalama 39 sn, medyan 31 sn
+mp3 26,6 GB   ->   24 kHz mono WAV 13,6 GB
+```
+
+WAV'ın küçük çıkmasının sebebi kayıtların çoğunun kısa olması. **Tek tek
+dosyalarda tersi oluyor** (16 sn'lik kayıt: 0,36 MB mp3 → 0,77 MB WAV).
+Uzun kayıt ağırlıklı bir kümede WAV daha büyük olurdu — bu yüzden ölçüldü.
+
+### Lisans ve coğrafya kararları
+
+- **ND (NoDerivatives) kayıtlar İNDİRİLMİYOR.** Guguk'un 300 kaydında
+  dağılım: `by-nc-sa` 201 · `by-nc-nd` **34** · `by-nc` 4 · CC0 2 · diğer 2.
+  Modeli ND kayıtla eğitmenin türev eser sayılması tartışmalı; %14 veri için
+  risk alınmadı. `--nd-dahil` ile açılır.
+- Kalanın çoğu **BY-NC-SA**: kişisel kullanımla uyumlu, **ticari dağıtımla
+  değil** — BirdNET'in CC BY-NC-SA kısıtıyla aynı sınıftan sorun.
+- API **negatif lisans filtresi desteklemiyor** (`-lic:` → HTTP 400);
+  eleme indirme sırasında metadata'dan yapılıyor.
+- Coğrafya `area:europe`. **Türkiye kayıtları pratikte yok** (Guguk 1,
+  Kızılgerdan 0, Büyük Baştankara 4). Kuş sesinde bölgesel lehçe gerçek
+  olduğu için üreme bölgesi tercih edildi; Avrupa'da kaydı olmayan tür için
+  dünya geneline düşülüyor.
+
 ### Sıradaki adımlar (ARCHITECTURE §6)
 
-1. ✅ Tür havuzu — *bitti*
-2. ⏸ **Nihai ~110 tür** — `xc_fetch.py --say`, **anahtar bekliyor**
-3. ⏸ Kayıt indirme — `xc_fetch.py --indir`, anahtar bekliyor
-4. ⏳ BirdNET ile segmentasyon + yumuşak etiketleme
-5. ⏳ **Negatif madenciliği** (trafik, korna, ezan, vapur, konuşma) — plan
-   bunu "atlanırsa cihaz sahada kullanılamaz" diye işaretliyor
-6. ⏳ Veri artırma → M5 eğitim
+1. ✅ Tür listesi — 178 tür
+2. ✅ Kayıt indirme + 24 kHz mono WAV dönüşümü
+3. ⏳ **BirdNET ile segmentasyon + yumuşak etiketleme** — XC kayıtlarının
+   büyük kısmı sessizlik ve arka plan türü; bu adım veri kalitesini
+   dramatik artırıyor
+4. ⏳ **Negatif madenciliği** — plan "atlanırsa cihaz sahada kullanılamaz"
+   diyor. Araştırıldı: **ESC-50** (CC BY-NC, GitHub, `chirping_birds`
+   sınıfı ÇIKARILMALI), Zenodo'da CC BY-4.0 şehir sesi setleri. Ama
+   ezan/vapur düdüğü/simitçi hiçbir sette yok — **cihazın kendisiyle
+   kaydedilmeli** (`r` komutu; aynı mikrofon, aynı kazanç, kanal uyumu
+   birebir). Freesound anahtar istiyor, kaçınıldı.
+5. ⏳ Veri artırma → M5 eğitim
 
 ---
 
@@ -814,9 +897,13 @@ src/
   ui/         spectrogram(.c/.h), lv_conf.h, lv_port(.c/.h)
 test/       CMakeLists.txt, dsp_test.c      ← host tarafı DSP testleri
 tools/      capture_wav.py, mel_reference.py,
-            species_list.py, xc_fetch.py    ← M4 veri boru hattı
-data/       species_istanbul.csv            ← tür havuzu (git'e giriyor)
-            cache/, xc/                     (ikisi de git'e girmiyor)
+            species_list.py, xc_fetch.py,
+            xc_convert.py, m4_run.py        ← M4 veri boru hattı
+data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
+            .xc_key                         ← XC API anahtarı (GİRMİYOR)
+            wav/                            ← eğitim verisi (girmiyor)
+            xc/kayitlar.csv                 ← lisans/atıf kaydı (girmiyor)
+            cache/                          ← API önbelleği (girmiyor)
 third_party/  pico-sdk/, lvgl/              (ikisi de git'e girmiyor)
 rsvpnano/     kullanıcının kopyası           (git'e girmiyor)
 ```
