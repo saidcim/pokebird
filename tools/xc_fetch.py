@@ -263,7 +263,22 @@ def komut_indir(key, tur_basina, sadece_ab, nd_dahil):
 
         for s in nihai:
             sci = s["bilimsel_ad"]
-            hedef_dizin = os.path.join(XC_DIR, s["ebird_kodu"] or sci.replace(" ", "_"))
+            tur_kodu = s["ebird_kodu"] or sci.replace(" ", "_")
+            hedef_dizin = os.path.join(XC_DIR, tur_kodu)
+
+            # Kotası zaten dolu olan türü hiç sorgulama. Eskiden her tür için
+            # boş dizin açılıyordu; "bu tür yeniden iniyor" izlenimi veriyor
+            # ve her turda gereksiz API sorgusu yapılıyordu.
+            wav_dizin = os.path.join(WAV_DIR, tur_kodu)
+            mevcut = 0
+            if os.path.isdir(wav_dizin):
+                mevcut += len([f for f in os.listdir(wav_dizin) if f.endswith(".wav")])
+            if os.path.isdir(hedef_dizin):
+                mevcut += len([f for f in os.listdir(hedef_dizin) if f.endswith(".mp3")])
+            if mevcut >= tur_basina:
+                print(f"  {s['turkce_ad'] or sci}: {mevcut} kayit zaten var, atlandi")
+                continue
+
             os.makedirs(hedef_dizin, exist_ok=True)
 
             kalite = ' q:">C"' if sadece_ab else ""
