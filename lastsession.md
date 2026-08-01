@@ -22,11 +22,13 @@ doğruladı:** kart doğru, spektrogram akıyor, ses çıkınca "SES ALGILANDI"
 yeşil yanıyor. Bu demo M2b'nin açık 6. maddesini de (spektrogram + LVGL
 bir arada) kapattı.
 
-**M4 — veri toplama neredeyse bitti (§9d):** Xeno-canto anahtarı alındı
-(`data/.xc_key`, git'e girmiyor). Nihai liste **178 tür**, tür başına **40
-kayıt**, hepsi **24 kHz mono 16-bit WAV** (cihazın formatı) olarak
-`data/wav/` altında. 123 tür çevrildi (4.878 WAV, 9,2 GB); kalan 55 tür
-indirilip çevriliyor. Hedef ~7.100 dosya / ~13 GB.
+**M4 veri toplama ✅ BİTTİ (§9d).** Eğitim verisi hazır ve doğrulandı:
+
+```
+178 tür · 7.111 WAV · 13,2 GB · ~79 saat ses
+24 kHz mono 16-bit (30 rastgele dosyada format sağlaması 30/30 doğru)
+172 tür tam 40 kayıt · 6 tür 39 · Küçük Kartal 37 (XC'de o kadar var)
+```
 
 **SIRADAKİ İŞ — BirdNET segmentasyonu. Adım adım tarifi §9e'de**
 (kurulum, komutlar, Python sürüm çakışması, kabul ölçütü). Ondan sonrası
@@ -496,7 +498,7 @@ s_capture'ı kaldırmanın yolu açık.
 | M2a | Ekran sürücüsü + canlı spektrogram | ✅ (§9a) |
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
-| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 178 tür + ses verisi indi; segmentasyon ve negatifler kaldı (§9d)** |
+| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 veri hazır (178 tür, 7.111 WAV); segmentasyon + negatifler kaldı (§9d, §9e)** |
 | M5 | Model eğitimi + damıtma + INT8 | |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
@@ -751,12 +753,20 @@ doğruladı: kart + akan mel spektrogramı + "SES ALGILANDI" yeşil.
 | `data/wav/<ebird_kodu>/XC*.wav` | eğitim verisi (git'e girmiyor) |
 | `data/xc/kayitlar.csv` | **lisans + kaydeden + XC kimliği — atıf için saklayın** |
 
-### Nihai veri kümesi
+### Nihai veri kümesi (ölçüldü, tamamlandı)
 
 ```
-178 tür · tür başına 40 kayıt · 24 kHz mono 16-bit WAV
-~7.100 dosya · ~77 saat ses · ~13 GB
+178 tür · 7.111 WAV · 13,2 GB · ~79 saat ses · ortalama 39,9 sn/kayıt
+24 kHz mono 16-bit — format sağlaması 30/30 doğru
+172 tür tam 40 · 6 tür 39 · booeag1 (Küçük Kartal) 37
 ```
+
+39'da kalan 6 tür: kotanın son kaydı ND lisanslı ya da bozuk çıkmış.
+Önemsiz — eğitim için 39 ile 40 arasında fark yok.
+
+**Bozuk indirmeler:** toplam 7 mp3 indirme sırasında bozulmuştu (ffprobe
+açamıyor: *"Failed to find two consecutive MPEG audio frames"*). Silindiler.
+Yeni indirme yapılırsa `ffprobe` ile sağlama yapmakta fayda var.
 
 **Tür sayısı neden 178 (plan ~110 diyordu):** kalite filtresi düzeltilince
 (aşağıda) kullanılabilir A/B kayıt sayısı 7 kat arttı, en yüksek nadir-tür
@@ -834,7 +844,22 @@ XC metadata'sındaki `length` alanından süreyi okuyup 128 kbps varsaydım,
 
 **4. `xc_fetch` yalnızca mp3'e bakıyordu.**
 `xc_convert` mp3'ü silip WAV bıraktığı için, çevrilmiş türler "inmemiş"
-sayılıp baştan inecekti (bir turda 26 GB boşa). Artık WAV'a da bakıyor.
+sayılıp baştan inecekti (bir turda 26 GB boşa). Artık WAV'a da bakıyor,
+ayrıca kotası dolu türü hiç sorgulamıyor.
+
+**5. Uzun kayıtlar indirmeyi 9 kat yavaşlattı.**
+`len:5-120` filtresi 2 dakikalık yüksek bitrate kayıtlara izin veriyordu;
+ölçülen dosyalar 2,4 / 5,1 / **18,1 MB**. Hız 0,09 dosya/sn'ye düşmüştü
+(5,5 saatlik iş). Kademeye `len:5-60` basamağı eklendi → 0,83 dosya/sn.
+**Gerekçe:** BirdNET nasılsa 3 sn'lik dilimlere bölecek, 2 dakikalık kayda
+ihtiyaç yok.
+
+**6. Arka plan süreçleri bu ortamda yaşamıyor.**
+`nohup ... &` ile başlatılan işler shell kapanınca ölüyor; harness'ın
+`run_in_background`'u da uzun işlerde öldü. İkisinde de Python çıktıyı
+tamponladığı için **log 0 bayt kaldı ve ölüm sebebi kayboldu**. Çözüm:
+uzun işleri `timeout 500 python -u ...` ile **önplanda parça parça**
+çalıştırmak. `-u` olmadan ölüm sebebi bir daha görünmez.
 
 ### Boyut gerçekleri (ölçüldü, tahmin değil)
 
@@ -971,7 +996,7 @@ onlar için ayrıca düşürülebilir.
 ## 9f. Sonraki adımlar (ARCHITECTURE §6)
 
 1. ✅ Tür listesi — 178 tür
-2. ✅ Kayıt indirme + 24 kHz mono WAV dönüşümü
+2. ✅ Kayıt indirme + 24 kHz mono WAV dönüşümü — **7.111 dosya, doğrulandı**
 3. ⏳ **BirdNET segmentasyonu** — §9e
 4. ⏳ **Negatif madenciliği** — plan *"atlanırsa cihaz sahada kullanılamaz"*
    diyor: şehir gürültüsünü sürekli kuş sanar.

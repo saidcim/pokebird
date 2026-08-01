@@ -292,7 +292,13 @@ def komut_indir(key, tur_basina, sadece_ab, nd_dahil):
             #   2. Avrupa              az kayıtlı türlerde uzunluk filtresi
             #                          havuzu fazla daraltıyor (İbibik 37).
             #   3. dünya geneli        Avrupa'da kaydı olmayan türler için.
+            #   0. Avrupa + 5-60 sn    ÖNCE BU: BirdNET nasılsa 3 sn'lik
+            #                          dilimlere bölecek, 2 dakikalık kayda
+            #                          ihtiyaç yok. Ölçüldü — uzun kayıtlar
+            #                          18 MB'a çıkabiliyor ve indirmeyi
+            #                          8 kat yavaşlatıyor.
             sorgular = [
+                f'sp:"{sci}"{kalite} area:europe len:5-60',
                 f'sp:"{sci}"{kalite} area:europe len:5-120',
                 f'sp:"{sci}"{kalite} area:europe',
                 f'sp:"{sci}"{kalite}',
