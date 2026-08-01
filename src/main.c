@@ -660,12 +660,18 @@ static void cmd_mel_pipeline(void) {
     const uint32_t kalan = PB_FFT_SIZE - PB_MEL_HOP;
 
     uint32_t toplam = 0, acik = 0, pencere_sayisi = 0;
+    uint32_t kayip_kare = 0, saniye_kare = 0;
     absolute_time_t sonraki_rapor = make_timeout_time_ms(1000);
+
+    /* Bayat veriyle değil şimdiyle başla; döngü İÇİNDE flush YOK — hattın
+     * kesintisiz akması sürekli yakalamanın bütün amacı. */
+    pb_audio_stream_flush();
 
     while (getchar_timeout_us(0) < 0) {
         memmove(kare, kare + PB_MEL_HOP, kalan * sizeof(int16_t));
-        pb_capture_result_t cap = pb_audio_capture(kare + kalan, PB_MEL_HOP);
+        pb_capture_result_t cap = pb_audio_stream_read(kare + kalan, PB_MEL_HOP, 1000);
         if (cap.samples < PB_MEL_HOP) { printf("  yakalama eksik, cikiliyor\n"); break; }
+        if (cap.fifo_overrun) kayip_kare++;   /* halka sarıldı: süreklilik koptu */
 
         float power[PB_FFT_POWER_BINS];
         pb_fft_power(kare, power);
@@ -674,6 +680,7 @@ static void cmd_mel_pipeline(void) {
 
         pb_mel_push(kare);
         toplam++;
+        saniye_kare++;
 
         if (pb_mel_frame_count() >= PB_MEL_FRAMES &&
             pb_mel_frame_count() % PB_MEL_FRAMES == 0) {
@@ -682,20 +689,24 @@ static void cmd_mel_pipeline(void) {
         }
 
         if (time_reached(sonraki_rapor)) {
-            printf("  kare %5lu  kapi %%%3lu  bant %6.1f dB  taban %6.1f dB  "
-                   "aki %.3f  pencere %lu\n",
-                   (unsigned long)toplam,
+            /* kare/s kabul ölçütü: 62.5 (hop 384 @ 24 kHz). Eskiden 57'ydi —
+             * bloklayan yakalama kare kaçırıyordu (lastsession.md §9c). */
+            printf("  kare %5lu (%lu/s)  kapi %%%3lu  bant %6.1f dB  "
+                   "taban %6.1f dB  aki %.3f  pencere %lu  kayip %lu\n",
+                   (unsigned long)toplam, (unsigned long)saniye_kare,
                    (unsigned long)(toplam ? acik * 100 / toplam : 0),
                    (double)g.band_db, (double)g.floor_db, (double)g.flux,
-                   (unsigned long)pencere_sayisi);
+                   (unsigned long)pencere_sayisi, (unsigned long)kayip_kare);
+            saniye_kare = 0;
             sonraki_rapor = make_timeout_time_ms(1000);
         }
     }
 
-    printf("\n  toplam kare %lu, kapi acik %lu (%%%lu), tam pencere %lu\n\n",
+    printf("\n  toplam kare %lu, kapi acik %lu (%%%lu), tam pencere %lu, "
+           "kayip %lu\n\n",
            (unsigned long)toplam, (unsigned long)acik,
            (unsigned long)(toplam ? acik * 100 / toplam : 0),
-           (unsigned long)pencere_sayisi);
+           (unsigned long)pencere_sayisi, (unsigned long)kayip_kare);
 }
 
 /**
