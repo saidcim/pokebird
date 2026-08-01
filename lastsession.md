@@ -22,9 +22,11 @@ doğruladı:** kart doğru, spektrogram akıyor, ses çıkınca "SES ALGILANDI"
 yeşil yanıyor. Bu demo M2b'nin açık 6. maddesini de (spektrogram + LVGL
 bir arada) kapattı.
 
-**Sıradaki iş — M4:** Veri boru hattı + İstanbul tür listesi (PC tarafı).
-`species_istanbul.csv` + indirilmiş/segmentlenmiş veri kümesi
-(ARCHITECTURE §M4).
+**M4 BAŞLADI — tıkalı nokta var:** İstanbul tür havuzu (268 tür) ve aylık
+dağılımı GBIF'ten anahtarsız çekildi, `data/species_istanbul.csv` hazır (§9d).
+**Nihai ~110 türe daraltma ve ses kaydı indirme Xeno-canto API anahtarı
+bekliyor** — v2 kapandı, v3 anahtar istiyor. Kullanıcı anahtarı alıp
+verecek. Anahtar gelince tek komut: `python tools/xc_fetch.py --say`.
 
 ---
 
@@ -490,7 +492,7 @@ s_capture'ı kaldırmanın yolu açık.
 | M2a | Ekran sürücüsü + canlı spektrogram | ✅ (§9a) |
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
-| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **⬅ SIRADAKİ** |
+| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 havuz + aylık veri hazır; XC anahtarı bekliyor (§9d)** |
 | M5 | Model eğitimi + damıtma + INT8 | |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
@@ -731,6 +733,69 @@ doğruladı: kart + akan mel spektrogramı + "SES ALGILANDI" yeşil.
 
 ---
 
+## 9d. M4 — veri boru hattı (BURADA KALDIK)
+
+### Yapılanlar
+
+| Dosya | Ne |
+|---|---|
+| [`tools/species_list.py`](tools/species_list.py) | GBIF + eBird'den İstanbul tür havuzu, **anahtarsız** |
+| [`tools/xc_fetch.py`](tools/xc_fetch.py) | Xeno-canto sayım + indirme — **anahtar bekliyor** |
+| `data/species_istanbul.csv` | 268 tür havuzu + aylık dağılım (git'e giriyor) |
+
+### Veri kaynakları — hangisi anahtar istiyor
+
+| Kaynak | Anahtar | Not |
+|---|---|---|
+| GBIF occurrence | **hayır** | İstanbul'da 576.380 kuş kaydı, 389 tür |
+| eBird taksonomi (`ref/taxonomy`) | **hayır** | `locale=tr` ile **Türkçe adlar** geliyor |
+| eBird bölge listesi (`product/spplist`) | evet (403) | GBIF ile ikame edildi, gerek kalmadı |
+| Xeno-canto v2 | — | **KAPANDI** (404, "no longer available") |
+| Xeno-canto v3 | **evet** (401) | ücretsiz: xeno-canto.org/account |
+
+> **GADM tuzağı:** İstanbul = `TUR.40_1`. İlk denemede `TUR.35_1` kullanıldı,
+> o **Gümüşhane**; sorgu sessizce 3.325 kayıt döndürdü (doğrusu 576.380).
+> İl kodunu `api.gbif.org/v1/geocode/gadm/TUR/subdivisions` ile doğrulayın.
+
+### ⚠ ÖLÇÜLDÜ: GBIF kayıt sayısıyla 110'a inmeyin
+
+Havuz 268 tür, plan ~110 diyor. Eşiği yükseltmek **yanlış türleri eliyor**:
+eşik 912'de Guguk (839), Sarıasma (817), Orman Alaca Ağaçkakan (835), Bahçe
+Tırmaşıkkuşu (837) eleniyor — tam da sesle tanınacak orman ötücüleri; yerine
+Flamingo (912), Kuğu (838), martılar kalıyor.
+
+Sebep: GBIF kayıt sayısı *"kaç kişi görüp bildirdi"*yi ölçüyor, *"ötüyor mu"*yu
+değil. Su kuşları açıkta ve kolay görülüyor; orman ötücüleri duyuluyor ama
+görülmüyor. **Doğru daraltma ölçütü Xeno-canto ses kaydı sayısı** — hem sesle
+tanınabilirliği hem eğitim verisi mevcudiyetini aynı anda ölçer (plan §6 da
+bunu diyor).
+
+### Aylık dağılım doğrulandı
+
+268 türün tamamı için İstanbul aylık kayıt dağılımı çekildi (Aşama 3 mevsim
+önceliğinin ham verisi). Bilinen göç desenleriyle karşılaştırılarak sınandı:
+
+```
+          Oca Sub Mar Nis May Haz Tem Agu Eyl Eki Kas Ara
+   +@.          Guguk          yalnizca Mart-Mayis      ✓ yaz gocmeni
+  @@+..+:       Leylek         Mart-Nisan zirve         ✓ yaz gocmeni
+   =@+=-+.      Ebabil         Nisan-Agustos            ✓ yaz gocmeni
+*+@#=...-@%#    Kizilgerdan    kis yuksek, yaz bos      ✓ kis ziyaretcisi
+==#%@=-=**==    Serce          12 ay sabit              ✓ yerlesik
+```
+
+### Sıradaki adımlar (ARCHITECTURE §6)
+
+1. ✅ Tür havuzu — *bitti*
+2. ⏸ **Nihai ~110 tür** — `xc_fetch.py --say`, **anahtar bekliyor**
+3. ⏸ Kayıt indirme — `xc_fetch.py --indir`, anahtar bekliyor
+4. ⏳ BirdNET ile segmentasyon + yumuşak etiketleme
+5. ⏳ **Negatif madenciliği** (trafik, korna, ezan, vapur, konuşma) — plan
+   bunu "atlanırsa cihaz sahada kullanılamaz" diye işaretliyor
+6. ⏳ Veri artırma → M5 eğitim
+
+---
+
 ## 10. Depo düzeni ve git durumu
 
 ```
@@ -748,7 +813,10 @@ src/
   dsp/        fft(.c/.h), mel(.c/.h), gate(.c/.h)
   ui/         spectrogram(.c/.h), lv_conf.h, lv_port(.c/.h)
 test/       CMakeLists.txt, dsp_test.c      ← host tarafı DSP testleri
-tools/      capture_wav.py, mel_reference.py
+tools/      capture_wav.py, mel_reference.py,
+            species_list.py, xc_fetch.py    ← M4 veri boru hattı
+data/       species_istanbul.csv            ← tür havuzu (git'e giriyor)
+            cache/, xc/                     (ikisi de git'e girmiyor)
 third_party/  pico-sdk/, lvgl/              (ikisi de git'e girmiyor)
 rsvpnano/     kullanıcının kopyası           (git'e girmiyor)
 ```

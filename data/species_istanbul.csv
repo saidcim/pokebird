@@ -1,0 +1,390 @@
+ebird_kodu,bilimsel_ad,turkce_ad,ingilizce_ad,gbif_kayit,gbif_species_key,durum,gerekce,ay_01,ay_02,ay_03,ay_04,ay_05,ay_06,ay_07,ay_08,ay_09,ay_10,ay_11,ay_12
+hoocro1,Corvus cornix,Leş Kargası,Hooded Crow,25861,2482515,dahil,,2024,1787,2765,3193,3105,1473,1104,1275,2427,2755,1915,2037
+yelgul1,Larus michahellis,Gümüş Martı,Yellow-legged Gull,23292,9413670,dahil,,2162,1669,2369,2688,2726,1271,1066,1200,2128,2391,1770,1851
+eurjac,Coloeus monedula,Küçük Karga,Eurasian Jackdaw,17929,6100954,dahil,,1546,1339,1888,2133,2237,891,502,790,1717,2006,1380,1499
+eurmag1,Pica pica,Saksağan,Eurasian Magpie,17702,5229490,dahil,,1493,1282,1930,2202,2173,887,557,830,1657,1892,1349,1449
+houspa,Passer domesticus,Serçe,House Sparrow,17604,5231190,dahil,,1176,1076,1845,2255,2549,1259,940,1033,1553,1648,1087,1182
+gretit1,Parus major,Büyük Baştankara,Great Tit,15332,9705453,dahil,,1112,1059,1891,2138,1873,794,437,630,1448,1739,1005,1204
+rocpig,Columba livia,Kaya Güvercini,Rock Pigeon,14976,2495414,dahil,,997,953,1526,1768,1811,878,633,874,1494,1699,1144,1198
+comcha,Fringilla coelebs,İspinoz,Common Chaffinch,13995,2494422,dahil,,1567,1264,2003,1516,1076,585,291,296,712,1777,1332,1575
+eursta,Sturnus vulgaris,Sığırcık,European Starling,12451,9809229,dahil,,1157,949,1315,1622,1754,819,315,295,662,1261,1141,1160
+grecor,Phalacrocorax carbo,Karabatak,Great Cormorant,12130,2481890,dahil,,1427,1076,1369,1354,1207,607,459,567,882,1077,938,1166
+eurrob1,Erithacus rubecula,Kızılgerdan,European Robin,11553,2492462,dahil,,1152,915,1671,1241,700,334,175,244,656,1732,1410,1322
+graher1,Ardea cinerea,Gri Balıkçıl,Gray Heron,10560,9797180,dahil,,1016,784,1010,1300,1159,535,464,588,926,1027,801,949
+combuz1,Buteo buteo,Şahin,Common Buzzard,10435,2480537,dahil,,1100,850,1601,1367,625,59,28,156,965,1546,998,1139
+alpswi1,Tachymarptis melba,Ak Karınlı Ebabil,Alpine Swift,9988,2477411,dahil,,0,0,402,1889,2094,982,730,931,1694,1198,66,2
+eurbla,Turdus merula,Karatavuk,Eurasian Blackbird,9332,2490719,dahil,,746,750,1354,1352,1234,569,274,299,528,817,665,743
+bkhgul,Chroicocephalus ridibundus,Karabaş Martı,Black-headed Gull,9140,6065824,dahil,,1621,1232,1146,654,279,95,172,295,538,822,995,1291
+laudov1,Spilopelia senegalensis,Küçük Kumru,Laughing Dove,8611,6101223,dahil,,532,508,815,1077,1145,564,431,623,973,880,557,505
+eurjay1,Garrulus glandarius,Alakarga,Eurasian Jay,7510,5229493,dahil,,483,492,853,1043,891,409,198,257,734,977,563,609
+comchi1,Phylloscopus collybita,Çıvgın,Common Chiffchaff,7384,2493091,dahil,,442,411,1318,1400,358,137,55,121,438,1478,685,540
+rorpar,Psittacula krameri,Yeşil Papağan,Rose-ringed Parakeet,7357,2479226,elendi,kafesten kacmis papagan (yerlesik ama egzotik),,,,,,,,,,,,
+eurspa1,Accipiter nisus,Atmaca,Eurasian Sparrowhawk,7133,2480637,dahil,,440,320,958,1096,364,26,24,90,939,1477,833,565
+whiwag,Motacilla alba,Ak Kuyruksallayan,White Wagtail,6981,9687165,dahil,,565,426,1232,1288,383,151,119,155,525,1050,548,538
+blutit,Cyanistes caeruleus,Mavi Baştankara,Eurasian Blue Tit,6928,2487879,dahil,,711,692,839,616,383,267,172,229,654,1025,630,709
+barswa,Hirundo rustica,Kır Kırlangıcı,Barn Swallow,6848,9515886,dahil,,0,0,176,1723,1762,606,417,650,1153,356,4,0
+mallar3,Anas platyrhynchos,Yeşilbaş,Mallard,6730,9761484,dahil,,904,657,578,715,724,256,237,302,432,602,593,729
+pygcor2,Microcarbo pygmaeus,Küçük Karabatak,Pygmy Cormorant,6630,10095118,dahil,,950,757,780,607,391,140,185,309,475,618,613,805
+eucdov,Streptopelia decaocto,Kumru,Eurasian Collared-Dove,5977,2495696,dahil,,300,309,553,852,975,431,281,434,713,454,351,323
+winwre4,Troglodytes troglodytes,Çıtkuşu,Eurasian Wren,5976,5231438,dahil,,465,519,902,912,661,337,174,139,272,543,479,572
+whisto1,Ciconia ciconia,Leylek,White Stork,5840,2481912,dahil,,40,78,1457,1576,874,208,159,834,449,96,38,30
+eurcoo,Fulica atra,Sakarmeke,Eurasian Coot,5806,2474377,dahil,,1262,923,468,321,301,108,142,187,303,378,522,890
+wemhar1,Circus aeruginosus,Saz Delicesi,Western Marsh Harrier,5105,2480482,dahil,,444,322,679,983,648,133,115,241,482,363,308,386
+litgre1,Tachybaptus ruficollis,Küçük Batağan,Little Grebe,4587,2482048,dahil,,810,567,398,327,134,74,125,224,374,450,489,614
+commoo3,Gallinula chloropus,Sutavuğu,Eurasian Moorhen,4401,5228199,dahil,,296,221,546,808,617,231,187,250,283,376,246,339
+alepar2,Psittacula eupatria,İskender Papağanı,Alexandrine Parakeet,4250,5229055,dahil,,309,316,459,541,484,279,150,178,403,482,342,307
+lottit1,Aegithalos caudatus,Uzun Kuyruklu Baştankara,Long-tailed Tit,4188,2495000,dahil,,319,336,605,598,439,183,64,126,358,465,325,369
+rebshr1,Lanius collurio,Kızıl Sırtlı Örümcekkuşu,Red-backed Shrike,4152,7745240,dahil,,1,0,0,253,1757,318,181,652,798,175,16,0
+sarwar1,Curruca melanocephala,Maskeli Ötleğen,Sardinian Warbler,3963,9990095,dahil,,70,105,459,747,602,245,182,198,544,514,180,117
+eurkes,Falco tinnunculus,Kerkenez,Eurasian Kestrel,3951,9616058,dahil,,307,193,420,843,611,119,109,253,358,335,196,206
+,Aquila pomarina,,,3781,2480505,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+grcgre1,Podiceps cristatus,Bahri,Great Crested Grebe,3743,2482054,dahil,,801,642,458,382,264,91,101,137,181,153,158,374
+cetwar1,Cettia cetti,Kamışbülbülü,Cetti's Warbler,3717,2493012,dahil,,287,257,547,735,724,282,114,94,101,201,158,216
+shteag1,Circaetus gallicus,Yılan Kartalı,Short-toed Snake-Eagle,3450,2480666,dahil,,0,1,401,642,365,85,78,213,1154,499,9,2
+comrav,Corvus corax,Kuzgun,Common Raven,3423,2482492,dahil,,204,222,504,458,237,82,63,134,500,497,257,264
+eurgol,Carduelis carduelis,Saka,European Goldfinch,3398,2494686,dahil,,371,286,538,319,132,72,50,89,89,441,511,499
+comswi,Apus apus,Ebabil,Common Swift,3374,5228676,dahil,,0,0,42,444,959,563,400,341,519,104,2,0
+blackc1,Sylvia atricapilla,Kara Başlı Ötleğen,Eurasian Blackcap,3144,2492956,dahil,,19,68,227,787,811,242,51,77,463,351,32,15
+eubeat1,Merops apiaster,Arıkuşu,European Bee-eater,3081,2475443,dahil,,0,0,2,135,1137,244,133,354,1026,48,0,1
+syrwoo1,Dendrocopos syriacus,Alaca Ağaçkakan,Syrian Woodpecker,3050,2478031,dahil,,214,197,270,309,286,149,118,248,424,399,205,231
+comnig1,Luscinia megarhynchos,Bülbül,Common Nightingale,3020,7660710,dahil,,1,1,8,912,1307,511,131,87,57,2,2,0
+,Phalacrocorax aristotelis,,,2948,2481861,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+eurgre1,Chloris chloris,Florya,European Greenfinch,2915,5845582,dahil,,130,154,336,398,277,168,108,170,187,560,293,133
+litegr,Egretta garzetta,Küçük Ak Balıkçıl,Little Egret,2853,2480876,dahil,,95,57,63,529,512,148,188,338,438,229,103,153
+eaywag1,Motacilla flava,Sarı Kuyruksallayan,Western Yellow Wagtail,2844,9701857,dahil,,1,1,259,954,539,93,105,312,454,119,2,4
+greegr,Ardea alba,Büyük Ak Balıkçıl,Great Egret,2818,9752617,dahil,,536,309,300,346,114,40,40,32,150,257,279,415
+eurhob,Falco subbuteo,Delice Doğan,Eurasian Hobby,2793,2481035,dahil,,0,0,16,230,391,206,110,243,1169,423,2,2
+blasto1,Ciconia nigra,Kara Leylek,Black Stork,2770,2481909,dahil,,22,12,314,527,384,94,102,210,757,291,21,35
+comkin1,Alcedo atthis,Yalıçapkını,Common Kingfisher,2635,2475532,dahil,,248,142,192,347,66,36,23,144,370,432,308,327
+wlwwar,Phylloscopus trochilus,Söğütbülbülü,Willow Warbler,2515,2493052,dahil,,0,0,24,292,121,2,0,437,1180,459,0,0
+sonthr1,Turdus philomelos,Öter Ardıç,Song Thrush,2509,7901064,dahil,,86,203,710,443,172,113,53,26,58,416,146,82
+medgul1,Ichthyaetus melanocephalus,Akdeniz Martısı,Mediterranean Gull,2495,8151548,dahil,,244,261,296,359,158,53,104,124,161,211,251,273
+grywag,Motacilla cinerea,Dağ Kuyruksallayanı,Gray Wagtail,2453,2490310,dahil,,280,193,232,64,24,3,5,10,171,660,441,370
+norwhe,Oenanthe oenanthe,Kuyrukkakan,Northern Wheatear,2424,5231240,dahil,,0,0,272,646,550,195,93,239,309,116,3,0
+spofly1,Muscicapa striata,Benekli Sinekkapan,Spotted Flycatcher,2386,2492576,dahil,,0,0,1,167,522,18,7,357,1071,240,2,0
+meapip1,Anthus pratensis,Çayır İncirkuşu,Meadow Pipit,2263,2490266,dahil,,312,199,444,364,28,0,0,0,15,209,353,339
+palswi3,Apus pallidus,Boz Ebabil,Pallid Swift,2261,5228695,dahil,,0,0,1,225,482,258,178,257,436,401,23,0
+eaowar1,Iduna pallida,Ak Mukallit,Eastern Olivaceous Warbler,2256,5739361,dahil,,0,0,0,39,1024,711,225,209,46,0,0,1
+levshe1,Puffinus yelkouan,Yelkovan,Yelkouan Shearwater,2255,5229377,elendi,"acik denizde, karadan ses duyulmaz",,,,,,,,,,,,
+corbun1,Emberiza calandra,Tarla Çintesi,Corn Bunting,2189,7634625,dahil,,31,26,186,482,708,285,87,50,62,117,101,53
+blared1,Phoenicurus ochruros,Kara Kızılkuyruk,Black Redstart,2132,5739315,dahil,,181,140,642,257,49,18,5,4,43,308,265,220
+blakit1,Milvus migrans,Kara Çaylak,Black Kite,2026,5229167,dahil,,36,38,322,494,212,24,11,159,425,171,60,74
+euhbuz1,Pernis apivorus,Arı Şahini,European Honey-buzzard,1986,2480420,dahil,,0,0,5,159,773,73,25,327,558,65,1,0
+,Sylvia communis,,,1882,2492943,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+comhom1,Delichon urbicum,Ev Kırlangıcı,Western House-Martin,1846,2489214,dahil,,0,2,86,520,539,169,144,143,210,32,0,0
+leswoo1,Dryobates minor,Küçük Ağaçkakan,Lesser Spotted Woodpecker,1845,9015784,dahil,,127,124,224,277,159,99,72,130,211,214,102,105
+rook1,Corvus frugilegus,Ekin Kargası,Rook,1836,2482513,dahil,,352,277,128,30,6,9,3,6,30,244,365,386
+eursis,Spinus spinus,Kara Başlı İskete,Eurasian Siskin,1816,6092830,dahil,,122,95,145,172,16,11,1,1,11,561,446,235
+,Sylvia curruca,,,1801,2492960,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+booeag1,Hieraaetus pennatus,Küçük Kartal,Booted Eagle,1767,2480685,dahil,,1,1,147,490,219,41,11,45,716,94,0,2
+eargre,Podiceps nigricollis,Kara Boyunlu Batağan,Eared Grebe,1701,2482065,dahil,,456,382,286,94,11,0,1,3,19,45,113,291
+hoopoe,Upupa epops,İbibik,Common Hoopoe,1680,2498415,dahil,,0,0,275,786,156,52,31,195,162,22,0,0
+rebfly,Ficedula parva,Küçük Sinekkapan,Red-breasted Flycatcher,1671,2492605,dahil,,1,0,2,103,209,0,1,67,856,430,1,1
+eutdov,Streptopelia turtur,Üveyik,European Turtle-Dove,1647,2495708,dahil,,0,1,5,165,658,289,190,195,131,8,4,0
+commyn,Acridotheres tristis,Çiğdeci,Common Myna,1617,2489005,dahil,,104,123,147,171,170,134,138,86,187,143,107,107
+litowl1,Athene noctua,Kukumav,Little Owl,1583,2497266,dahil,,37,26,135,215,294,182,141,181,161,101,66,43
+trepip,Anthus trivialis,Ağaç İncirkuşu,Tree Pipit,1555,2490246,dahil,,0,0,42,601,74,1,0,60,568,207,1,0
+whinch1,Saxicola rubetra,Çayır Taşkuşu,Whinchat,1549,2492521,dahil,,4,0,17,514,312,0,1,198,412,84,4,3
+grnsan,Tringa ochropus,Yeşil Düdükçün,Green Sandpiper,1541,2481728,dahil,,94,45,305,282,54,71,100,178,133,111,68,100
+cirbun1,Emberiza cirlus,Bahçe Çintesi,Cirl Bunting,1518,7626513,dahil,,69,76,244,229,178,86,75,43,76,191,164,86
+woosan,Tringa glareola,Orman Düdükçünü,Wood Sandpiper,1453,2481713,dahil,,0,0,62,442,324,15,92,242,220,55,0,1
+perfal,Falco peregrinus,Gökdoğan,Peregrine Falcon,1389,2481047,dahil,,106,77,117,140,76,51,21,67,198,252,145,139
+tawpip1,Anthus campestris,Kır İncirkuşu,Tawny Pipit,1384,2490274,dahil,,0,0,26,404,486,164,90,117,89,7,0,0
+eurwar1,Acrocephalus scirpaceus,Saz Kamışçını,Common Reed Warbler,1361,2493118,dahil,,0,0,20,399,462,138,101,127,87,23,3,0
+comsni,Gallinago gallinago,Suçulluğu,Common Snipe,1352,2481819,dahil,,206,109,104,103,39,0,8,65,157,197,156,208
+,Aquila clanga,,,1310,2480509,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+gnwtea,Anas crecca,Çamurcun,Green-winged Teal,1296,8214667,dahil,,301,186,64,34,4,0,0,58,102,119,201,227
+stonec4,Saxicola rubicola,Taşkuşu,European Stonechat,1281,4408759,dahil,,68,45,337,178,133,45,18,25,42,196,107,87
+hawfin,Coccothraustes coccothraustes,Kocabaş,Hawfinch,1236,2494329,dahil,,89,114,197,173,102,80,77,28,59,176,69,72
+santer1,Thalasseus sandvicensis,Kara Gagalı Sumru,Sandwich Tern,1230,2481240,dahil,,146,100,90,177,88,17,15,70,141,116,139,131
+eugwoo2,Picus viridis,Yeşil Ağaçkakan,Eurasian Green Woodpecker,1225,2478523,dahil,,65,72,270,193,112,45,76,66,94,101,56,74
+norhar1,Circus cyaneus,Gökçe Delice,Hen Harrier,1186,2480487,dahil,,123,92,265,319,15,0,0,1,24,88,107,152
+ruff,Calidris pugnax,Döğüşkenkuş,Ruff,1161,8250742,dahil,,29,48,205,339,232,1,17,79,150,30,14,17
+firecr1,Regulus ignicapilla,Sürmeli Çalıkuşu,Common Firecrest,1158,6093527,dahil,,156,148,131,56,26,17,9,2,36,211,190,176
+compoc,Aythya ferina,Elmabaş Patka,Common Pochard,1141,2498255,dahil,,378,203,64,41,16,14,16,12,33,44,121,199
+comred2,Phoenicurus phoenicurus,Kızılkuyruk,Common Redstart,1113,5739317,dahil,,0,0,39,182,30,6,2,21,416,410,7,0
+goldcr1,Regulus regulus,Çalıkuşu,Goldcrest,1108,2484596,dahil,,163,176,160,18,5,2,0,2,7,128,222,225
+skylar,Alauda arvensis,Tarlakuşu,Eurasian Skylark,1092,8077224,dahil,,71,77,299,177,75,27,13,6,5,138,115,88
+comter,Sterna hirundo,Sumru,Common Tern,1088,9367409,dahil,,2,3,5,231,323,89,118,157,119,23,14,3
+comred1,Tringa totanus,Kızılbacak,Common Redshank,1071,2481714,dahil,,189,149,97,60,10,9,30,85,130,95,98,119
+grrwar1,Acrocephalus arundinaceus,Büyük Kamışçın,Great Reed Warbler,1027,2493128,dahil,,0,0,1,145,473,218,98,66,24,2,0,0
+spaspa1,Passer hispaniolensis,Söğüt Serçesi,Spanish Sparrow,1011,5231209,dahil,,4,8,8,269,409,128,71,35,42,20,13,3
+mewgul,Larus canus,Küçük Gümüş Martı,Common Gull,1007,7982160,dahil,,377,302,98,23,0,1,3,2,16,17,27,141
+gargan,Spatula querquedula,Çıkrıkçın,Garganey,974,9274012,dahil,,0,2,242,340,85,11,31,105,122,24,11,0
+misthr1,Turdus viscivorus,Ökse Ardıcı,Mistle Thrush,943,2490774,dahil,,24,42,203,131,21,7,2,1,17,310,146,39
+watpip1,Anthus spinoletta,Dağ İncirkuşu,Water Pipit,941,2490255,dahil,,121,77,233,80,3,0,0,0,2,83,153,189
+casgul2,Larus cachinnans,Hazar Martısı,Caspian Gull,931,2481181,dahil,,203,165,93,48,31,21,12,22,39,47,96,154
+lolbuz1,Buteo rufinus,Kızıl Şahin,Long-legged Buzzard,912,2480564,dahil,,65,66,128,85,65,17,19,51,169,119,54,74
+grefla3,Phoenicopterus roseus,Flamingo,Greater Flamingo,912,4352332,dahil,,177,97,55,45,35,12,18,63,77,101,116,116
+eurnut2,Sitta europaea,Sıvacı,Eurasian Nuthatch,902,2484916,dahil,,68,97,96,89,85,73,61,36,67,60,56,113
+dunlin,Calidris alpina,Kara Karınlı Kumkuşu,Dunlin,893,2481759,dahil,,228,135,46,38,32,0,8,39,124,67,67,109
+reebun,Emberiza schoeniclus,Bataklık Çintesi,Reed Bunting,882,2491557,dahil,,140,111,210,82,0,0,3,3,3,89,114,127
+comgre,Tringa nebularia,Yeşilbacak,Common Greenshank,875,2481726,dahil,,53,47,77,206,50,9,43,113,144,51,57,25
+woolar1,Lullula arborea,Orman Toygarı,Wood Lark,866,2490604,dahil,,42,40,187,152,119,50,8,4,14,99,92,58
+eutspa,Passer montanus,Ağaç Serçesi,Eurasian Tree Sparrow,859,5231198,dahil,,67,61,83,106,130,54,28,26,79,96,66,63
+watrai1,Rallus aquaticus,Sukılavuzu,Water Rail,855,2474831,dahil,,82,40,102,76,37,7,29,78,78,106,89,130
+squher1,Ardeola ralloides,Alaca Balıkçıl,Squacco Heron,842,2480906,dahil,,0,0,0,267,460,21,13,36,42,3,0,0
+comcuc,Cuculus canorus,Guguk,Common Cuckoo,839,5231918,dahil,,0,0,8,245,442,75,12,26,28,2,0,0
+mutswa,Cygnus olor,Kuğu,Mute Swan,838,2498343,dahil,,185,137,62,64,38,17,23,17,47,49,79,120
+shttre1,Certhia brachydactyla,Bahçe Tırmaşıkkuşu,Short-toed Treecreeper,837,7806848,dahil,,68,89,84,72,82,73,49,29,79,53,46,112
+grswoo,Dendrocopos major,Orman Alaca Ağaçkakanı,Great Spotted Woodpecker,835,2477968,dahil,,67,99,72,63,72,55,48,39,74,72,65,109
+tufduc,Aythya fuligula,Tepeli Patka,Tufted Duck,828,2498261,dahil,,351,182,34,8,0,0,3,6,5,12,72,155
+purher1,Ardea purpurea,Erguvani Balıkçıl,Purple Heron,821,2480934,dahil,,0,0,21,357,238,25,22,61,79,13,2,3
+eugori2,Oriolus oriolus,Sarıasma,Eurasian Golden Oriole,817,2488949,dahil,,0,0,0,52,372,108,57,72,151,4,0,0
+dunnoc1,Prunella modularis,Dağbülbülü,Dunnock,804,5231763,dahil,,122,67,155,27,1,1,0,0,4,84,146,196
+slbgul1,Chroicocephalus genei,İnce Gagalı Martı,Slender-billed Gull,791,6065810,dahil,,208,160,58,24,22,1,3,11,27,46,81,150
+cowpig1,Columba palumbus,Tahtalı,Common Wood-Pigeon,779,2495455,dahil,,60,55,127,51,12,10,1,4,31,317,48,63
+norsho,Spatula clypeata,Kaşıkgaga,Northern Shoveler,772,8332393,dahil,,150,130,63,55,16,2,1,20,29,53,119,134
+ortbun1,Emberiza hortulana,Kirazkuşu,Ortolan Bunting,760,2491482,dahil,,0,0,0,154,365,154,40,36,10,0,0,0
+colfly1,Ficedula albicollis,Halkalı Sinekkapan,Collared Flycatcher,758,2492601,dahil,,1,0,1,524,76,0,1,64,90,1,0,0
+legshr2,Lanius minor,Kara Alınlı Örümcekkuşu,Lesser Gray Shrike,752,2492854,dahil,,0,0,0,57,463,16,12,156,45,2,0,0
+brambl,Fringilla montifringilla,Dağ İspinozu,Brambling,727,2494441,dahil,,98,41,66,10,0,0,0,0,11,221,204,76
+gloibi,Plegadis falcinellus,Çeltikçi,Glossy Ibis,713,2480773,dahil,,0,0,13,299,172,23,84,93,26,3,0,0
+coatit2,Periparus ater,Çam Baştankarası,Coal Tit,709,2487871,dahil,,50,62,121,24,21,32,19,6,74,152,87,61
+comshe,Tadorna tadorna,Suna,Common Shelduck,691,2498009,dahil,,152,106,47,83,75,3,12,16,18,20,68,91
+litgul,Hydrocoloeus minutus,Küçük Martı,Little Gull,689,6065841,dahil,,105,76,46,38,49,3,20,74,122,70,24,61
+fieldf,Turdus pilaris,Tarla Ardıcı,Fieldfare,684,2490737,dahil,,89,105,257,72,1,0,0,0,0,29,86,45
+banswa,Riparia riparia,Kum Kırlangıcı,Bank Swallow,681,2489160,dahil,,0,0,2,165,278,16,16,50,137,17,0,0
+comsan,Actitis hypoleucos,Dere Düdükçünü,Common Sandpiper,670,2481800,dahil,,16,14,41,165,48,17,85,131,79,39,11,24
+eupfly1,Ficedula hypoleuca,Kara Sinekkapan,European Pied Flycatcher,660,2492606,dahil,,0,0,0,493,97,0,0,22,46,2,0,0
+blhbun1,Emberiza melanocephala,Kara Başlı Çinte,Black-headed Bunting,643,9613112,dahil,,0,0,0,21,412,129,49,24,7,0,0,0
+eurgri1,Gyps fulvus,Kızıl Akbaba,Eurasian Griffon,616,2480389,dahil,,0,0,57,27,29,1,2,1,120,377,1,1
+reffal1,Falco vespertinus,Aladoğan,Red-footed Falcon,596,2481062,dahil,,0,0,0,164,201,23,0,17,120,69,0,2
+bkwsti,Himantopus himantopus,Uzunbacak,Black-winged Stilt,591,5229126,dahil,,18,3,14,206,135,45,48,85,27,3,1,6
+rinphe1,Phasianus colchicus,Sülün,Ring-necked Pheasant,591,9752149,elendi,salinmis av kusu,,,,,,,,,,,,
+eurwig,Mareca penelope,Fiyu,Eurasian Wigeon,574,8000602,dahil,,166,119,22,21,7,0,1,0,6,31,82,119
+eurser1,Serinus serinus,Küçük İskete,European Serin,560,2494200,dahil,,92,75,56,44,31,18,16,13,11,62,65,76
+lbbgul,Larus fuscus,Kara Sırtlı Martı,Lesser Black-backed Gull,546,2481174,dahil,,30,28,72,100,27,15,15,24,83,52,58,42
+isawhe1,Oenanthe isabellina,Boz Kuyrukkakan,Isabelline Wheatear,545,5231245,dahil,,0,0,166,217,39,4,3,53,54,7,2,0
+norlap,Vanellus vanellus,Kızkuşu,Northern Lapwing,543,2480242,dahil,,65,72,34,52,35,15,7,16,44,38,74,91
+martit2,Poecile palustris,Kayın Baştankarası,Marsh Tit,533,2487843,dahil,,55,77,49,26,39,48,31,18,45,34,29,81
+redwin,Turdus iliacus,Kızıl Ardıç,Redwing,523,2490781,dahil,,87,116,101,11,0,0,0,0,0,29,84,95
+eurspo1,Platalea leucorodia,Kaşıkçı,Eurasian Spoonbill,519,2480801,dahil,,59,32,10,75,76,26,4,29,105,31,23,49
+whiter2,Chlidonias hybrida,Bıyıklı Sumru,Whiskered Tern,511,2481121,dahil,,3,0,1,96,150,26,30,63,96,41,2,3
+arcloo,Gavia arctica,Kara Gerdanlı Dalgıç,Arctic Loon,510,2481959,dahil,,94,124,81,77,27,0,0,5,4,3,29,66
+,Sylvia nisoria,,,510,2492955,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+eurrol1,Coracias garrulus,Gökkuzgun,European Roller,497,2475365,dahil,,0,0,0,94,318,24,15,27,18,0,0,0
+spored,Tringa erythropus,Kara Kızılbacak,Spotted Redshank,488,2481725,dahil,,84,61,52,76,8,0,2,14,65,29,40,57
+miswoo1,Dendrocoptes medius,Ortanca Ağaçkakan,Middle Spotted Woodpecker,484,8773033,dahil,,47,59,53,47,33,52,33,12,41,27,24,55
+gyfwoo1,Picus canus,Küçük Yeşil Ağaçkakan,Gray-headed Woodpecker,465,2478548,dahil,,41,53,55,67,55,36,28,14,17,21,22,56
+crelar1,Galerida cristata,Tepeli Toygar,Crested Lark,462,2490669,dahil,,31,30,48,55,71,27,24,28,37,53,30,28
+bkbplo,Pluvialis squatarola,Gümüş Yağmurcun,Black-bellied Plover,447,2480327,dahil,,113,85,27,13,26,0,0,29,33,34,27,60
+euptit1,Remiz pendulinus,Çulhakuşu,Eurasian Penduline-Tit,438,2487385,dahil,,13,19,69,56,44,37,44,39,30,43,20,23
+eurlin1,Linaria cannabina,Ketenkuşu,Eurasian Linnet,424,8104397,dahil,,23,21,175,53,4,12,1,1,11,61,40,21
+impeag1,Aquila heliaca,Şah Kartal,Imperial Eagle,421,2480500,dahil,,13,16,68,51,45,6,8,28,52,76,40,18
+thrnig1,Luscinia luscinia,Benekli Bülbül,Thrush Nightingale,416,2492542,dahil,,0,0,0,83,176,11,1,82,61,2,0,0
+litsti,Calidris minuta,Küçük Kumkuşu,Little Stint,411,2481749,dahil,,11,3,4,40,134,1,13,64,105,16,8,12
+gstlar1,Calandrella brachydactyla,Bozkır Toygarı,Greater Short-toed Lark,406,2490681,dahil,,0,0,31,268,85,5,1,8,7,1,0,0
+osprey,Pandion haliaetus,Balık Kartalı,Osprey,387,2480726,dahil,,0,1,43,168,28,0,0,2,79,59,7,0
+eursco1,Otus scops,İshakkuşu,Eurasian Scops-Owl,387,2497701,dahil,,0,0,2,77,98,72,70,52,15,1,0,0
+,Phylloscopus sibillatrix,,,387,8128385,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+norpin,Anas acuta,Kılkuyruk,Northern Pintail,375,2498112,dahil,,74,70,42,16,2,0,0,3,25,20,67,56
+eurnig1,Caprimulgus europaeus,Çobanaldatan,Eurasian Nightjar,363,8109681,dahil,,0,0,1,15,36,80,67,86,54,17,6,0
+corplo,Charadrius hiaticula,Halkalı Cılıbıt,Common Ringed Plover,361,9566659,dahil,,15,13,10,19,57,0,1,48,125,36,11,26
+sedwar1,Acrocephalus schoenobaenus,Kındıra Kamışçını,Sedge Warbler,360,2493129,dahil,,1,0,0,145,113,9,9,19,32,30,2,0
+retpip,Anthus cervinus,Kızıl Gerdanlı İncirkuşu,Red-throated Pipit,356,2490283,dahil,,0,0,3,166,51,0,0,0,47,75,13,1
+marwar3,Acrocephalus palustris,Çalı Kamışçını,Marsh Warbler,334,2493136,dahil,,0,0,0,9,219,57,11,28,9,1,0,0
+gadwal,Mareca strepera,Boz Ördek,Gadwall,333,9362027,dahil,,114,81,10,5,0,0,1,3,9,15,42,53
+bktgod,Limosa limosa,Çamurçulluğu,Black-tailed Godwit,331,2481685,dahil,,16,26,71,97,13,0,11,20,50,14,3,10
+whwter,Chlidonias leucopterus,Ak Kanatlı Sumru,White-winged Tern,327,2481120,dahil,,11,4,0,36,139,7,8,53,39,12,5,13
+wooshr1,Lanius senator,Kızıl Başlı Örümcekkuşu,Woodchat Shrike,322,2492867,dahil,,0,0,1,162,137,2,1,8,10,0,0,0
+ferduc,Aythya nyroca,Pasbaş Patka,Ferruginous Duck,317,2498259,dahil,,22,10,35,72,46,24,14,15,38,19,9,13
+gbbgul,Larus marinus,Büyük Kara Sırtlı Martı,Great Black-backed Gull,313,2481172,dahil,,87,70,13,0,1,1,0,0,9,37,41,54
+bcnher,Nycticorax nycticorax,Gece Balıkçılı,Black-crowned Night Heron,312,2480863,dahil,,0,0,7,53,50,35,47,72,45,3,0,0
+eurcur,Numenius arquata,Kervançulluğu,Eurasian Curlew,310,2481792,dahil,,97,53,35,34,0,0,1,5,16,12,18,39
+garwar1,Sylvia borin,Boz Ötleğen,Garden Warbler,309,2492942,dahil,,0,0,0,13,42,23,4,70,134,22,1,0
+eugplo,Pluvialis apricaria,Altın Yağmurcun,European Golden-Plover,265,2480332,dahil,,17,23,88,10,0,0,5,0,6,12,56,48
+grwpel1,Pelecanus onocrotalus,Ak Pelikan,Great White Pelican,265,2480350,dahil,,14,8,14,23,44,21,4,29,42,23,11,32
+palhar1,Circus macrourus,Bozkır Delicesi,Pallid Harrier,263,2480491,dahil,,1,1,78,139,17,0,0,2,12,12,0,1
+gbhgul2,Ichthyaetus ichthyaetus,Büyük Karabaş Martı,Pallas's Gull,261,8028588,dahil,,114,88,11,2,0,0,0,0,0,0,12,34
+monhar1,Circus pygargus,Çayır Delicesi,Montagu's Harrier,259,2480495,dahil,,0,0,15,133,44,1,2,24,33,7,0,0
+comcra,Grus grus,Turna,Common Crane,235,2474950,dahil,,0,28,146,29,2,0,0,1,6,19,2,2
+marsan,Tringa stagnatilis,Bataklık Düdükçünü,Marsh Sandpiper,235,2481719,dahil,,0,0,33,122,14,0,12,29,23,0,0,2
+cursan,Calidris ferruginea,Kızıl Kumkuşu,Curlew Sandpiper,226,2481741,dahil,,0,0,1,16,116,0,12,24,55,2,0,0
+armgul1,Larus armenicus,Van Gölü Martısı,Armenian Gull,225,2481171,dahil,,81,54,9,0,0,0,0,1,1,10,31,38
+citwag,Motacilla citreola,Sarı Başlı Kuyruksallayan,Citrine Wagtail,210,2490307,dahil,,0,0,46,138,22,1,0,1,2,0,0,0
+,Porzana parva,,,208,2474627,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+semfly1,Ficedula semitorquata,Alaca Sinekkapan,Semicollared Flycatcher,203,2492608,dahil,,0,0,0,124,50,6,3,10,9,1,0,0
+loeowl,Asio otus,Kulaklı Orman Baykuşu,Long-eared Owl,202,2497306,dahil,,31,27,10,1,9,51,24,21,10,5,5,8
+redkit1,Milvus milvus,Kızıl Çaylak,Red Kite,200,5229168,dahil,,23,17,13,1,0,0,0,1,7,50,40,48
+leskes1,Falco naumanni,Küçük Kerkenez,Lesser Kestrel,197,9584698,dahil,,0,0,8,36,43,35,17,23,25,10,0,0
+gragoo,Anser anser,Boz Kaz,Graylag Goose,192,2498036,dahil,,23,18,20,19,7,14,7,4,18,16,23,23
+stodov1,Columba oenas,Gökçe Güvercin,Stock Dove,191,2495471,dahil,,7,9,36,10,0,0,0,2,0,100,8,19
+egyvul1,Neophron percnopterus,Küçük Akbaba,Egyptian Vulture,190,2480696,dahil,,0,0,44,30,11,0,0,6,94,5,0,0
+tawowl1,Strix aluco,Alaca Baykuş,Tawny Owl,190,9282206,dahil,,4,6,11,21,16,39,23,18,17,12,11,11
+eurwry,Jynx torquilla,Boyunçeviren,Eurasian Wryneck,186,8012314,dahil,,1,0,3,49,6,2,0,42,61,21,1,0
+gubter2,Gelochelidon nilotica,Gülen Sumru,Gull-billed Tern,180,2481263,dahil,,0,0,3,78,29,3,10,28,28,0,1,0
+recpoc,Netta rufina,Macar Ördeği,Red-crested Pochard,176,2498180,dahil,,66,35,6,10,1,0,1,0,3,0,21,33
+smew,Mergellus albellus,Sütlabi,Smew,176,2498285,dahil,,74,77,3,0,0,0,0,0,0,0,2,20
+whoswa,Cygnus cygnus,Ötücü Kuğu,Whooper Swan,176,2498347,dahil,,66,27,15,1,0,0,0,0,0,3,18,46
+yellow2,Emberiza citrinella,Sarı Çinte,Yellowhammer,162,2491534,dahil,,9,6,17,3,1,0,0,1,4,57,50,14
+rudshe,Tadorna ferruginea,Angıt,Ruddy Shelduck,162,2498015,dahil,,12,10,17,12,9,0,6,7,27,20,17,25
+webowl1,Tyto alba,Peçeli Baykuş,Western Barn Owl,160,2497921,dahil,,3,3,5,1,1,7,36,74,12,10,5,3
+whhduc1,Oxyura leucocephala,Dikkuyruk,White-headed Duck,159,2498302,dahil,,53,15,1,0,0,0,0,0,1,11,31,47
+blkter,Chlidonias niger,Kara Sumru,Black Tern,157,2481119,dahil,,0,0,0,34,87,2,3,7,24,0,0,0
+rossta2,Pastor roseus,Alasığırcık,Rosy Starling,157,5845386,dahil,,0,0,0,1,133,12,0,5,4,2,0,0
+comqua1,Coturnix coturnix,Bıldırcın,Common Quail,154,2474156,dahil,,0,0,0,24,41,5,2,6,48,17,4,7
+whteag,Haliaeetus albicilla,Ak Kuyruklu Kartal,White-tailed Eagle,148,2480449,dahil,,15,13,20,11,2,1,2,4,29,24,8,19
+rebmer,Mergus serrator,Tarakdiş,Red-breasted Merganser,148,2498375,dahil,,44,48,11,2,0,1,0,0,0,2,18,22
+grebit1,Botaurus stellaris,Balaban,Eurasian Bittern,136,2480910,dahil,,25,8,18,47,3,1,0,0,0,8,6,19
+comgol,Bucephala clangula,Altıngöz,Common Goldeneye,134,2498326,dahil,,56,45,3,0,0,0,0,0,0,0,0,30
+merlin,Falco columbarius,Boz Doğan,Merlin,134,9813242,dahil,,12,10,8,32,3,0,0,0,13,13,22,21
+eurwoo,Scolopax rusticola,Çulluk,Eurasian Woodcock,132,2481700,dahil,,29,18,3,0,0,0,0,0,1,6,52,23
+,Charadrius alexandrinus,,,130,2480311,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+masshr1,Lanius nubicus,Maskeli Örümcekkuşu,Masked Shrike,119,2492855,dahil,,0,0,0,5,79,5,5,1,17,6,1,0
+pieavo1,Recurvirostra avosetta,Kılıçgaga,Pied Avocet,117,2480259,dahil,,10,8,13,23,17,0,0,5,7,2,2,30
+spocra1,Porzana porzana,Benekli Suyelvesi,Spotted Crake,115,2474621,dahil,,0,0,56,29,4,0,0,4,17,5,0,0
+callar1,Melanocorypha calandra,Boğmaklı Toygar,Calandra Lark,113,2490613,dahil,,2,4,41,33,6,4,1,0,0,9,3,10
+colpra,Glareola pratincola,Bataklıkkırlangıcı,Collared Pratincole,110,2480757,dahil,,0,0,0,24,38,6,18,14,10,0,0,0
+sander,Calidris alba,Ak Kumkuşu,Sanderling,108,2481748,dahil,,22,19,16,0,2,0,0,5,10,13,10,11
+whebul1,Pycnonotus leucotis,Ak Yanaklı Arapbülbülü,White-eared Bulbul,107,2486132,dahil,,11,4,8,14,3,4,13,11,8,16,6,9
+gwfgoo,Anser albifrons,Sakarca,Greater White-fronted Goose,106,2498017,dahil,,42,28,2,3,0,0,0,0,1,0,11,19
+tunswa,Cygnus columbianus,Küçük Kuğu,Tundra Swan,105,2498338,dahil,,28,7,0,0,0,0,0,0,0,0,26,44
+caster1,Hydroprogne caspia,Hazar Sumrusu,Caspian Tern,102,2481236,dahil,,0,0,0,37,3,0,7,20,35,0,0,0
+steeag1,Aquila nipalensis,Bozkır Kartalı,Steppe Eagle,101,2480513,dahil,,0,0,16,41,16,0,0,0,24,3,0,1
+rinouz1,Turdus torquatus,Boğmaklı Ardıç,Ring Ouzel,99,7865305,dahil,,0,0,36,17,0,0,0,0,14,32,0,0
+bearee1,Panurus biarmicus,Bıyıklı Baştankara,Bearded Reedling,97,2493367,dahil,,3,0,0,12,0,2,22,33,6,3,1,15
+norshr1,Lanius excubitor,Büyük Örümcekkuşu,Great Gray Shrike,92,9444556,dahil,,2,2,15,1,0,0,0,0,0,36,15,21
+brbsan,Calidris falcinellus,Sürmeli Kumkuşu,Broad-billed Sandpiper,91,7537888,dahil,,0,0,0,0,29,0,3,34,24,1,0,0
+blueth,Luscinia svecica,Mavigerdan,Bluethroat,88,4408732,dahil,,0,0,44,30,0,0,0,1,4,9,0,0
+savwar1,Locustella luscinioides,Bataklık Kamışçını,Savi's Warbler,85,2493551,dahil,,0,0,8,51,11,0,2,1,12,0,0,0
+,Charadrius morinellus,,,84,2480281,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+ictwar1,Hippolais icterina,Sarı Mukallit,Icterine Warbler,83,2493220,dahil,,0,0,1,12,46,1,0,13,10,0,0,0
+litter1,Sternula albifrons,Küçük Sumru,Little Tern,75,5789279,dahil,,0,0,0,12,29,8,9,5,10,2,0,0
+palwar5,Phylloscopus proregulus,Çalıkuşu Çıvgını,Pallas's Leaf Warbler,74,2493090,dahil,,21,0,5,3,0,0,0,0,0,0,28,17
+temsti,Calidris temminckii,Sarı Bacaklı Kumkuşu,Temminck's Stint,72,2481740,dahil,,0,0,0,18,27,0,1,10,14,1,1,0
+bkewhe1,Oenanthe hispanica,Batılı Kara Kulaklı Kuyrukkakan,Western Black-eared Wheatear,70,5231235,dahil,,0,0,2,41,12,1,1,2,10,1,0,0
+euhgul1,Larus argentatus,Kuzey Gümüş Martısı,European Herring Gull,69,2481139,dahil,,6,22,2,0,0,0,0,6,17,0,2,14
+redkno,Calidris canutus,Büyük Kumkuşu,Red Knot,69,2481765,dahil,,31,21,6,0,0,0,0,1,2,1,0,7
+humwar1,Phylloscopus humei,Ak Kaşlı Çıvgın,Hume's Warbler,68,7341522,dahil,,0,0,59,8,0,0,0,0,0,0,0,1
+rolhaw,Buteo lagopus,Paçalı Şahin,Rough-legged Hawk,67,2480524,dahil,,10,13,12,8,0,0,0,0,0,1,12,11
+comros,Carpodacus erythrinus,Çütre,Common Rosefinch,65,2494459,dahil,,0,0,0,0,18,42,4,0,1,0,0,0
+deswhe1,Oenanthe deserti,Çöl Kuyrukkakanı,Desert Wheatear,64,5231244,dahil,,26,0,0,0,0,0,0,0,0,0,2,36
+,Bubulcus ibis,,,63,2480830,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+rudtur,Arenaria interpres,Taşçeviren,Ruddy Turnstone,63,2481776,dahil,,0,0,1,5,25,0,0,3,23,4,0,2
+euroys1,Haematopus ostralegus,Poyrazkuşu,Eurasian Oystercatcher,63,7788295,dahil,,1,0,12,7,19,1,6,7,10,0,0,0
+redcro,Loxia curvirostra,Çaprazgaga,Red Crossbill,62,9629160,dahil,,0,2,6,1,1,0,2,0,33,13,4,0
+parjae,Stercorarius parasiticus,Korsanmartı,Parasitic Jaeger,59,2481621,dahil,,7,9,6,7,3,0,0,2,5,2,7,11
+rebgoo1,Branta ruficollis,Sibirya Kazı,Red-breasted Goose,55,5232451,dahil,,19,15,0,0,0,0,0,0,0,0,21,0
+horgre,Podiceps auritus,Kulaklı Batağan,Horned Grebe,51,2482059,dahil,,22,3,7,2,0,0,0,0,0,0,0,17
+cinvul1,Aegypius monachus,Kara Akbaba,Cinereous Vulture,50,5229165,dahil,,24,0,1,10,1,1,0,0,2,11,0,0
+sheowl,Asio flammeus,Kır Baykuşu,Short-eared Owl,49,2497295,dahil,,6,2,3,0,2,0,0,0,5,24,6,1
+elefal1,Falco eleonorae,Ada Doğanı,Eleonora's Falcon,47,2481037,dahil,,0,0,0,0,8,8,2,16,11,2,0,0
+jacsni,Lymnocryptes minimus,Küçük Suçulluğu,Jack Snipe,47,2481835,dahil,,11,1,6,4,7,0,0,0,0,6,3,9
+bkskit1,Elanus caeruleus,Ak Çaylak,Black-winged Kite,46,2480372,dahil,,0,0,0,0,0,0,28,18,0,0,0,0
+chukar,Alectoris chukar,Kınalı Keklik,Chukar,44,2474029,dahil,,2,4,4,4,3,1,0,5,5,5,2,3
+mouwar1,Acrocephalus melanopogon,Bıyıklı Kamışçın,Moustached Warbler,44,2493124,dahil,,1,5,2,3,6,0,0,0,0,6,0,21
+comeid,Somateria mollissima,Pufla,Common Eider,41,2498352,dahil,,3,22,0,5,0,0,0,0,4,0,3,4
+whimbr5,Numenius phaeopus,Sürmeli Kervançulluğu,Eurasian Whimbrel,40,2481784,dahil,,0,0,9,24,1,0,0,3,3,0,0,0
+rengre,Podiceps grisegena,Kızıl Boyunlu Batağan,Red-necked Grebe,35,2482051,dahil,,5,12,8,0,0,0,0,1,5,0,0,4
+,Sylvia crassirostris,,,35,7342065,elendi,eBird taksonomisinde eslesmedi,,,,,,,,,,,,
+litbus1,Tetrax tetrax,Mezgeldek,Little Bustard,33,5228228,dahil,,1,0,0,0,0,0,0,0,0,0,6,26
+sibsto1,Saxicola maurus,Sibirya Taşkuşu,Siberian Stonechat,33,5846290,dahil,,0,0,5,4,1,0,0,0,0,23,0,0
+bklkit,Rissa tridactyla,Kara Ayaklı Martı,Black-legged Kittiwake,32,2481205,dahil,,3,4,1,1,0,0,0,0,0,1,10,12
+batgod,Limosa lapponica,Kıyı Çamurçulluğu,Bar-tailed Godwit,31,2481681,dahil,,1,1,0,7,3,0,0,0,9,9,0,1
+eutkne1,Burhinus oedicnemus,Kocagöz,Eurasian Thick-knee,29,2482100,elendi,Istanbul'da yalnizca 29 kayit (esik 30),,,,,,,,,,,,
+laplon,Calcarius lapponicus,Mahmuzlu Çinte,Lapland Longspur,29,2491678,elendi,Istanbul'da yalnizca 29 kayit (esik 30),,,,,,,,,,,,
+gresni1,Gallinago media,Büyük Suçulluğu,Great Snipe,28,2481831,elendi,Istanbul'da yalnizca 28 kayit (esik 30),,,,,,,,,,,,
+eurwar2,Locustella fluviatilis,Ağaç Kamışçını,River Warbler,27,2493549,elendi,Istanbul'da yalnizca 27 kayit (esik 30),,,,,,,,,,,,
+corcra,Crex crex,Bıldırcınkılavuzu,Corn Crake,27,4408498,elendi,Istanbul'da yalnizca 27 kayit (esik 30),,,,,,,,,,,,
+gresca,Aythya marila,Karabaş Patka,Greater Scaup,26,2498265,elendi,Istanbul'da yalnizca 26 kayit (esik 30),,,,,,,,,,,,
+easwar1,Curruca cantillans,Bıyıklı Ötleğen,Eastern Subalpine Warbler,26,9317615,elendi,Istanbul'da yalnizca 26 kayit (esik 30),,,,,,,,,,,,
+,Sylvia melanocephala,,,24,2492962,elendi,Istanbul'da yalnizca 24 kayit (esik 30),,,,,,,,,,,,
+manduc,Aix galericulata,Mandarin Ördeği,Mandarin Duck,23,2498388,elendi,Istanbul'da yalnizca 23 kayit (esik 30),,,,,,,,,,,,
+grscuc1,Clamator glandarius,Tepeli Guguk,Great Spotted Cuckoo,22,2496464,elendi,Istanbul'da yalnizca 22 kayit (esik 30),,,,,,,,,,,,
+,Accipiter brevipes,,,21,2480578,elendi,Istanbul'da yalnizca 21 kayit (esik 30),,,,,,,,,,,,
+retloo,Gavia stellata,Kızıl Gerdanlı Dalgıç,Red-throated Loon,21,2481958,elendi,Istanbul'da yalnizca 21 kayit (esik 30),,,,,,,,,,,,
+spwlap1,Vanellus spinosus,Mahmuzlu Kızkuşu,Spur-winged Lapwing,21,5229142,elendi,Istanbul'da yalnizca 21 kayit (esik 30),,,,,,,,,,,,
+musduc,Cairina moschata,Moskof Ördeği,Muscovy Duck,21,9751099,elendi,evcil misk ordegi,,,,,,,,,,,,
+yebwar3,Phylloscopus inornatus,Sarı Kaşlı Çıvgın,Yellow-browed Warbler,20,2493095,elendi,Istanbul'da yalnizca 20 kayit (esik 30),,,,,,,,,,,,
+commer,Mergus merganser,Büyük Tarakdiş,Common Merganser,20,9537647,elendi,Istanbul'da yalnizca 20 kayit (esik 30),,,,,,,,,,,,
+goleag,Aquila chrysaetos,Kaya Kartalı,Golden Eagle,17,2480506,elendi,Istanbul'da yalnizca 17 kayit (esik 30),,,,,,,,,,,,
+wooduc,Aix sponsa,Orman Ördeği,Wood Duck,17,2498387,elendi,Istanbul'da yalnizca 17 kayit (esik 30),,,,,,,,,,,,
+batlar1,Ammomanes cinctura,Küçük Çöl Toygarı,Bar-tailed Lark,17,7340809,elendi,Istanbul'da yalnizca 17 kayit (esik 30),,,,,,,,,,,,
+dalpel1,Pelecanus crispus,Tepeli Pelikan,Dalmatian Pelican,16,2480353,elendi,Istanbul'da yalnizca 16 kayit (esik 30),,,,,,,,,,,,
+carcro1,Corvus corone,Kara Leş Kargası,Carrion Crow,16,9409796,elendi,Istanbul'da yalnizca 16 kayit (esik 30),,,,,,,,,,,,
+swagoo1,Anser cygnoides,Çin Kazı,Swan Goose,15,2498034,elendi,Istanbul'da yalnizca 15 kayit (esik 30),,,,,,,,,,,,
+blksco1,Melanitta nigra,Kara Ördek,Common Scoter,15,2498247,elendi,Istanbul'da yalnizca 15 kayit (esik 30),,,,,,,,,,,,
+redjun,Gallus gallus,Yaban Tavuğu,Red Junglefowl,15,9326020,elendi,evcil tavuk,,,,,,,,,,,,
+pomjae,Stercorarius pomarinus,Küt Kuyruklu Korsanmartı,Pomarine Jaeger,14,2481609,elendi,Istanbul'da yalnizca 14 kayit (esik 30),,,,,,,,,,,,
+bohwax,Bombycilla garrulus,İpekkuyruk,Bohemian Waxwing,13,2484605,elendi,Istanbul'da yalnizca 13 kayit (esik 30),,,,,,,,,,,,
+oltwar1,Hippolais olivetorum,Zeytin Mukalliti,Olive-tree Warbler,13,2493219,elendi,Istanbul'da yalnizca 13 kayit (esik 30),,,,,,,,,,,,
+lotduc,Clangula hyemalis,Telkuyruk,Long-tailed Duck,12,2498273,elendi,Istanbul'da yalnizca 12 kayit (esik 30),,,,,,,,,,,,
+eurtre1,Certhia familiaris,Orman Tırmaşıkkuşu,Eurasian Treecreeper,11,2487603,elendi,Istanbul'da yalnizca 11 kayit (esik 30),,,,,,,,,,,,
+piewhe1,Oenanthe pleschanka,Alaca Kuyrukkakan,Pied Wheatear,11,5231233,elendi,Istanbul'da yalnizca 11 kayit (esik 30),,,,,,,,,,,,
+junmyn1,Acridotheres fuscus,Kurşuni Çiğdeci,Jungle Myna,10,2489006,elendi,Istanbul'da yalnizca 10 kayit (esik 30),,,,,,,,,,,,
+eabwar1,Phylloscopus orientalis,Boz Çıvgın,Eastern Bonelli's Warbler,10,4408827,elendi,Istanbul'da yalnizca 10 kayit (esik 30),,,,,,,,,,,,
+whbwoo1,Dendrocopos leucotos,Ak Sırtlı Ağaçkakan,White-backed Woodpecker,8,2477927,elendi,Istanbul'da yalnizca 8 kayit (esik 30),,,,,,,,,,,,
+budger,Melopsittacus undulatus,Muhabbetkuşu,Budgerigar,8,2479798,elendi,"muhabbet kusu, kafes kusu",,,,,,,,,,,,
+eurnut3,Nucifraga caryocatactes,Göknar Kargası,Northern Nutcracker,8,2482613,elendi,Istanbul'da yalnizca 8 kayit (esik 30),,,,,,,,,,,,
+egygoo,Alopochen aegyptiaca,Nil Kazı,Egyptian Goose,8,2498252,elendi,Istanbul'da yalnizca 8 kayit (esik 30),,,,,,,,,,,,
+grecou1,Centropus sinensis,Büyük Kukal,Greater Coucal,8,5232005,elendi,Istanbul'da yalnizca 8 kayit (esik 30),,,,,,,,,,,,
+helgui,Numida meleagris,Beçtavuğu,Helmeted Guineafowl,7,2473341,elendi,"beckusu, evcil",,,,,,,,,,,,
+snobun,Plectrophenax nivalis,Alaca Çinte,Snow Bunting,7,2491719,elendi,Istanbul'da yalnizca 7 kayit (esik 30),,,,,,,,,,,,
+whwsco3,Melanitta fusca,Kadife Ördek,Velvet Scoter,7,2498238,elendi,Istanbul'da yalnizca 7 kayit (esik 30),,,,,,,,,,,,
+lammer1,Gypaetus barbatus,Sakallı Akbaba,Bearded Vulture,6,2480649,elendi,Istanbul'da yalnizca 6 kayit (esik 30),,,,,,,,,,,,
+wallcr1,Tichodroma muraria,Duvar Tırmaşıkkuşu,Wallcreeper,6,2484918,elendi,Istanbul'da yalnizca 6 kayit (esik 30),,,,,,,,,,,,
+renpha,Phalaropus lobatus,Denizdüdükçünü,Red-necked Phalarope,6,5739290,elendi,Istanbul'da yalnizca 6 kayit (esik 30),,,,,,,,,,,,
+eueowl1,Bubo bubo,Puhu,Eurasian Eagle-Owl,6,5959092,elendi,Istanbul'da yalnizca 6 kayit (esik 30),,,,,,,,,,,,
+,Anthropoides virgo,,,5,2474936,elendi,Istanbul'da yalnizca 5 kayit (esik 30),,,,,,,,,,,,
+rtrthr1,Monticola saxatilis,Taşkızılı,Rufous-tailed Rock-Thrush,5,2490956,elendi,Istanbul'da yalnizca 5 kayit (esik 30),,,,,,,,,,,,
+pinbun,Emberiza leucocephalos,Ak Başlı Çinte,Pine Bunting,5,2491472,elendi,Istanbul'da yalnizca 5 kayit (esik 30),,,,,,,,,,,,
+blawoo1,Dryocopus martius,Kara Ağaçkakan,Black Woodpecker,4,2477872,elendi,Istanbul'da yalnizca 4 kayit (esik 30),,,,,,,,,,,,
+pagplo,Pluvialis fulva,Küçük Altın Yağmurcun,Pacific Golden-Plover,4,2480331,elendi,Istanbul'da yalnizca 4 kayit (esik 30),,,,,,,,,,,,
+somtit3,Poecile lugubris,Ak Yanaklı Baştankara,Sombre Tit,4,2487857,elendi,Istanbul'da yalnizca 4 kayit (esik 30),,,,,,,,,,,,
+,Erythropygia galactotes,,,4,5788860,elendi,Istanbul'da yalnizca 4 kayit (esik 30),,,,,,,,,,,,
+,Sylvia ruppeli,,,4,6100917,elendi,Istanbul'da yalnizca 4 kayit (esik 30),,,,,,,,,,,,
+,Charadrius dubius,,,4,7937336,elendi,Istanbul'da yalnizca 4 kayit (esik 30),,,,,,,,,,,,
+cockat,Nymphicus hollandicus,Sultan Papağanı,Cockatiel,3,2479977,elendi,"sultan papagani, kafes kusu",,,,,,,,,,,,
+batele1,Terathopius ecaudatus,Cambaz Kartal,Bateleur,3,2480377,elendi,Istanbul'da yalnizca 3 kayit (esik 30),,,,,,,,,,,,
+slbcur,Numenius tenuirostris,İnce Gagalı Kervançulluğu,Slender-billed Curlew,3,2481789,elendi,Istanbul'da yalnizca 3 kayit (esik 30),,,,,,,,,,,,
+rocbun1,Emberiza cia,Kaya Çintesi,Rock Bunting,3,2491498,elendi,Istanbul'da yalnizca 3 kayit (esik 30),,,,,,,,,,,,
+blkfra,Francolinus francolinus,Turaç,Black Francolin,3,5227919,elendi,Istanbul'da yalnizca 3 kayit (esik 30),,,,,,,,,,,,
+boneag2,Aquila fasciata,Tavşancıl,Bonelli's Eagle,3,5844449,elendi,Istanbul'da yalnizca 3 kayit (esik 30),,,,,,,,,,,,
+compea,Pavo cristatus,Tavuskuşu,Indian Peafowl,3,9451184,elendi,"tavus kusu, evcil",,,,,,,,,,,,
+,Ixobrychus minutus,,,2,2480850,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+scoshe1,Calonectris diomedea,Boz Yelkovan,Scopoli's Shearwater,2,2481521,elendi,"acik denizde, karadan ses duyulmaz",,,,,,,,,,,,
+tersan,Xenus cinereus,Terek Düdükçünü,Terek Sandpiper,2,2481703,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+bimlar1,Melanocorypha bimaculata,Küçük Boğmaklı Toygar,Bimaculated Lark,2,2490609,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+,Sylvia nana,,,2,2492963,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+eurbul,Pyrrhula pyrrhula,Şakrak,Eurasian Bullfinch,2,2494543,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+whcpin,Anas bahamensis,Ak Gerdanlı Kılkuyruk,White-cheeked Pintail,2,2498090,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+blkswa,Cygnus atratus,Kara Kuğu,Black Swan,2,2498344,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+eurcrm1,Ptyonoprogne rupestris,Kaya Kırlangıcı,Eurasian Crag-Martin,2,4408796,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+plhpar1,Psittacula cyanocephala,Erik Başlı Yeşil Papağan,Plum-headed Parakeet,2,5229044,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+cangoo,Branta canadensis,Kanada Kazı,Canada Goose,2,5232437,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+bargoo,Branta leucopsis,Ak Yanaklı Kaz,Barnacle Goose,2,5232464,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+boowar1,Iduna caligata,Küçük Mukallit,Booted Warbler,2,5739359,elendi,Istanbul'da yalnizca 2 kayit (esik 30),,,,,,,,,,,,
+blagro1,Lyrurus tetrix,Orman Horozu,Black Grouse,1,2473682,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+rocpar2,Alectoris graeca,Kaya Kekliği,Rock Partridge,1,2474055,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+,Porzana pusilla,,,1,2474628,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+grebus1,Otis tarda,Toy,Great Bustard,1,2474921,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+senpar,Poicephalus senegalus,Senegal Papağanı,Senegal Parrot,1,2479964,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+grepar,Psittacus erithacus,Afrika Gri Papağanı,Gray Parrot,1,2480181,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+palsan1,Syrrhaptes paradoxus,Paçalı Bağırtlak,Pallas's Sandgrouse,1,2480208,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+,Accipiter gentilis,,,1,2480589,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+brnboo,Sula leucogaster,Kara Sümsük,Brown Booby,1,2480975,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+sakfal1,Falco cherrug,Ulu Doğan,Saker Falcon,1,2481034,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+lotjae,Stercorarius longicaudus,Uzun Kuyruklu Korsanmartı,Long-tailed Jaeger,1,2481613,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+gresku1,Stercorarius skua,Büyük Korsanmartı,Great Skua,1,2481618,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+rocnut1,Sitta neumayer,Kaya Sıvacısı,Western Rock Nuthatch,1,2484890,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+whsbul1,Pycnonotus xanthopygos,Arapbülbülü,White-spectacled Bulbul,1,2486116,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+,Melanocorypha leucoptera,,,1,2490611,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+blalar1,Melanocorypha yeltoniensis,Kara Toygar,Black Lark,1,2490614,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+crebun2,Emberiza caesia,Kızıl Kirazkuşu,Cretzschmar's Bunting,1,2491490,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+rusbun,Emberiza rustica,Ak Kaşlı Çinte,Rustic Bunting,1,2491582,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+refblu1,Tarsiger cyanurus,Mavi Kuyruklu Bülbül,Red-flanked Bluetail,1,2492509,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+piebus1,Saxicola caprata,Kara Taşkuşu,Pied Bushchat,1,2492519,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+afrsto1,Saxicola torquatus,Afrika Taşkuşu,African Stonechat,1,2492526,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+zitcis1,Cisticola juncidis,Yelpazekuyruk,Zitting Cisticola,1,2492822,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+redava,Amandava amandava,Kırmızı Avadava,Red Avadavat,1,2493698,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+bahgoo,Anser indicus,Hint Kazı,Bar-headed Goose,1,2498035,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+robpoc1,Netta peposaca,Gül Gagalı Ördek,Rosy-billed Pochard,1,2498181,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+manshe,Puffinus puffinus,Atlantik Yelkovanı,Manx Shearwater,1,5229380,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+reclar1,Calandrella cinerea,Kızıl Tepeli Bozkır Toygarı,Red-capped Lark,1,5230989,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+redpol1,Acanthis flammea,Huş İsketesi,Redpoll,1,5231630,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+sibacc,Prunella montanella,Sibirya Dağbülbülü,Siberian Accentor,1,5231759,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+brant,Branta bernicla,Yosun Kazı,Brant,1,5232446,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+orihob2,Pernis ptilorhynchus,Tepeli Arı Şahini,Oriental Honey-buzzard,1,5793241,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+audgul1,Ichthyaetus audouinii,Ada Martısı,Audouin's Gull,1,7406504,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,
+ricpip1,Anthus richardi,Mahmuzlu İncirkuşu,Richard's Pipit,1,9465111,elendi,Istanbul'da yalnizca 1 kayit (esik 30),,,,,,,,,,,,

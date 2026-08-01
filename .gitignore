@@ -11,7 +11,10 @@ build/
 third_party/pico-sdk/
 third_party/lvgl/
 
-# Eğitim boru hattı (tools/) — indirilen ses verileri çok büyük
+# Eğitim boru hattı — indirilen ses verileri ve API önbelleği çok büyük.
+# data/species_istanbul.csv GİRER: küçük ve eleme kararlarını taşıyor.
+data/xc/
+data/cache/
 tools/data/
 tools/downloads/
 tools/runs/
