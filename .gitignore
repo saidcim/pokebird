@@ -9,6 +9,7 @@ build/
 
 # Vendor edilmiş SDK — depoya girmez, cmake/setup ile çekilir
 third_party/pico-sdk/
+third_party/lvgl/
 
 # Eğitim boru hattı (tools/) — indirilen ses verileri çok büyük
 tools/data/

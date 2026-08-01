@@ -34,6 +34,26 @@
 void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                  const uint16_t *buf);
 
+/**
+ * Adımlı (strided) blit — kaynağı gezerken satır ve sütun adımı verilebilir.
+ *
+ * NEDEN: LVGL arayüzü YATAY (640x172), panel ise DİKEY (172x640). Aradaki 90°
+ * çevrim normalde tamponun devriğini (transpose) almayı, yani ikinci bir
+ * tampon kadar daha RAM'i gerektirir — bizde o RAM yok (plan §5).
+ *
+ * Bunun yerine kaynağı devrik SIRAYLA okuyoruz: panelin bir yatay satırı,
+ * LVGL tamponunun bir dikey sütunudur. Negatif adım da geçerli; aynalama
+ * bununla hallediliyor. Ek tampon maliyeti SIFIR.
+ *
+ * piksel(satır r, sütun c) = buf[r*row_step + c*col_step]
+ *
+ * `x/y/w/h` panelin doğal koordinatlarında. Sınır dışı istek sessizce
+ * kırpılmaz, REDDEDİLİR: negatif adımlarda kırpma kaynak başlangıcını da
+ * kaydırmayı gerektirir ve bunu çağıran bilmeden yapmak sessiz hataya yol açar.
+ */
+void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                         const uint16_t *buf, int32_t col_step, int32_t row_step);
+
 /** Tüm paneli tek renkle doldur. */
 void pb_lcd_fill(uint16_t color);
 
