@@ -38,3 +38,5 @@ data/.xc_key
 
 # M4 boru hatti calisma gunlugu
 data/m4_run.log
+data/wav/
+data/convert.log
