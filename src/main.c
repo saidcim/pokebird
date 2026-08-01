@@ -23,17 +23,25 @@
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
 #include "hardware/clocks.h"
+#include "hardware/dma.h"
+#include "hardware/pio.h"
 #include "hardware/pwm.h"
+#include "hardware/watchdog.h"
 
 #include "board_config.h"
 #include "hal/audio_i2s.h"
 #include "hal/es8311.h"
 #include "hal/i2c_bus.h"
+#include "hal/touch.h"
 #include "hal/display/LCD_3in49.h"
 #include "hal/display/lcd_blit.h"
 #include "hal/display/qspi_pio.h"
 #include "dsp/fft.h"
+#include "dsp/mel.h"
+#include "dsp/gate.h"
 #include "ui/spectrogram.h"
+#include "ui/lv_port.h"
+#include "lvgl.h"
 
 void pb_display_dma_init(void);   /* hal/display/dev_config.c */
 
@@ -70,7 +78,7 @@ static const pb_audio_cfg_t s_audio_cfg = {
 
 static uint8_t s_mic_gain = PB_MIC_GAIN;
 
-/* ── Ekran ────────────────────────────────────────────────────────────────
+/* â”€â”€ Ekran â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * M1'de ekranı kullanmıyoruz ama arka ışık gürültü ölçümünün bir değişkeni:
  * AP3032 yükseltici ve PWM, mikrofonun hemen yanında anahtarlama yapıyor. */
 
@@ -95,6 +103,25 @@ static uint8_t s_mic_gain = PB_MIC_GAIN;
  * yani parlaklığı kısmak için akustik bir gerekçe de yok. Kademeli parlaklık
  * istenirse (M7 ayarlar ekranı) PWM sorunu o zaman ayrıca çözülür.
  */
+/**
+ * Güç mandalını kilitle.
+ *
+ * Waveshare'in örneği ekrandan önce `DEV_Module_Init()` çağırıyor; biz onu
+ * kendi HAL'imizle çakışmasın diye hiç almadık. İçindeki tek kritik iş
+ * SYS_EN'i yüksek tutmak: kart bu mandalla ayakta duruyor, örneğin core1'i
+ * `DEV_Digital_Write(SYS_EN, 0)` ile kapanma yapıyor.
+ *
+ * Panelin mantık/IO beslemesi bu mandalın arkasındaysa, panel kendi
+ * taramasını sürdürse bile ana bilgisayar arayüzü beslemesiz kalır ve
+ * QSPI'den gelen hiçbir komutu duymaz — gözlediğimiz tabloya birebir uyuyor.
+ * Doğrulanmış değil; ucuz ve zararsız olduğu için deniyoruz.
+ */
+static void power_latch_init(void) {
+    gpio_init(PB_PIN_SYS_EN);
+    gpio_set_dir(PB_PIN_SYS_EN, GPIO_OUT);
+    gpio_put(PB_PIN_SYS_EN, 1);     /* 1 = acik kal. 0 KAPATIR. */
+}
+
 static void backlight_init(void) {
     gpio_init(PB_PIN_BL_EN);
     gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
@@ -206,7 +233,7 @@ static audio_stats_t measure_with_backlight(bool enable,
     return compute_stats(s_capture, cap.samples);
 }
 
-/* ── Komutlar ────────────────────────────────────────────────────────────── */
+/* â”€â”€ Komutlar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 static void cmd_info(void) {
     pico_unique_board_id_t id;
@@ -381,39 +408,837 @@ static void cmd_spectrogram(void) {
     printf("cikildi\n\n");
 }
 
+/* Bit-bang yolu asagida tanimli; ekran testi PIO yolunun yanina onu da
+ * koyabilsin diye burada bildiriliyor. */
+static void bb_pins_setup(void);
+static void bb_panel_init(void);
+static void bb_ekrani_boya(uint16_t renk);
+
+#define PB_INIT_BITBANG 99   /* cmd_display_test icin sanal varyant */
+
+/** Bekleyen seri girisi temizle — onceki adimdan kalan tuslar yanlis
+ *  varyanti "kazanan" gostermesin. */
+static void drain_stdin(void) {
+    while (getchar_timeout_us(0) >= 0) { }
+}
+
 /**
- * Ekran testi — "hiçbir şey görünmüyor" durumunu ayrıştırır.
+ * Ekran testi — hangi panel başlatma dizisi doğru görüntü veriyor?
  *
- * Arka ışık ayrı, panel ayrı bir sorun olabilir. Bu test önce arka ışığı
- * yakıp beyaz basıyor: ekran beyaz oluyorsa QSPI ve panel init'i çalışıyor
- * demektir ve sorun çizim mantığındadır. Hiçbir şey olmuyorsa sorun daha
- * aşağıda: arka ışık ya da panel başlatma.
+ * Belirti: ekran yanıyor ama her pikselin farklı renk olduğu, hiç gitmeyen
+ * bir karıncalanma var. Bu, GRAM'a kayık veri yazıldığının klasik işareti:
+ * en olası sebep piksel biçiminin (COLMOD, 0x3A) hiç ayarlanmamış olması —
+ * biz piksel başına 2 bayt yolluyoruz, panel reset varsayılanında başka bir
+ * genişlik bekliyor.
+ *
+ * Seri porttan ekranı göremediğimiz için (bkz. lastsession.md §5.9) üç
+ * hipotezi tek firmware'e koyup sırayla deniyoruz; düz renk gördüğünüzde
+ * tuşa basıyorsunuz ve cihaz hangi varyantta olduğunu kendisi yazıyor.
  */
 static void cmd_display_test(void) {
-    printf("\nEkran testi. Her renk 2 saniye.\n");
+    printf("\nEkran testi — panel baslatma varyantlari (etkilesimli).\n");
+    printf("EKRANA BAKIN. Ekran DUZ RENK doldugunda bir tusa basin.\n");
+    printf("Karincalanma devam ediyorsa hicbir sey yapmayin, sonraki varyanta gecer.\n\n");
     backlight_set(true);
 
-    const struct { const char *ad; uint16_t renk; } adimlar[] = {
-        { "beyaz",     0xFFFF },
-        { "kirmizi",   0xF800 },
-        { "yesil",     0x07E0 },
-        { "mavi",      0x001F },
-        { "siyah",     0x0000 },
+    const struct { int varyant; const char *ad; } denemeler[] = {
+        { LCD_3IN49_INIT_FULL,      "satici tablosu + SLPOUT/MADCTL/COLMOD(RGB565)/DISPON" },
+        { LCD_3IN49_INIT_MINIMAL,   "sadece DCS kuyrugu (rsvpnano ile ayni)" },
+        { LCD_3IN49_INIT_NO_COLMOD, "satici tablosu + SLPOUT/DISPON, COLMOD YOK (kontrol)" },
+        { PB_INIT_BITBANG,          "BIT-BANG: PIO/DMA/satici surucusu tamamen devre disi" },
     };
 
-    for (size_t i = 0; i < sizeof(adimlar) / sizeof(adimlar[0]); i++) {
-        printf("  %s\n", adimlar[i].ad);
-        pb_lcd_fill(adimlar[i].renk);
-        sleep_ms(2000);
+    const struct { const char *ad; uint16_t renk; } renkler[] = {
+        { "kirmizi", 0xF800 },
+        { "yesil",   0x07E0 },
+        { "mavi",    0x001F },
+        { "beyaz",   0xFFFF },
+    };
+
+    for (size_t v = 0; v < sizeof(denemeler) / sizeof(denemeler[0]); v++) {
+        printf("  [%u] %s\n", (unsigned)(v + 1), denemeler[v].ad);
+        const bool bitbang = (denemeler[v].varyant == PB_INIT_BITBANG);
+        if (bitbang) {
+            pio_sm_set_enabled(qspi.pio, qspi.sm, false);
+            bb_pins_setup();
+            bb_panel_init();
+        } else {
+            LCD_3IN49_InitVariant(denemeler[v].varyant);
+        }
+        backlight_set(true);
+        drain_stdin();
+
+        for (size_t r = 0; r < sizeof(renkler) / sizeof(renkler[0]); r++) {
+            printf("        %s\n", renkler[r].ad);
+            if (bitbang) bb_ekrani_boya(renkler[r].renk);
+            else         pb_lcd_fill(renkler[r].renk);
+
+            /* Renk basildiktan sonra 1.5 s bakma suresi */
+            for (int t = 0; t < 15; t++) {
+                if (getchar_timeout_us(0) >= 0) {
+                    printf("\n  >>> DUZGUN CALISAN VARYANT: [%u] %s <<<\n",
+                           (unsigned)(v + 1), denemeler[v].ad);
+                    printf("  (o anda ekranda: %s)\n\n", renkler[r].ad);
+                    if (bitbang) {
+                        printf("  Bit-bang yolu calisiyor, PIO yolu calismiyor:\n");
+                        printf("  hata PIO/DMA tarafinda. Yon karesi atlandi.\n\n");
+                        return;
+                    }
+                    /* Yon kontrolu: panelin (0,0) kosesine 20x20 beyaz kare.
+                     * Cihazi yatay tuttugunuzda karenin nerede goruldugu,
+                     * ui/spectrogram.c'deki yon cevirimini dogrular. */
+                    pb_lcd_fill(0x0000);
+                    static uint16_t kare[20 * 20];
+                    for (int i = 0; i < 20 * 20; i++) kare[i] = 0xFFFF;
+                    pb_lcd_blit(0, 0, 20, 20, kare);
+                    printf("  panel (0,0) konumuna 20x20 beyaz kare cizildi —\n");
+                    printf("  cihazi USB soketi ASAGI bakacak sekilde tutun ve\n");
+                    printf("  karenin hangi kosede oldugunu soyleyin.\n\n");
+                    return;
+                }
+                sleep_ms(100);
+            }
+        }
+        printf("\n");
     }
 
-    /* Yön kontrolü: panelin SOL UST kosesine kucuk beyaz bir kare.
-     * Cihazi yatay tuttugunuzda karenin nerede oldugu, yon cevirimimizin
-     * dogru olup olmadigini soyler. */
-    static uint16_t kare[20 * 20];
-    for (int i = 0; i < 20 * 20; i++) kare[i] = 0xFFFF;
-    pb_lcd_blit(0, 0, 20, 20, kare);
-    printf("  panel (0,0) konumuna 20x20 beyaz kare cizildi\n\n");
+    printf("  Hicbir varyantta tus basilmadi — uc dizinin ucu de duzgun\n");
+    printf("  goruntu vermedi. Sorun baslatma dizisinde degil, veri yolunda.\n\n");
+}
+
+/* ── Bit-bang QSPI — PIO'yu denklemden çıkarmak için ──────────────────────
+ * Hattı doğrudan CPU ile, yavaşça sürüyoruz. Amaç PIO programını şüpheli
+ * listesinden silmek: bit-bang panele ulaşıyor ama PIO ulaşmıyorsa hata
+ * PIO'dadır; ikisi de ulaşmıyorsa hata kabloda/pinde/panelde.
+ * Ayrıca bit-bang okuma yapabiliyor — panelin kimliğini sorabiliyoruz,
+ * ki bu "panel bizi duyuyor mu" sorusunun tek doğrudan yanıtı. */
+#define BB_GECIKME() sleep_us(1)      /* ~500 kHz — panel icin fazlasiyla yavas */
+
+static void bb_pins_setup(void) {
+    const uint cikislar[] = { PIN_CS, PIN_SCLK, PIN_DIO0 };
+    for (size_t i = 0; i < 3; i++) {
+        gpio_set_function(cikislar[i], GPIO_FUNC_SIO);
+        gpio_set_dir(cikislar[i], GPIO_OUT);
+    }
+    /* D1..D3 tek hatli fazda kullanilmiyor; panel surerse cakismasin diye giris */
+    for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) {
+        gpio_set_function(p, GPIO_FUNC_SIO);
+        gpio_set_dir(p, GPIO_IN);
+    }
+    gpio_put(PIN_CS, 1);
+    gpio_put(PIN_SCLK, 0);
+}
+
+static void bb_byte(uint8_t v) {
+    for (int i = 7; i >= 0; i--) {
+        gpio_put(PIN_SCLK, 0);
+        gpio_put(PIN_DIO0, (v >> i) & 1);
+        BB_GECIKME();
+        gpio_put(PIN_SCLK, 1);          /* panel yukselen kenarda ornekler */
+        BB_GECIKME();
+    }
+    gpio_put(PIN_SCLK, 0);
+}
+
+static void bb_cmd(uint8_t cmd, const uint8_t *veri, size_t n) {
+    gpio_put(PIN_CS, 0);
+    BB_GECIKME();
+    bb_byte(0x02); bb_byte(0x00); bb_byte(cmd); bb_byte(0x00);
+    for (size_t i = 0; i < n; i++) bb_byte(veri[i]);
+    BB_GECIKME();
+    gpio_put(PIN_CS, 1);
+    BB_GECIKME();
+}
+
+static void bb_read(uint8_t cmd, uint8_t *cikti, size_t n) {
+    gpio_put(PIN_CS, 0);
+    BB_GECIKME();
+    bb_byte(0x03); bb_byte(0x00); bb_byte(cmd); bb_byte(0x00);
+
+    gpio_set_dir(PIN_DIO0, GPIO_IN);
+    for (size_t i = 0; i < n; i++) {
+        uint8_t v = 0;
+        for (int b = 7; b >= 0; b--) {
+            gpio_put(PIN_SCLK, 0); BB_GECIKME();
+            gpio_put(PIN_SCLK, 1); BB_GECIKME();
+            v |= (uint8_t)(gpio_get(PIN_DIO0) << b);
+        }
+        cikti[i] = v;
+    }
+    gpio_put(PIN_SCLK, 0);
+    gpio_set_dir(PIN_DIO0, GPIO_OUT);
+    BB_GECIKME();
+    gpio_put(PIN_CS, 1);
+}
+
+/** Dort hat uzerinden bir bayt (gercek QSPI veri fazi). */
+static void bb_byte_quad(uint8_t v) {
+    for (int yari = 0; yari < 2; yari++) {
+        uint8_t nib = yari ? (uint8_t)(v & 0x0F) : (uint8_t)(v >> 4);
+        gpio_put(PIN_SCLK, 0);
+        gpio_put(PIN_DIO0,  nib       & 1);
+        gpio_put(PIN_DIO1, (nib >> 1) & 1);
+        gpio_put(PIN_DIO2, (nib >> 2) & 1);
+        gpio_put(PIN_DIO3, (nib >> 3) & 1);
+        gpio_put(PIN_SCLK, 1);
+    }
+    gpio_put(PIN_SCLK, 0);
+}
+
+/**
+ * Tum ekrani bit-bang ile tek renge boya.
+ *
+ * PIO'yu, DMA'yi ve satici surucusunu tamamen devre disi birakan bagimsiz
+ * bir yol. Yavas ama her adimi burada gorunur. PIO yolu calismayip bu
+ * calisirsa hata PIO tarafindadir; ikisi de calismazsa hata daha asagida.
+ */
+static void bb_ekrani_boya(uint16_t renk) {
+    for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) gpio_set_dir(p, GPIO_OUT);
+
+    uint8_t caset[] = { 0x00, 0x00, (PB_PANEL_W - 1) >> 8, (PB_PANEL_W - 1) & 0xFF };
+    uint8_t raset[] = { 0x00, 0x00, (PB_PANEL_H - 1) >> 8, (PB_PANEL_H - 1) & 0xFF };
+    bb_cmd(0x2A, caset, 4);
+    bb_cmd(0x2B, raset, 4);
+
+    /* Piksel yazimi: komut+adres tek hatta (0x32 / 0x002C00), veri dort hatta */
+    gpio_put(PIN_CS, 0);
+    bb_byte(0x32); bb_byte(0x00); bb_byte(0x2C); bb_byte(0x00);
+    uint8_t yuksek = (uint8_t)(renk >> 8), dusuk = (uint8_t)(renk & 0xFF);
+    for (uint32_t i = 0; i < (uint32_t)PB_PANEL_W * PB_PANEL_H; i++) {
+        bb_byte_quad(yuksek);
+        bb_byte_quad(dusuk);
+    }
+    gpio_put(PIN_CS, 1);
+
+    for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) gpio_set_dir(p, GPIO_IN);
+}
+
+/** rsvpnano'nun kanitladigi asgari baslatma — tamami bit-bang. */
+static void bb_panel_init(void) {
+    uint8_t p0 = 0x00, p55 = 0x55;
+    bb_cmd(0x11, NULL, 0);  sleep_ms(120);   /* SLPOUT */
+    bb_cmd(0x36, &p0,  1);                   /* MADCTL */
+    bb_cmd(0x3A, &p55, 1);                   /* COLMOD RGB565 */
+    bb_cmd(0x29, NULL, 0);  sleep_ms(120);   /* DISPON */
+}
+
+/** TE hattinda 200 ms'de gecis say — panel tariyor mu / emre uydu mu. */
+static uint32_t te_gecis_say(void) {
+    uint32_t s = 0;
+    int onceki = gpio_get(PB_PIN_LCD_TE);
+    absolute_time_t bitis = make_timeout_time_ms(200);
+    while (!time_reached(bitis)) {
+        int simdi = gpio_get(PB_PIN_LCD_TE);
+        if (simdi != onceki) { s++; onceki = simdi; }
+    }
+    return s;
+}
+
+/**
+ * M3 — mel + kapı hattını CANLI mikrofonla çalıştır.
+ *
+ * DSP'nin doğruluğu host testleriyle kanıtlandı (`test/dsp_test` 13/13, ve
+ * `tools/mel_reference.py` bağımsız Python referansıyla 64 bandın tamamında
+ * sıfır sapma). Burada sınanan başka bir şey: hat gerçek zamanlı olarak,
+ * gerçek mikrofonla, kartın üzerinde ayakta kalıyor mu ve kapı gerçek odada
+ * mantıklı davranıyor mu.
+ *
+ * Çıktı tamamen sayısal — ekrana bakmak gerekmiyor.
+ */
+static void cmd_mel_pipeline(void) {
+    printf("\nM3: mel + kapi hatti (canli mikrofon)\n");
+    printf("Cikmak icin bir tusa basin.\n\n");
+
+    pb_mel_init();
+    pb_mel_reset();
+    pb_gate_reset();
+
+    /* Doğru hop için örtüşmeli kare: her turda PB_MEL_HOP yeni örnek alınıp
+     * kare sola kaydırılıyor. Örtüşmesiz okumak 16 ms'lik adımı bozar ve
+     * 3 saniye 187 kare tutmaz. */
+    static int16_t kare[PB_FFT_SIZE];
+    const uint32_t kalan = PB_FFT_SIZE - PB_MEL_HOP;
+
+    uint32_t toplam = 0, acik = 0, pencere_sayisi = 0;
+    absolute_time_t sonraki_rapor = make_timeout_time_ms(1000);
+
+    while (getchar_timeout_us(0) < 0) {
+        memmove(kare, kare + PB_MEL_HOP, kalan * sizeof(int16_t));
+        pb_capture_result_t cap = pb_audio_capture(kare + kalan, PB_MEL_HOP);
+        if (cap.samples < PB_MEL_HOP) { printf("  yakalama eksik, cikiliyor\n"); break; }
+
+        float power[PB_FFT_POWER_BINS];
+        pb_fft_power(kare, power);
+        pb_gate_result_t g = pb_gate_update(power);
+        if (g.active) acik++;
+
+        pb_mel_push(kare);
+        toplam++;
+
+        if (pb_mel_frame_count() >= PB_MEL_FRAMES &&
+            pb_mel_frame_count() % PB_MEL_FRAMES == 0) {
+            static int8_t pencere[PB_MEL_BANDS * PB_MEL_FRAMES];
+            if (pb_mel_window(pencere)) pencere_sayisi++;
+        }
+
+        if (time_reached(sonraki_rapor)) {
+            printf("  kare %5lu  kapi %%%3lu  bant %6.1f dB  taban %6.1f dB  "
+                   "aki %.3f  pencere %lu\n",
+                   (unsigned long)toplam,
+                   (unsigned long)(toplam ? acik * 100 / toplam : 0),
+                   (double)g.band_db, (double)g.floor_db, (double)g.flux,
+                   (unsigned long)pencere_sayisi);
+            sonraki_rapor = make_timeout_time_ms(1000);
+        }
+    }
+
+    printf("\n  toplam kare %lu, kapi acik %lu (%%%lu), tam pencere %lu\n\n",
+           (unsigned long)toplam, (unsigned long)acik,
+           (unsigned long)(toplam ? acik * 100 / toplam : 0),
+           (unsigned long)pencere_sayisi);
+}
+
+/**
+ * LVGL demo — M2b'nin kabul ölçütü.
+ *
+ * Tek ekranda dört şeyi birden sınıyor: LVGL'in ayağa kalkması, 90° yön
+ * çevriminin kısmi render ile doğru çalışması, yazı tipi/tema, ve dokunmatik
+ * girişi. Dokunulan nokta ekrana yazıldığı için koordinat eşlemesinin doğru
+ * olup olmadığı da doğrudan görülüyor.
+ */
+static void cmd_ui_demo(void) {
+    printf("\nLVGL demo. Cikmak icin bir tusa basin.\n");
+    backlight_set(true);
+
+    bool dokunmatik = pb_lv_init();
+    printf("  dokunmatik: %s\n", dokunmatik ? "hazir" : "YOK (sadece ekran)");
+
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x101820), LV_PART_MAIN);
+
+    lv_obj_t *baslik = lv_label_create(scr);
+    lv_label_set_text(baslik, "PokeBird");
+    lv_obj_set_style_text_color(baslik, lv_color_hex(0xF0C000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(baslik, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(baslik, LV_ALIGN_TOP_LEFT, 12, 10);
+
+    lv_obj_t *bilgi = lv_label_create(scr);
+    lv_label_set_text(bilgi, "ekrana dokunun");
+    lv_obj_set_style_text_color(bilgi, lv_color_hex(0xB0B8C0), LV_PART_MAIN);
+    lv_obj_align(bilgi, LV_ALIGN_TOP_LEFT, 12, 44);
+
+    /* Sağ kenara bir çubuk: kısmi render'ın ekranın uzak ucunda da doğru
+     * yere düştüğünü gösterir (yön hatası en çok orada belli olur). */
+    lv_obj_t *cubuk = lv_bar_create(scr);
+    lv_obj_set_size(cubuk, 200, 16);
+    lv_obj_align(cubuk, LV_ALIGN_BOTTOM_RIGHT, -16, -16);
+    lv_bar_set_range(cubuk, 0, 100);
+
+    int deger = 0;
+    drain_stdin();
+    while (getchar_timeout_us(0) < 0) {
+        pb_lv_tick();
+
+        pb_touch_state_t st = pb_touch_read();
+        if (st.ok && st.fingers > 0) {
+            lv_label_set_text_fmt(bilgi, "dokunus: x=%u  y=%u",
+                                  st.p.raw_x, st.p.raw_y);
+        }
+
+        deger = (deger + 1) % 101;
+        lv_bar_set_value(cubuk, deger, LV_ANIM_OFF);
+        sleep_ms(20);
+    }
+    printf("cikildi\n\n");
+}
+
+/**
+ * Yön testi — panelin doğal koordinatları fiziksel olarak nereye düşüyor?
+ *
+ * Panel 172x640 dikey, arayüz 640x172 yatay. `ui/spectrogram.c` bu çevrimi
+ * yapıyor ama hangi köşenin (0,0) olduğu ve aynalama olup olmadığı ancak
+ * ekrana bakılarak bilinir.
+ *
+ * Dört köşeye dört farklı renk basıyoruz. Tek bir bakış hem dönüşü hem
+ * aynalamayı belirsizliğe yer bırakmadan söylüyor — tuşa basmak gerekmiyor.
+ */
+static void cmd_orientation(void) {
+    enum { KARE = 40 };
+    static uint16_t blok[KARE * KARE];
+
+    const struct { uint32_t x, y; uint16_t renk; const char *ad; } kose[] = {
+        { 0,               0,               0xF800, "KIRMIZI = panel (0,0)"         },
+        { PB_PANEL_W-KARE, 0,               0x07E0, "YESIL   = panel (X sonu, 0)"   },
+        { 0,               PB_PANEL_H-KARE, 0x001F, "MAVI    = panel (0, Y sonu)"   },
+        { PB_PANEL_W-KARE, PB_PANEL_H-KARE, 0xFFE0, "SARI    = panel (X sonu, Y sonu)" },
+    };
+
+    printf("\nYon testi — ekranda dort renkli kare var.\n");
+    backlight_set(true);
+    pb_lcd_fill(0x0000);
+
+    for (size_t i = 0; i < sizeof(kose) / sizeof(kose[0]); i++) {
+        for (int p = 0; p < KARE * KARE; p++) blok[p] = kose[i].renk;
+        pb_lcd_blit(kose[i].x, kose[i].y, KARE, KARE, blok);
+        printf("  %s\n", kose[i].ad);
+    }
+
+    printf("\nCihazi USB soketi ASAGI bakacak sekilde tutun ve her rengin\n");
+    printf("hangi kosede oldugunu soyleyin (sol ust / sag ust / sol alt / sag alt).\n\n");
+}
+
+/**
+ * Dokunmatik bring-up ve koordinat eşlemesi.
+ *
+ * Ham değerlerin hangi eksene/yöne karşılık geldiği varsayılmıyor, ekran
+ * yönünde olduğu gibi ÖLÇÜLÜYOR: kullanıcıdan dört köşeye sırayla dokunması
+ * isteniyor ve cihaz her köşenin ham değerini yazıyor. Dört satırdan eşleme
+ * belirsizliğe yer bırakmadan çıkıyor.
+ */
+static void cmd_touch_probe(void) {
+    printf("\nDokunmatik teshisi\n");
+    printf("==================\n\n");
+
+    if (!pb_touch_init()) {
+        printf("Adres 0x%02x (I2C0, SDA=GPIO%d SCL=GPIO%d) yanit VERMIYOR.\n\n",
+               PB_TP_I2C_ADDR, PB_PIN_TP_SDA, PB_PIN_TP_SCL);
+        return;
+    }
+    printf("Adres 0x%02x yanit veriyor.\n\n", PB_TP_I2C_ADDR);
+
+    /* â”€â”€ Once en temel soru: bu hatta gercekten bir sey var mi? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+     * Adres taramasi. Yalnizca 0x3B yanit veriyorsa cip gercekten orada.
+     * COGU adres yanit veriyorsa hat bozuk (yanlis pin, SDA takili kalmis)
+     * ve okudugumuz 0xdb yalnizca gurultudur — protokol varyantlariyla
+     * ugrasmak bos emek olur. Karsilastirma icin ES8311'in bulundugu i2c1
+     * de taraniyor: o hat saglam oldugunu bildigimiz referans. */
+    {
+        printf("I2C adres taramasi:\n");
+        printf("  i2c0 (dokunmatik, GPIO%d/%d):", PB_PIN_TP_SDA, PB_PIN_TP_SCL);
+        int tp_sayi = 0;
+        for (uint8_t a = 0x08; a < 0x78; a++) {
+            uint8_t d;
+            if (i2c_read_timeout_us(PB_TP_I2C_INST, a, &d, 1, false, 2000) >= 0) {
+                printf(" %02x", a);
+                tp_sayi++;
+            }
+        }
+        printf("   (%d adet)\n", tp_sayi);
+
+        printf("  i2c1 (codec,      GPIO%d/%d):", PB_PIN_I2C_SDA, PB_PIN_I2C_SCL);
+        int cd_sayi = 0;
+        for (uint8_t a = 0x08; a < 0x78; a++) {
+            if (pb_i2c_probe(a)) { printf(" %02x", a); cd_sayi++; }
+        }
+        printf("   (%d adet)\n", cd_sayi);
+
+        if (tp_sayi > 8) {
+            printf("  -> i2c0'da COK FAZLA adres yanit veriyor: hat bozuk,\n");
+            printf("     okunan 0xdb gurultu. Once pin/kablolama.\n\n");
+        } else if (tp_sayi == 0) {
+            printf("  -> i2c0'da HICBIR sey yok.\n\n");
+        } else {
+            printf("\n");
+        }
+    }
+
+
+    /* INT hatti: cip dokunusu ALGILIYOR mu? Bu, okuma protokolunden bagimsiz
+     * bir soru. INT kipirdiyorsa cip calisiyordur ve sorun yalnizca okumada. */
+    gpio_init(PB_PIN_TP_INT);
+    gpio_set_dir(PB_PIN_TP_INT, GPIO_IN);
+    gpio_pull_up(PB_PIN_TP_INT);
+
+    printf("Cihazi USB soketi SAGDA olacak sekilde YATAY tutun.\n");
+    printf("Kenarlarda ve koselerde gezdirin; her degisiklik yaziliyor.\n");
+    printf("INT sutunu dokununca 0'a dusuyorsa cip dokunusu goruyor demektir.\n");
+    printf("Cikmak icin bir tusa basin.\n\n");
+    printf("  INT  parmak   ham x   ham y   ilk 8 bayt\n");
+
+    /* Adim adim "su koseye dokun" yerine CANLI AKIS: cihaz ne goruyorsa onu
+     * yaziyor. Onceki surum kose kose ilerliyordu ve bazi koseleri atliyordu;
+     * hatanin dokunmatikte mi kendi durum makinemde mi oldugu ayirt
+     * edilemiyordu. Ham baytlari da basiyoruz — parmak sayisinin gercekten
+     * bayt 1'de olup olmadigi ancak boyle gorulur. */
+    uint16_t onceki_x = 0xFFFF, onceki_y = 0xFFFF;
+    uint8_t  onceki_f = 0xFF;
+    int      onceki_int = -1;
+    uint32_t hic_yanit_yok = 0;
+
+    while (getchar_timeout_us(0) < 0) {
+        int intp = gpio_get(PB_PIN_TP_INT);
+        pb_touch_state_t st = pb_touch_read();
+        if (!st.ok) {
+            if (++hic_yanit_yok % 100 == 1) printf("  (I2C yanit vermiyor)\n");
+            sleep_ms(20);
+            continue;
+        }
+
+        if (intp != onceki_int || st.fingers != onceki_f ||
+            st.p.raw_x != onceki_x || st.p.raw_y != onceki_y) {
+            uint8_t ham[32];
+            pb_touch_last_raw(ham);
+            printf("  %3d   %4u    %5u   %5u   ",
+                   intp, st.fingers, st.p.raw_x, st.p.raw_y);
+            for (int i = 0; i < 8; i++) printf("%02x ", ham[i]);
+            printf("\n");
+            onceki_int = intp;
+            onceki_f = st.fingers;
+            onceki_x = st.p.raw_x;
+            onceki_y = st.p.raw_y;
+        }
+        sleep_ms(20);
+    }
+    printf("\ncikildi\n\n");
+}
+
+/**
+ * Veri yolu teşhisi — QSPI hattında hangi varsayım tutmuyor?
+ *
+ * Üç başlatma dizisinin üçü de görüntü vermedi, yani sorun panelin register
+ * dizisinde değil, baytların panele ulaşmasında. Bu testte veri yolundaki
+ * her varsayım tek tek ölçülüyor; çoğu için ekrana bakmak GEREKMİYOR, cihaz
+ * sonucu kendisi yazıyor (bkz. lastsession.md §5.9).
+ */
+static void cmd_datapath_probe(void) {
+    printf("\nVeri yolu teshisi\n");
+    printf("=================\n\n");
+
+    /* â”€â”€ 1. Dar (8 bit) DMA yazimi bayt seritlerine kopyalaniyor mu? â”€â”€â”€â”€â”€â”€
+     * Piksel verisi DMA_SIZE_8 ile PIO TX FIFO'suna yaziliyor. PIO programi
+     * OSR'yi SOLA kaydiriyor, yani anlamli bayt bit 31:24'te olmali. Tek
+     * baytlik bir yazimin 32 bitin tamamina kopyalanmasina guveniyoruz.
+     * Kopyalanmiyorsa bayt bit 7:0'a dusuyor ve panele giden her piksel 0
+     * oluyor — tum piksel yolu sessizce olu.
+     *
+     * Zararsiz, okunabilir bir IO register'ina (watchdog scratch) ayni
+     * sekilde tek bayt yazip geri okuyoruz. */
+    {
+        /* Hedef: kullanilmayan bir DMA kanalinin read_addr register'i. Tam
+         * 32 bit okunur-yazilir, tetiklenmedigi surece zararsiz. (Ilk
+         * denemede watchdog scratch kullanilmisti; oradan 0 donuyordu, yani
+         * hedef yaziya hic izin vermiyordu ve test sonucsuz kalmisti.) */
+        int hedef = dma_claim_unused_channel(true);
+        int ch    = dma_claim_unused_channel(true);
+        volatile uint32_t *reg = &dma_hw->ch[hedef].read_addr;
+        static uint8_t src = 0xA5;
+
+        /* (a) DMA ile tek bayt */
+        *reg = 0;
+        dma_channel_config cfg = dma_channel_get_default_config(ch);
+        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_8);
+        channel_config_set_read_increment(&cfg, false);
+        channel_config_set_write_increment(&cfg, false);
+        dma_channel_configure(ch, &cfg, (void *)reg, &src, 1, true);
+        dma_channel_wait_for_finish_blocking(ch);
+        uint32_t dma_sonuc = *reg;
+
+        /* (b) CPU ile tek bayt — karsilastirma icin */
+        *reg = 0;
+        *(volatile uint8_t *)reg = 0xA5;
+        uint32_t cpu_sonuc = *reg;
+
+        *reg = 0;
+        dma_channel_unclaim(ch);
+        dma_channel_unclaim(hedef);
+
+        printf("1) Dar (8 bit) IO yazimi — 0xA5:\n");
+        printf("   DMA ile: 0x%08lx    CPU ile: 0x%08lx\n",
+               (unsigned long)dma_sonuc, (unsigned long)cpu_sonuc);
+        if (dma_sonuc == 0xA5A5A5A5u) {
+            printf("   -> bayt tum seritlere kopyalaniyor. PIO 31:24'ten okuyor,\n");
+            printf("      piksel yolu bu yonden SAGLAM.\n\n");
+        } else if (dma_sonuc == 0x000000A5u) {
+            printf("   -> KOPYALANMIYOR. Bayt 7:0'a dusuyor, PIO ise sola kaydirip\n");
+            printf("      31:24'ten okuyor: TUM PIKSEL VERISI SIFIR GIDIYOR.\n");
+            printf("      Duzeltme: DMA yazma adresi ((uint8_t*)&pio->txf[sm])+3.\n\n");
+        } else {
+            printf("   -> beklenmeyen; elle degerlendirin.\n\n");
+        }
+    }
+
+    /* â”€â”€ 2. PIO state machine calisiyor ve FIFO'yu tuketiyor mu? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    {
+        printf("2) PIO durumu (pio0, sm%u):\n", (unsigned)qspi.sm);
+        printf("   SM etkin mi: %s\n",
+               ((qspi.pio->ctrl >> qspi.sm) & 1u) ? "EVET" : "HAYIR (veri hic cikmaz)");
+        printf("   PC: %u\n", (unsigned)pio_sm_get_pc(qspi.pio, qspi.sm));
+
+        pio_sm_clear_fifos(qspi.pio, qspi.sm);
+        for (int i = 0; i < 8; i++) {
+            if (!pio_sm_is_tx_fifo_full(qspi.pio, qspi.sm)) {
+                pio_sm_put(qspi.pio, qspi.sm, 0x0Fu << 24);
+            }
+        }
+        uint32_t lvl_once = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
+        sleep_ms(2);
+        uint32_t lvl_sonra = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
+        printf("   TX FIFO: yazimdan hemen sonra %lu, 2 ms sonra %lu\n",
+               (unsigned long)lvl_once, (unsigned long)lvl_sonra);
+        printf("   -> %s\n\n", (lvl_sonra == 0)
+               ? "FIFO bosaliyor, SM veriyi tuketiyor."
+               : "FIFO BOSALMIYOR. SM calismiyor veya saat durmus.");
+    }
+
+    /* â”€â”€ 3. PIO pinleri gercekten suruyor mu? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+     * Saati calisilamayacak kadar yavaslatip (birkac kHz) pinleri CPU ile
+     * ornekliyoruz. Gecis sayisi 0 ise PIO o pini hic surmuyor. */
+    {
+        printf("3) PIO pinleri suruyor mu (yavas saatte orneklendi):\n");
+        pio_sm_set_clkdiv(qspi.pio, qspi.sm, 30000.0f);
+        pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
+
+        uint32_t gecis_sclk = 0, gecis_d0 = 0;
+        int onceki_s = gpio_get(PIN_SCLK), onceki_d = gpio_get(PIN_DIO0);
+        absolute_time_t bitis = make_timeout_time_ms(60);
+        while (!time_reached(bitis)) {
+            if (!pio_sm_is_tx_fifo_full(qspi.pio, qspi.sm)) {
+                pio_sm_put(qspi.pio, qspi.sm, 0x0Fu << 24);  /* nibble 0 sonra F */
+            }
+            int s = gpio_get(PIN_SCLK);
+            int d = gpio_get(PIN_DIO0);
+            if (s != onceki_s) { gecis_sclk++; onceki_s = s; }
+            if (d != onceki_d) { gecis_d0++;  onceki_d = d; }
+        }
+        printf("   SCLK(GPIO%d) gecis: %lu   D0(GPIO%d) gecis: %lu\n",
+               PIN_SCLK, (unsigned long)gecis_sclk,
+               PIN_DIO0, (unsigned long)gecis_d0);
+        printf("   -> %s\n\n", (gecis_sclk > 0 && gecis_d0 > 0)
+               ? "PIO her iki pini de suruyor."
+               : "PIN KIPIRDAMIYOR. Yanlis pin, ezilmis islev ya da olu SM.");
+
+        pio_sm_set_clkdiv(qspi.pio, qspi.sm, 2.0f);
+        pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
+        pio_sm_clear_fifos(qspi.pio, qspi.sm);
+    }
+
+    /* â”€â”€ 4. Pinler elektriksel olarak saglam mi? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+     * Pinleri kisa sureligine duz GPIO yapip surulen seviyeyi geri okuyoruz.
+     * Bu test yanlis pin NUMARASINI yakalayamaz (bagli olmayan bir GPIO de
+     * yazdiginizi geri okur); kisa devre / takili kalmis pin yakalar. */
+    {
+        printf("4) Pin surme/geri okuma (kisa devre testi):\n");
+        const struct { uint pin; const char *ad; } pinler[] = {
+            { PIN_SCLK, "SCLK" }, { PIN_DIO0, "D0" }, { PIN_DIO1, "D1" },
+            { PIN_DIO2, "D2" },   { PIN_DIO3, "D3" }, { PIN_CS,   "CS" },
+            { PIN_RST,  "RST" },
+        };
+        for (size_t i = 0; i < sizeof(pinler) / sizeof(pinler[0]); i++) {
+            gpio_set_function(pinler[i].pin, GPIO_FUNC_SIO);
+            gpio_set_dir(pinler[i].pin, GPIO_OUT);
+            gpio_put(pinler[i].pin, 1); sleep_us(100);
+            int yuksek = gpio_get(pinler[i].pin);
+            gpio_put(pinler[i].pin, 0); sleep_us(100);
+            int dusuk = gpio_get(pinler[i].pin);
+            printf("   %-4s GPIO%-2d  1->%d  0->%d  %s\n",
+                   pinler[i].ad, pinler[i].pin, yuksek, dusuk,
+                   (yuksek == 1 && dusuk == 0) ? "" : "<<< TAKILI KALMIS");
+        }
+        printf("\n");
+
+        /* Takili kalan pin disaridan mi suruluyor? Cikisi birakip once
+         * asagi sonra yukari cekerek olcuyoruz: ikisinde de ayni seviye
+         * okunuyorsa pini baska bir sey suruyor demektir. */
+        printf("   Serbest birakildiginda (dahili pull ile olculdu):\n");
+        const struct { uint pin; const char *ad; } serbest[] = {
+            { PIN_RST, "RST(34)" }, { PB_PIN_LCD_TE, "TE(35)" },
+            { PB_PIN_LCD_BL, "BL(36)" }, { PB_PIN_BL_EN, "BL_EN(37)" },
+        };
+        for (size_t i = 0; i < sizeof(serbest) / sizeof(serbest[0]); i++) {
+            gpio_set_function(serbest[i].pin, GPIO_FUNC_SIO);
+            gpio_set_dir(serbest[i].pin, GPIO_IN);
+            gpio_pull_down(serbest[i].pin); sleep_ms(2);
+            int pd = gpio_get(serbest[i].pin);
+            gpio_pull_up(serbest[i].pin);   sleep_ms(2);
+            int pu = gpio_get(serbest[i].pin);
+            gpio_disable_pulls(serbest[i].pin);
+            const char *yorum = (pd == 0 && pu == 1) ? "serbest (normal)"
+                              : (pd == 1 && pu == 1) ? "DISARIDAN YUKSEK SURULUYOR"
+                              : (pd == 0 && pu == 0) ? "DISARIDAN DUSUK SURULUYOR"
+                                                     : "belirsiz";
+            printf("   %-10s pull-down->%d  pull-up->%d   %s\n",
+                   serbest[i].ad, pd, pu, yorum);
+        }
+        printf("\n");
+    }
+
+    /* â”€â”€ 5. Komutlar panele ulasiyor mu? (goz gerekir) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+     * DISPOFF/DISPON ve renk tersleme, piksel verisinden BAGIMSIZ olarak
+     * ekranda gorunur bir degisiklik yapar. Karincalanma sonuyor ya da
+     * renkleri tersine donuyorsa komut yolu calisiyor demektir ve sorun
+     * yalnizca piksel yolundadir. Hicbir sey degismiyorsa panele hicbir
+     * sey ulasmiyordur. */
+    /* ── 5. Komutlar panele ULASIYOR MU? — TE hatti ile, goz gerekmeden ────
+     * Panelin TE (tearing effect) cikisi GPIO35'e bagli. TEON (0x35) komutu
+     * panelin her karede bu hatti darbelemesini saglar; TEOFF (0x34) durdurur.
+     * Yani TE'yi izleyerek "komut panele ulasti mi" sorusunu ekrana bakmadan,
+     * olcerek yanitlayabiliyoruz. Ayrica darbe varsa panel gercekten TARIYOR
+     * demektir — ki bu da karincalanmanin panelin kendi GRAM'ini gosterdigini
+     * dogrular. */
+    {
+        printf("5) Komut yolu testi — panelin TE cikisi (GPIO%d) dinleniyor:\n",
+               PB_PIN_LCD_TE);
+
+        /* Pinleri PIO'ya geri ver, paneli yeniden baslat */
+        QSPI_GPIO_Init(qspi);
+        for (uint p = PIN_SCLK; p <= PIN_DIO3; p++) pio_gpio_init(qspi.pio, p);
+        LCD_3IN49_InitVariant(LCD_3IN49_INIT_FULL);
+
+        gpio_set_function(PB_PIN_LCD_TE, GPIO_FUNC_SIO);
+        gpio_set_dir(PB_PIN_LCD_TE, GPIO_IN);
+        gpio_disable_pulls(PB_PIN_LCD_TE);
+
+        /* TE gecislerini 200 ms boyunca say (60 Hz'de ~24 beklenir).
+         * Test iki yonlu: TEOFF darbeleri durdurmali, TEON geri getirmeli.
+         * Tek yonlu bakmak yaniltici — panel varsayilan olarak da darbeliyor
+         * olabilir, nitekim ilk olcumde oyleydi. */
+        #define TE_SAY() ({                                            \
+            uint32_t _s = 0; int _o = gpio_get(PB_PIN_LCD_TE);         \
+            absolute_time_t _b = make_timeout_time_ms(200);            \
+            while (!time_reached(_b)) {                                \
+                int _n = gpio_get(PB_PIN_LCD_TE);                      \
+                if (_n != _o) { _s++; _o = _n; }                       \
+            } _s; })
+
+        /* Saat hizini da eleyelim: 37.5 MHz komut icin fazla hizliysa yavas
+         * saatte calisir. Iki hizda da olcup karsilastiriyoruz. */
+        const struct { float bolen; const char *ad; } hizlar[] = {
+            { 2.0f,  "clkdiv 2  (~37.5 MHz)" },
+            { 40.0f, "clkdiv 40 (~1.9 MHz)"  },
+        };
+
+        for (size_t h = 0; h < sizeof(hizlar) / sizeof(hizlar[0]); h++) {
+            pio_sm_set_clkdiv(qspi.pio, qspi.sm, hizlar[h].bolen);
+            pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
+
+            uint32_t taban = TE_SAY();
+
+            LCD_3IN49_SendSimpleCmd(0x34);          /* TEOFF */
+            sleep_ms(20);
+            uint32_t kapali = TE_SAY();
+
+            QSPI_Select(qspi);                      /* TEON */
+            QSPI_REGISTER_Write(qspi, 0x35);
+            QSPI_DATA_Write(qspi, 0x00);
+            QSPI_Deselect(qspi);
+            sleep_ms(20);
+            uint32_t acik = TE_SAY();
+
+            printf("   %s\n", hizlar[h].ad);
+            printf("     taban %lu  ->  TEOFF %lu  ->  TEON %lu\n",
+                   (unsigned long)taban, (unsigned long)kapali,
+                   (unsigned long)acik);
+            if (taban > 4 && kapali < 4 && acik > 4) {
+                printf("     -> KOMUTLAR ULASIYOR. Panel emirlere uyuyor.\n");
+            } else if (taban > 4) {
+                printf("     -> panel tariyor ama komutlara UYMUYOR.\n");
+            } else {
+                printf("     -> TE hic darbelemiyor; panel taramiyor.\n");
+            }
+        }
+        printf("\n");
+        pio_sm_set_clkdiv(qspi.pio, qspi.sm, 2.0f);
+        pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
+        #undef TE_SAY
+    }
+
+    /* â”€â”€ 6. Bit-bang: PIO'yu denklemden cikar, panele kimligini sor â”€â”€â”€â”€â”€â”€â”€
+     * PIO calisiyor, pinler kipirdiyor, CS zamanlamasi duzeltildi — ama panel
+     * hala uymuyor. Geriye iki ihtimal kaliyor: PIO'nun urettigi dalga sekli
+     * yanlis, ya da sorun hattin/panelin kendisinde. Bit-bang ikisini ayirir.
+     * Ayrica okuma yapabildigi icin panelin kimligini sorabiliyoruz. */
+    {
+        printf("6) Bit-bang testi (PIO devre disi, ~500 kHz):\n");
+        pio_sm_set_enabled(qspi.pio, qspi.sm, false);
+        bb_pins_setup();
+
+        gpio_set_function(PB_PIN_LCD_TE, GPIO_FUNC_SIO);
+        gpio_set_dir(PB_PIN_LCD_TE, GPIO_IN);
+        gpio_disable_pulls(PB_PIN_LCD_TE);
+
+        uint32_t taban = te_gecis_say();
+        bb_cmd(0x34, NULL, 0);                 /* TEOFF */
+        sleep_ms(20);
+        uint32_t kapali = te_gecis_say();
+        uint8_t param = 0x00;
+        bb_cmd(0x35, &param, 1);               /* TEON */
+        sleep_ms(20);
+        uint32_t acik = te_gecis_say();
+
+        printf("   TE: taban %lu -> TEOFF %lu -> TEON %lu\n",
+               (unsigned long)taban, (unsigned long)kapali, (unsigned long)acik);
+        printf("   -> %s\n", (taban > 4 && kapali < 4 && acik > 4)
+               ? "BIT-BANG CALISIYOR. Hata PIO dalga seklinde."
+               : "bit-bang de etkisiz. Sorun PIO'da degil.");
+
+        /* Panelden oku: 0x04 = RDDID, 0x0A = guc modu, 0x0C = piksel bicimi.
+         * Hepsi 0x00 ya da hepsi 0xFF gelirse panel hic yanit vermiyordur
+         * (hat sirasiyla asagi ya da yukari cekili kaliyor). */
+        const struct { uint8_t reg; const char *ad; } okumalar[] = {
+            { 0x04, "RDDID  (uretici/surum/kimlik)" },
+            { 0x0A, "RDDPM  (guc modu)" },
+            { 0x0C, "RDDCOLMOD (piksel bicimi)" },
+        };
+        int anlamli = 0;
+        for (size_t i = 0; i < sizeof(okumalar) / sizeof(okumalar[0]); i++) {
+            uint8_t buf[6] = {0};
+            bb_read(okumalar[i].reg, buf, sizeof(buf));
+            printf("   0x%02x %-28s:", okumalar[i].reg, okumalar[i].ad);
+            for (size_t j = 0; j < sizeof(buf); j++) printf(" %02x", buf[j]);
+            printf("\n");
+            for (size_t j = 0; j < sizeof(buf); j++) {
+                if (buf[j] != 0x00 && buf[j] != 0xFF) anlamli = 1;
+            }
+        }
+        printf("   -> %s\n\n", anlamli
+               ? "PANEL YANIT VERIYOR. Veri hatti iki yonlu calisiyor."
+               : "PANELDEN HIC YANIT YOK (hep 00 ya da FF). Panel bu hattan\n"
+                 "      bizi duymuyor: pin haritasi ya da kablolama yanlis.");
+
+        /* PIO'yu geri ac */
+        QSPI_GPIO_Init(qspi);
+        for (uint p = PIN_SCLK; p <= PIN_DIO3; p++) pio_gpio_init(qspi.pio, p);
+        pio_sm_set_consecutive_pindirs(qspi.pio, qspi.sm, PIN_SCLK, 1, true);
+        pio_sm_set_consecutive_pindirs(qspi.pio, qspi.sm, PIN_DIO0, 4, true);
+        pio_sm_set_enabled(qspi.pio, qspi.sm, true);
+    }
+
+    /* â”€â”€ 7. Yedek: gozle komut yolu testi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+     * Olculebilir testler sonucsuz kalirsa diye duruyor. */
+    {
+        printf("7) Komut yolu testi — EKRANA BAKIN.\n");
+        printf("   Karincalanmada HERHANGI bir degisiklik (sonme, renklerin\n");
+        printf("   tersine donmesi, parlaklik oynamasi) gorurseniz TUSA BASIN.\n\n");
+
+        backlight_set(true);
+        drain_stdin();
+
+        const struct { uint8_t cmd; const char *ad; } adimlar[] = {
+            { 0x28, "DISPOFF  (ekran sonmeli)" },
+            { 0x29, "DISPON   (geri gelmeli)" },
+            { 0x21, "INVON    (renkler terslenmeli)" },
+            { 0x20, "INVOFF   (geri donmeli)" },
+            { 0x28, "DISPOFF  (ekran sonmeli)" },
+            { 0x29, "DISPON   (geri gelmeli)" },
+        };
+        for (size_t i = 0; i < sizeof(adimlar) / sizeof(adimlar[0]); i++) {
+            LCD_3IN49_SendSimpleCmd(adimlar[i].cmd);
+            printf("   0x%02x %s\n", adimlar[i].cmd, adimlar[i].ad);
+            for (int t = 0; t < 20; t++) {
+                if (getchar_timeout_us(0) >= 0) {
+                    printf("\n   >>> KOMUT YOLU CALISIYOR — degisiklik 0x%02x sonrasi <<<\n",
+                           adimlar[i].cmd);
+                    printf("   Komutlar panele ulasiyor; sorun yalnizca piksel yolunda.\n\n");
+                    LCD_3IN49_SendSimpleCmd(0x29);
+                    return;
+                }
+                sleep_ms(100);
+            }
+        }
+        LCD_3IN49_SendSimpleCmd(0x29);
+        printf("\n   Hicbir degisiklik bildirilmedi — panele HICBIR komut\n");
+        printf("   ulasmiyor. Sorun QSPI hattinin kendisinde (pin/CS/saat).\n\n");
+    }
 }
 
 /**
@@ -482,6 +1307,13 @@ static void print_help(void) {
     printf("  e  EMI taramasi (arka isik etkisi)\n");
     printf("  g  mikrofon kazanci (0-7)\n");
     printf("  r  %d s kayit al ve aktar\n", CAPTURE_SECONDS);
+    printf("  d  ekran testi (panel baslatma varyantlari)\n");
+    printf("  o  yon testi (dort koseye dort renk)\n");
+    printf("  t  dokunmatik teshisi ve koordinat esleme\n");
+    printf("  m  mel + kapi hatti (M3, canli mikrofon)\n");
+    printf("  b  arka isik teshisi\n");
+    printf("  v  QSPI veri yolu teshisi\n");
+    printf("  s  canli spektrogram\n");
     printf("  ?  bu yardim\n\n");
 }
 
@@ -493,6 +1325,7 @@ int main(void) {
     printf(" PokeBird — M1: mikrofon bring-up\n");
     printf("========================================\n");
 
+    power_latch_init();
     backlight_init();
     pb_i2c_init();
 
@@ -517,7 +1350,7 @@ int main(void) {
         printf("[!] I2S yakalama yolu kurulamadi.\n");
     }
 
-    /* ── Ekran ──────────────────────────────────────────────────────────
+    /* â”€â”€ Ekran â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
      * QSPI pio0'da, ses pio1'de — state machine çakışması yok.
      *
      * SIRA ZORUNLU (Waveshare örneğindeki sıra):
@@ -557,6 +1390,11 @@ int main(void) {
             case 's': cmd_spectrogram(); break;
             case 'd': cmd_display_test(); break;
             case 'b': cmd_backlight_probe(); break;
+            case 'v': cmd_datapath_probe(); break;
+            case 'o': cmd_orientation(); break;
+            case 't': cmd_touch_probe(); break;
+            case 'u': cmd_ui_demo(); break;
+            case 'm': cmd_mel_pipeline(); break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;

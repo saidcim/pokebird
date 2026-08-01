@@ -26,14 +26,38 @@ add_executable(pokebird
     src/hal/audio_i2s.c
     src/hal/es8311.c
     src/hal/i2c_bus.c
+    # Satıcının Touch.c'si BİLEREK alınmadı: I2C çağrıları zaman aşımsız,
+    # dokunmatik ACK vermezse tüm cihazı kilitliyor. Protokolü korunarak
+    # zaman aşımlı hâli src/hal/touch.c'ye taşındı.
+    src/hal/touch.c
     src/hal/display/qspi_pio.c
     src/hal/display/dev_config.c
     src/hal/display/lcd_blit.c
     src/hal/display/LCD_3in49.c
-    src/hal/display/Touch.c
     src/dsp/fft.c
+    src/dsp/mel.c
+    src/dsp/gate.c
     src/ui/spectrogram.c
+    src/ui/lv_port.c
 )
+
+# ── LVGL v9 ────────────────────────────────────────────────────────────────
+# third_party/lvgl altına klonlu (git'e girmiyor, .gitignore'da). Yoksa:
+#   git clone -b v9.3.0 --depth 1 https://github.com/lvgl/lvgl.git third_party/lvgl
+# LVGL kendi CMakeLists'inde `lvgl` hedefini tanımlıyor; ayarları
+# src/ui/lv_conf.h'den okuması için mutlak yol veriliyor.
+# DİKKAT: CMake değişkeninin adı LV_BUILD_CONF_PATH. Belgelerde ve örneklerde
+# geçen LV_CONF_PATH, LVGL'in kendi ürettiği DERLEYİCİ makrosunun adı; CMake
+# tarafında karşılığı yok ve verilirse sessizce yok sayılır.
+set(LV_BUILD_CONF_PATH ${CMAKE_CURRENT_LIST_DIR}/src/ui/lv_conf.h CACHE PATH "" FORCE)
+
+# Demo ve örnekler derlenmesin. lv_conf.h'deki LV_BUILD_EXAMPLES yetmiyor:
+# CMake tarafı bunları ayrı hedefler olarak kuruyor ve `lvgl`e PUBLIC
+# bağlıyor. Ayrıca kapattığımız bileşenleri kullandıkları için (lv_spinbox
+# -> LV_USE_TEXTAREA) derleme hatası veriyorlar.
+option(CONFIG_LV_BUILD_DEMOS "" OFF)
+option(CONFIG_LV_BUILD_EXAMPLES "" OFF)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/lvgl lvgl)
 
 target_include_directories(pokebird PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
@@ -51,6 +75,7 @@ target_link_libraries(pokebird PRIVATE
     hardware_i2c
     hardware_pio
     hardware_dma
+    lvgl
 )
 
 # Hata ayıklama çıktısı USB CDC üzerinden. Kartta USB dışında kolay erişilebilir
