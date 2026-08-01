@@ -19,6 +19,12 @@ void pb_i2c_init(void);
 /** Cihazın hatta yanıt verip vermediğini sınar (adres taraması). */
 bool pb_i2c_probe(uint8_t addr);
 
+/** Dokunmatiğin AYRI hattı (GPIO32/33 -> I2C0). Birden fazla çağrı zararsız. */
+void pb_tp_i2c_init(void);
+
+/** Dokunmatik hattında adres taraması. */
+bool pb_tp_i2c_probe(uint8_t addr);
+
 /* es8311.c'nin beklediği API */
 void    DEV_I2C_Write(uint8_t addr, uint8_t reg, uint8_t value);
 uint8_t DEV_I2C_ReadByte(uint8_t addr, uint8_t reg);
