@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 xc_fetch.py — M4 adım 1b+2: Xeno-canto'dan ses kaydı sayımı ve indirme.
 
 İki iş yapar:
@@ -20,13 +20,18 @@ kayıt sayısı iki soruyu birden yanıtlıyor: tür sesle tanınıyor mu, ve o 
 
 API ANAHTARI GEREKİYOR:
   Xeno-canto API v2 kapandı; v3 anahtar istiyor. Ücretsiz:
-  https://xeno-canto.org/account  (hesap açıp "API key" bölümünden alınır)
+  https://xeno-canto.org/account
 
-  Anahtarı ya ortam değişkeninde ya da parametreyle verin:
-      set XC_KEY=...                      (PowerShell: $env:XC_KEY="...")
-      python tools/xc_fetch.py --say
-  ya da
-      python tools/xc_fetch.py --say --key ...
+  Anahtar üç yerden okunuyor, bu sırayla:
+      1. --key parametresi
+      2. XC_KEY ortam değişkeni
+      3. data/.xc_key dosyası        <- TERCİH EDİLEN
+
+  Dosya yöntemi tercih edilir: anahtar komut geçmişine, ekran görüntüsüne
+  ya da sohbet kaydına düşmez. .gitignore'da olduğu için depoya da girmez.
+  Oluşturmak için (PowerShell):
+
+      "ANAHTARINIZ" | Out-File -Encoding ascii -NoNewline data\.xc_key
 
 LİSANS: Xeno-canto kayıtları Creative Commons; her kaydın kendi lisansı var.
 İndirilen her dosyanın lisansı ve kaydedeni `data/xc/kayitlar.csv`'ye
@@ -234,10 +239,26 @@ def komut_indir(key, tur_basina, sadece_ab):
     print(f"Lisans ve atif bilgisi: {kayit_csv}")
 
 
+ANAHTAR_DOSYA = os.path.join(DATA, ".xc_key")
+
+
+def anahtar_bul(parametre):
+    """Anahtarı üç kaynaktan sırayla ara. Dosya yöntemi tercih edilir:
+    anahtar komut geçmişine ya da ekrana düşmez."""
+    if parametre:
+        return parametre.strip()
+    if os.environ.get("XC_KEY"):
+        return os.environ["XC_KEY"].strip()
+    if os.path.exists(ANAHTAR_DOSYA):
+        with open(ANAHTAR_DOSYA, encoding="utf-8-sig") as f:
+            return f.read().strip()
+    return ""
+
+
 def main():
     ap = argparse.ArgumentParser(description="PokeBird M4: Xeno-canto")
-    ap.add_argument("--key", default=os.environ.get("XC_KEY", ""),
-                    help="Xeno-canto API anahtari (ya da XC_KEY ortam degiskeni)")
+    ap.add_argument("--key", default="",
+                    help="Xeno-canto API anahtari (yoksa XC_KEY ya da data/.xc_key)")
     ap.add_argument("--say", action="store_true", help="kayit sayilarini cek ve nihai listeyi olustur")
     ap.add_argument("--indir", action="store_true", help="nihai listedeki turlerin kayitlarini indir")
     ap.add_argument("--esik", type=int, default=VARSAYILAN_ESIK,
@@ -246,19 +267,21 @@ def main():
     ap.add_argument("--tum-kalite", action="store_true", help="A/B disinda C/D/E kayitlari da indir")
     args = ap.parse_args()
 
-    if not args.key:
+    key = anahtar_bul(args.key)
+    if not key:
         sys.exit(
-            "\n[!] Xeno-canto API anahtari yok.\n\n"
+            "\n[!] Xeno-canto API anahtari bulunamadi.\n\n"
             "    API v2 kapandi, v3 anahtar istiyor. Ucretsiz almak icin:\n"
             "      1. https://xeno-canto.org/account adresinde hesap acin\n"
-            "      2. Hesap sayfasindaki 'API key' bolumunden anahtari kopyalayin\n"
-            "      3. PowerShell'de:  $env:XC_KEY = \"...\"\n"
-            "         ya da:          python tools/xc_fetch.py --say --key ...\n")
+            "      2. Ayni sayfadan API anahtarinizi kopyalayin\n"
+            "      3. Anahtari dosyaya yazin (PowerShell):\n"
+            "           \"ANAHTAR\" | Out-File -Encoding ascii -NoNewline data\\.xc_key\n\n"
+            "    Alternatif:  $env:XC_KEY = \"ANAHTAR\"   ya da   --key ANAHTAR\n")
 
     if args.say:
-        komut_say(args.key, args.esik)
+        komut_say(key, args.esik)
     elif args.indir:
-        komut_indir(args.key, args.adet, not args.tum_kalite)
+        komut_indir(key, args.adet, not args.tum_kalite)
     else:
         ap.print_help()
 

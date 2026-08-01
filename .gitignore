@@ -32,3 +32,6 @@ compile_commands.json
 
 # Referans olarak buraya kopyalanan baska projeler
 rsvpnano/
+
+# Xeno-canto API anahtari — asla depoya girmez
+data/.xc_key
