@@ -98,6 +98,13 @@ static uint32_t tick_cb(void)
 
 bool pb_lv_init(void)
 {
+    /* Bir kez kur: iki komut arka arkaya çağırırsa (örn. 'u' sonra 'a')
+     * ikinci lv_init + ikinci display oluşturmak LVGL'i bozar. */
+    static bool s_inited = false;
+    static bool s_touch_ok = false;
+    if (s_inited) return s_touch_ok;
+    s_inited = true;
+
     lv_init();
     lv_tick_set_cb(tick_cb);
 
@@ -106,13 +113,13 @@ bool pb_lv_init(void)
     lv_display_set_buffers(disp, s_draw_buf, NULL, sizeof(s_draw_buf),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    bool dokunmatik = pb_touch_init();
-    if (dokunmatik) {
+    s_touch_ok = pb_touch_init();
+    if (s_touch_ok) {
         lv_indev_t *indev = lv_indev_create();
         lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
         lv_indev_set_read_cb(indev, indev_read_cb);
     }
-    return dokunmatik;
+    return s_touch_ok;
 }
 
 void pb_lv_tick(void)

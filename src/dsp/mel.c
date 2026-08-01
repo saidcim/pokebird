@@ -121,6 +121,13 @@ void pb_mel_reset(void) {
 
 uint32_t pb_mel_frame_count(void) { return s_total; }
 
+bool pb_mel_last_frame(int8_t *out) {
+    if (s_total == 0 || !out) return false;
+    const uint32_t son = (s_write + PB_MEL_FRAMES - 1) % PB_MEL_FRAMES;
+    memcpy(out, s_ring[son], PB_MEL_BANDS);
+    return true;
+}
+
 void pb_mel_push(const int16_t *samples) {
     pb_mel_frame(samples, s_ring[s_write]);
     s_write = (s_write + 1) % PB_MEL_FRAMES;

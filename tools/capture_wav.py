@@ -187,10 +187,13 @@ def main():
     ap = argparse.ArgumentParser(description="PokeBird M1 ses yakalama")
     ap.add_argument("--port", required=True, help="ornek: COM13 veya /dev/ttyACM0")
     ap.add_argument("--out", default="kayit.wav")
-    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i", "l", "d", "s", "b", "v", "o", "t", "u"],
+    ap.add_argument("--cmd", default="r", choices=["r", "n", "e", "i", "l", "d", "s", "b", "v", "o", "t", "u", "m", "a"],
                     help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
                          "l=canli seviye, d=ekran testi, b=arka isik, "
-                         "v=QSPI veri yolu teshisi, s=spektrogram (Ctrl+C ile cik)")
+                         "v=QSPI veri yolu teshisi, s=spektrogram (Ctrl+C ile cik), "
+                         "m=mel+kapi hatti, a=tam demo")
+    ap.add_argument("--sure", type=float, default=0.0,
+                    help="m/a icin: bu kadar saniye akit, sonra cihazdan cik")
     ap.add_argument("--spectrum", action="store_true",
                     help="bant enerjisi analizi (yavas, numpy'siz DFT)")
     args = ap.parse_args()
@@ -217,9 +220,26 @@ def main():
                 print("\n")
             return
 
-        if args.cmd in ("d", "b", "v", "t", "u"):
+        if args.cmd in ("d", "b", "v", "t", "u") or (args.cmd in ("m", "a") and args.sure <= 0):
             # Etkilesimli teshis: canli akis + klavyeyi cihaza ilet.
             run_interactive(ser, args.cmd)
+            return
+
+        if args.cmd in ("m", "a"):
+            # Zamanli akis: --sure kadar canli bas, sonra cikis tusu gonder
+            # ve ozeti al. Goz gerektirmeyen dogrulama icin.
+            ser.write(args.cmd.encode())
+            ser.flush()
+            bitis = time.time() + args.sure
+            while time.time() < bitis:
+                data = ser.read(4096).decode("utf-8", errors="replace")
+                if data:
+                    sys.stdout.write(data)
+                    sys.stdout.flush()
+                else:
+                    time.sleep(0.02)
+            ser.write(b"q")
+            print(read_until_prompt(ser, timeout=10.0))
             return
 
         if args.cmd != "r":

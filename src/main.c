@@ -710,6 +710,155 @@ static void cmd_mel_pipeline(void) {
 }
 
 /**
+ * DEMO — şimdiye kadar yapılan her şey tek ekranda, aynı anda.
+ *
+ *   Sol şerit (0..199)   LVGL durum kartı (M2b): başlık, kapı durumu,
+ *                        canlı sayılar. Yalnızca kirlenen alan yeniden
+ *                        çizildiği için sağ şeride dokunmuyor.
+ *   Sağ şerit (200..639) Canlı MEL spektrogramı (M3): ekranda akan şey
+ *                        FFT değil, modelin göreceği 64 bant. Doğrudan
+ *                        blit ile çiziliyor — LVGL ile bir arada yaşama
+ *                        M2b'nin açık kalan 6. maddesiydi, bu demo onu
+ *                        kapatıyor.
+ *   Ses                  Sürekli yakalama halkasından (M3'ün son işi):
+ *                        62.5 kare/s örtüşmeli hop, kare kaçırmadan.
+ *   Kapı                 Ses algılayınca durum yazısı yeşillenir; 3 s'lik
+ *                        pencere sayacı modelin girdi penceresinin
+ *                        birikişini gösterir.
+ *
+ * Çıkışta sayısal özet de basılıyor: kare/s ölçümü göz gerektirmeden
+ * doğrulanabilsin (kabul ölçütü 62/s, eski bloklayan yakalama 57'de
+ * kalıyordu).
+ */
+static void cmd_full_demo(void) {
+    printf("\nDEMO: LVGL kart + canli mel spektrogrami + kapi.\n");
+    printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
+    printf("Cikmak icin bir tusa basin.\n\n");
+    backlight_set(true);
+
+    bool dokunmatik = pb_lv_init();
+    printf("  dokunmatik: %s\n", dokunmatik ? "hazir" : "yok (demoya engel degil)");
+
+    /* ── Sol kart ── */
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_clean(scr);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x101820), LV_PART_MAIN);
+
+    lv_obj_t *baslik = lv_label_create(scr);
+    lv_label_set_text(baslik, "PokeBird");
+    lv_obj_set_style_text_color(baslik, lv_color_hex(0xF0C000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(baslik, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(baslik, LV_ALIGN_TOP_LEFT, 12, 8);
+
+    lv_obj_t *durum = lv_label_create(scr);
+    lv_label_set_text(durum, "dinliyor...");
+    lv_obj_set_style_text_color(durum, lv_color_hex(0xB0B8C0), LV_PART_MAIN);
+    lv_obj_align(durum, LV_ALIGN_TOP_LEFT, 12, 44);
+
+    lv_obj_t *sayilar = lv_label_create(scr);
+    lv_label_set_text(sayilar, "");
+    lv_obj_set_style_text_color(sayilar, lv_color_hex(0x8090A0), LV_PART_MAIN);
+    lv_obj_align(sayilar, LV_ALIGN_TOP_LEFT, 12, 76);
+
+    /* Kartı çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi tam
+     * ekran, spektrogram alanını da boyuyor — sıra ters olursa şerit silinir. */
+    for (int i = 0; i < 4; i++) { pb_lv_tick(); sleep_ms(5); }
+    pb_spec_init();
+
+    /* ── Ses hattı ── */
+    pb_mel_init();
+    pb_mel_reset();
+    pb_gate_reset();
+
+    static int16_t kare[PB_FFT_SIZE];
+    memset(kare, 0, sizeof(kare));
+    const uint32_t kalan = PB_FFT_SIZE - PB_MEL_HOP;
+
+    uint32_t toplam = 0, acik = 0, pencere_sayisi = 0, kayip = 0;
+    uint32_t saniye_kare = 0, son_hiz = 0;
+    /* Kapı kapanınca yazıyı hemen soldurmak yerine kısa bir süre tut:
+     * 62 kare/s'de tek karelik açılmalar gözle görülmez. */
+    uint32_t kapi_tut = 0;
+    bool kapi_gorunur = false;
+    absolute_time_t sonraki_rapor = make_timeout_time_ms(1000);
+    absolute_time_t sonraki_kart  = make_timeout_time_ms(250);
+
+    pb_audio_stream_flush();
+    drain_stdin();
+
+    while (getchar_timeout_us(0) < 0) {
+        memmove(kare, kare + PB_MEL_HOP, kalan * sizeof(int16_t));
+        pb_capture_result_t cap = pb_audio_stream_read(kare + kalan, PB_MEL_HOP, 1000);
+        if (cap.samples < PB_MEL_HOP) { printf("  yakalama eksik, cikiliyor\n"); break; }
+        if (cap.fifo_overrun) kayip++;
+
+        float power[PB_FFT_POWER_BINS];
+        pb_fft_power(kare, power);
+        pb_gate_result_t g = pb_gate_update(power);
+        if (g.active) { acik++; kapi_tut = 31; }      /* ~0.5 s görünür kal */
+        else if (kapi_tut) kapi_tut--;
+
+        pb_mel_push(kare);
+        toplam++;
+        saniye_kare++;
+
+        if (pb_mel_frame_count() >= PB_MEL_FRAMES &&
+            pb_mel_frame_count() % PB_MEL_FRAMES == 0) {
+            static int8_t pencere[PB_MEL_BANDS * PB_MEL_FRAMES];
+            if (pb_mel_window(pencere)) pencere_sayisi++;
+        }
+
+        /* Mel karesini spektrogram sütununa çevir. Gösterim penceresi
+         * -75..-15 dB: oda tabanı (~-47 dB) koyu, kuş sesi parlak düşer. */
+        int8_t mel_q[PB_MEL_BANDS];
+        if (pb_mel_last_frame(mel_q)) {
+            uint8_t bins[PB_MEL_BANDS];
+            for (int b = 0; b < PB_MEL_BANDS; b++) {
+                float db = pb_mel_q_to_db(mel_q[b]);
+                float v = (db + 75.0f) * (255.0f / 60.0f);
+                if (v < 0.0f) v = 0.0f;
+                if (v > 255.0f) v = 255.0f;
+                bins[b] = (uint8_t)v;
+            }
+            pb_spec_push_column(bins, PB_MEL_BANDS);
+        }
+
+        if (time_reached(sonraki_rapor)) {
+            son_hiz = saniye_kare;
+            saniye_kare = 0;
+            sonraki_rapor = make_timeout_time_ms(1000);
+        }
+
+        /* Kartı 4 Hz güncelle: her karede güncellemek LVGL'e boş yere
+         * çizim çıkarır ve hop bütçesini yer. */
+        if (time_reached(sonraki_kart)) {
+            bool goster = g.active || kapi_tut > 0;
+            if (goster != kapi_gorunur) {
+                kapi_gorunur = goster;
+                lv_label_set_text(durum, goster ? "SES ALGILANDI" : "dinliyor...");
+                lv_obj_set_style_text_color(durum,
+                    lv_color_hex(goster ? 0x40E060 : 0xB0B8C0), LV_PART_MAIN);
+            }
+            lv_label_set_text_fmt(sayilar,
+                "%lu kare/s\nkapi %%%lu\nbant %d dB\npencere %lu\nkayip %lu",
+                (unsigned long)son_hiz,
+                (unsigned long)(toplam ? acik * 100 / toplam : 0),
+                (int)g.band_db,
+                (unsigned long)pencere_sayisi,
+                (unsigned long)kayip);
+            sonraki_kart = make_timeout_time_ms(250);
+        }
+        pb_lv_tick();
+    }
+
+    printf("\n  toplam kare %lu, son hiz %lu kare/s, kapi acik %%%lu,\n"
+           "  tam pencere %lu, kayip %lu\n\n",
+           (unsigned long)toplam, (unsigned long)son_hiz,
+           (unsigned long)(toplam ? acik * 100 / toplam : 0),
+           (unsigned long)pencere_sayisi, (unsigned long)kayip);
+}
+
+/**
  * LVGL demo — M2b'nin kabul ölçütü.
  *
  * Tek ekranda dört şeyi birden sınıyor: LVGL'in ayağa kalkması, 90° yön
@@ -1322,6 +1471,7 @@ static void print_help(void) {
     printf("  o  yon testi (dort koseye dort renk)\n");
     printf("  t  dokunmatik teshisi ve koordinat esleme\n");
     printf("  m  mel + kapi hatti (M3, canli mikrofon)\n");
+    printf("  a  DEMO: LVGL kart + canli mel spektrogrami + kapi\n");
     printf("  b  arka isik teshisi\n");
     printf("  v  QSPI veri yolu teshisi\n");
     printf("  s  canli spektrogram\n");
@@ -1406,6 +1556,7 @@ int main(void) {
             case 't': cmd_touch_probe(); break;
             case 'u': cmd_ui_demo(); break;
             case 'm': cmd_mel_pipeline(); break;
+            case 'a': cmd_full_demo(); break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;

@@ -58,6 +58,14 @@ void pb_mel_reset(void);
 uint32_t pb_mel_frame_count(void);
 
 /**
+ * Son itilen karenin int8 değerlerini kopyala — canlı gösterim için.
+ * Mel karesini yeniden HESAPLAMAZ; halkadan okur.
+ * @param out PB_MEL_BANDS adet int8
+ * @return    henüz hiç kare itilmediyse false
+ */
+bool pb_mel_last_frame(int8_t *out);
+
+/**
  * Son 3 saniyeyi, model girdisi olarak normalize edilmiş hâlde ver.
  *
  * Pencere içi ortalama/varyans normalizasyonu burada yapılıyor (plan §3):
