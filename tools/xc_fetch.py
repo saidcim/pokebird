@@ -156,7 +156,7 @@ def csv_yaz(satirlar, sutunlar):
 
 # ── Sayım ──────────────────────────────────────────────────────────────────
 
-def komut_say(key, esik):
+def komut_say(key, esik, nadir_esik=NADIR_ESIK, yaygin_gbif=YAYGIN_GBIF):
     satirlar, sutunlar = csv_oku()
     havuz = [s for s in satirlar if s["durum"] == "dahil"]
     print(f"Havuzda {len(havuz)} tur. Xeno-canto kayit sayilari cekiliyor...")
@@ -180,9 +180,9 @@ def komut_say(key, esik):
             # tarafından desteklenmiyor (400 dönüyor), o yüzden ND'yi burada
             # değil indirme sırasında metadata'dan eliyoruz.
             d = {
-                "ab":     xc_sorgu(key, f'sp:"{sci}" q:"<C"').get("numRecordings", "0"),
-                "ab_eu":  xc_sorgu(key, f'sp:"{sci}" q:"<C" area:europe').get("numRecordings", "0"),
-                "ab_sa":  xc_sorgu(key, f'sp:"{sci}" q:"<C" area:europe lic:"BY-NC-SA"').get("numRecordings", "0"),
+                "ab":     xc_sorgu(key, f'sp:"{sci}" q:">C"').get("numRecordings", "0"),
+                "ab_eu":  xc_sorgu(key, f'sp:"{sci}" q:">C" area:europe').get("numRecordings", "0"),
+                "ab_sa":  xc_sorgu(key, f'sp:"{sci}" q:">C" area:europe lic:"BY-NC-SA"').get("numRecordings", "0"),
             }
             with open(onbellek, "w", encoding="utf-8") as f:
                 json.dump(d, f)
@@ -206,8 +206,8 @@ def komut_say(key, esik):
         eu = int(s.get("xc_ab_eu") or 0)
         dunya = int(s.get("xc_ab") or 0)
         etkin = eu if eu > 0 else dunya
-        yaygin = int(s.get("gbif_kayit") or 0) >= YAYGIN_GBIF
-        gereken = esik if yaygin else NADIR_ESIK
+        yaygin = int(s.get("gbif_kayit") or 0) >= yaygin_gbif
+        gereken = esik if yaygin else nadir_esik
 
         if etkin < gereken:
             s["durum"] = "elendi"
@@ -265,7 +265,7 @@ def komut_indir(key, tur_basina, sadece_ab, nd_dahil):
             hedef_dizin = os.path.join(XC_DIR, s["ebird_kodu"] or sci.replace(" ", "_"))
             os.makedirs(hedef_dizin, exist_ok=True)
 
-            kalite = ' q:"<C"' if sadece_ab else ""
+            kalite = ' q:">C"' if sadece_ab else ""
             # Kademeli gevşetme: en alakalı/en ucuz kayıtlardan başla, tür
             # başına hedef dolmazsa kısıtları sırayla kaldır.
             #
@@ -366,7 +366,11 @@ def main():
     ap.add_argument("--say", action="store_true", help="kayit sayilarini cek ve nihai listeyi olustur")
     ap.add_argument("--indir", action="store_true", help="nihai listedeki turlerin kayitlarini indir")
     ap.add_argument("--esik", type=int, default=VARSAYILAN_ESIK,
-                    help=f"nihai liste icin asgari A/B kayit (varsayilan {VARSAYILAN_ESIK})")
+                    help=f"yaygin turler icin asgari A/B kayit (varsayilan {VARSAYILAN_ESIK})")
+    ap.add_argument("--nadir-esik", type=int, default=NADIR_ESIK,
+                    help=f"nadir turler icin asgari A/B kayit (varsayilan {NADIR_ESIK})")
+    ap.add_argument("--yaygin-gbif", type=int, default=YAYGIN_GBIF,
+                    help=f"bu kadar GBIF kaydi olan tur 'yaygin' sayilir (varsayilan {YAYGIN_GBIF})")
     ap.add_argument("--adet", type=int, default=60, help="tur basina indirilecek kayit (varsayilan 60)")
     ap.add_argument("--tum-kalite", action="store_true", help="A/B disinda C/D/E kayitlari da indir")
     ap.add_argument("--nd-dahil", action="store_true",
@@ -385,7 +389,7 @@ def main():
             "    Alternatif:  $env:XC_KEY = \"ANAHTAR\"   ya da   --key ANAHTAR\n")
 
     if args.say:
-        komut_say(key, args.esik)
+        komut_say(key, args.esik, args.nadir_esik, args.yaygin_gbif)
     elif args.indir:
         komut_indir(key, args.adet, not args.tum_kalite, args.nd_dahil)
     else:

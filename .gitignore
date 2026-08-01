@@ -35,3 +35,6 @@ rsvpnano/
 
 # Xeno-canto API anahtari — asla depoya girmez
 data/.xc_key
+
+# M4 boru hatti calisma gunlugu
+data/m4_run.log
