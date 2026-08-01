@@ -9,15 +9,22 @@
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
-**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 🔶
+**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 ✅
 
 Çalışma ağacı temiz, her şey commit edildi (§10).
 
-**Sıradaki iş — M3'ün kalanı:** `pb_audio_capture` bloklayan olduğu için DSP
-hattı gerçek zamanın **%91'inde** koşuyor (57 kare/s, olması gereken 62.5) ve
-kare kaçırıyor. Çift tamponlu sürekli yakalamaya (ping-pong DMA) geçilmeli.
-Model eklenmeden çözülmeli, yoksa gerçek zamanlı bütçe baştan açık verir.
-Ayrıntı §9c.
+**M3 KAPANDI (1 Ağustos 2026):** Sürekli yakalama (kendini yenileyen DMA
+halka tamponu) yazıldı ve kartta doğrulandı: **62–63 kare/s, kayıp 0**
+(hedef 62.5; eski bloklayan yakalama 57'de kalıyordu). Ayrıntı §9c.
+Ayrıca `a` komutu eklendi: şimdiye kadarki her şeyi tek ekranda çalıştıran
+demo — LVGL kart + canlı mel spektrogramı + kapı. **Kullanıcı ekranda
+doğruladı:** kart doğru, spektrogram akıyor, ses çıkınca "SES ALGILANDI"
+yeşil yanıyor. Bu demo M2b'nin açık 6. maddesini de (spektrogram + LVGL
+bir arada) kapattı.
+
+**Sıradaki iş — M4:** Veri boru hattı + İstanbul tür listesi (PC tarafı).
+`species_istanbul.csv` + indirilmiş/segmentlenmiş veri kümesi
+(ARCHITECTURE §M4).
 
 ---
 
@@ -186,14 +193,22 @@ Kart USB seri olarak görünüyor: **COM13** (`VID_2E8A PID_0009`).
 | `t` | dokunmatik teşhisi (canlı akış) | **evet** |
 | `u` | LVGL demo ekranı | **evet** |
 | `m` | **mel + kapı hattı (M3)** | hayır |
+| `a` | **TAM DEMO**: LVGL kart + canlı mel spektrogramı + kapı | **evet** |
 
 ```bash
-python tools/capture_wav.py --port COM13 --cmd m
-python tools/capture_wav.py --port COM13 --out a.wav   # kayit al
+python tools/capture_wav.py --port COM13 --cmd m --sure 8   # 8 s akit, ozeti al
+python tools/capture_wav.py --port COM13 --cmd a --sure 15  # demoyu 15 s calistir
+python tools/capture_wav.py --port COM13 --out a.wav        # kayit al
 ```
 
 `d`, `b`, `v`, `t`, `u` **etkileşimli**: araç çıktıyı canlı akıtır ve klavyeyi
-cihaza iletir. Diğerleri toplu okur.
+cihaza iletir. Diğerleri toplu okur. `m` ve `a`, `--sure N` verilirse N saniye
+akıtıp kendiliğinden çıkar (göz gerektirmeyen doğrulama); `--sure`'siz
+etkileşimli çalışırlar.
+
+> Tek seferlik gözlenen tuhaflık: uzun (60 s) bir `--sure` koşusunda çıkış
+> tuşu cihaza ulaşmadı ve özet bir sonraki bağlantıda geldi. Tekrarında
+> (15 s) temiz çalıştı; kovalanmadı. Tekrar görülürse USB-CDC tarafına bakın.
 
 `v` teşhisinin ilk dört adımı ekrana bakmayı gerektirmez; QSPI hattında bir şey
 bozulursa oradan başlayın: dar DMA yazımı, PIO durumu, pinlerin gerçekten
@@ -399,8 +414,8 @@ satır bazında onarıldı, derleme doğrulandı.
 
 | Konu | Durum |
 |---|---|
-| **`pb_audio_capture` bloklayan** | **M3'ün kalan işi.** Hat gerçek zamanın %91'inde koşuyor, kare kaçıyor. Ping-pong DMA'ya geçilmeli. Bkz. §9c. |
 | **EMI ölçümü geçersiz** | M1'deki tarama PWM ile yapıldı, ışık hep kapalıydı. `e` komutu aç/kapa olarak düzeltilip yeniden ölçülmeli (§4). |
+| **`s_capture` (96 KB) hâlâ duruyor** | Teşhis komutları (`n`, `r`, `e`...) kullanıyor. Sürekli yakalama halkası (16 KB) ayrı. TFLM arena'sı (180 KB, M6) eklenmeden `s_capture` küçültülmeli/kaldırılmalı — bss şu an 206 KB. |
 | **Dokunmatik park edildi** | Kritik yolda değil. Kaldığı yer §9b. |
 | **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **GPIO34 (LCD_RST) aşağı çekilemiyor** | Ölçüldü, kök neden aranmadı. Bkz. §5.11. |
@@ -453,13 +468,16 @@ DMA 8 + FatFS 10 + tablo 20 + yığın/heap 80 = **~360 KB**, ~160 KB pay.
 ### Şu anki gerçek kullanım
 
 ```
-text 449 KB (flash, 16 MB'de sorun değil)
-bss  189 KB (520 KB SRAM'de)
+text 460 KB (flash, 16 MB'de sorun değil)
+bss  206 KB (520 KB SRAM'de)
 ```
 
-bss'in içinde `s_capture` (M1 test tamponu, ~96 KB) var — ping-pong DMA'ya
-geçilince kalkacak. TFLM arena'sı (180 KB) ondan sonra gelecek. **Arena
-eklenmeden önce s_capture'ın kalkması gerekiyor**, yoksa bütçe taşar.
+bss'in içinde: `s_capture` (M1 test tamponu, ~96 KB — teşhis komutları hâlâ
+kullanıyor) + sürekli yakalama halkası (16 KB, 16 KB'a hizalı) + LVGL çizim
+tamponu (25 KB) + mel halkası (12 KB). TFLM arena'sı (180 KB) gelmeden
+**s_capture küçültülmeli/kaldırılmalı**, yoksa bütçe taşar. Sürekli yakalama
+sayesinde teşhis komutları artık halkadan parça parça da okuyabilir —
+s_capture'ı kaldırmanın yolu açık.
 
 ---
 
@@ -470,9 +488,9 @@ eklenmeden önce s_capture'ın kalkması gerekiyor**, yoksa bütçe taşar.
 | M0 | İskelet, derleme zinciri | ✅ |
 | M1 | Mikrofon bring-up + SNR | ✅ |
 | M2a | Ekran sürücüsü + canlı spektrogram | ✅ (§9a) |
-| **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL çalışıyor; dokunmatik park, TE yapılmadı (§9b)** |
-| **M3** | **DSP hattı: mel + kapı** | **🔶 mel+kapı doğrulandı; ping-pong DMA kaldı (§9c)** |
-| M4 | Veri boru hattı + tür listesi (PC tarafı) | |
+| **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
+| M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
+| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **⬅ SIRADAKİ** |
 | M5 | Model eğitimi + damıtma + INT8 | |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
@@ -566,7 +584,7 @@ birden** dönmeli: `write_ui_column`'daki ny ve bin eşlemesi.
 | 3 | Dokunmatik sürücüsü (zaman aşımlı), çip 0x3B'de ACK veriyor | ✅ |
 | 4 | Dokunmatik koordinat eşlemesi | ⏸ **PARK EDİLDİ** |
 | 5 | LCD_TE ile yırtılma önleme | ⏳ yapılmadı |
-| 6 | Spektrogramın LVGL ile birlikte yaşaması | ⏳ yapılmadı |
+| 6 | Spektrogramın LVGL ile birlikte yaşaması | ✅ `a` demosu kanıtladı: LVGL sol şeritte (0..199), spektrogram sağda (200..639) doğrudan blit; LVGL yalnızca kirlenen alanı çizdiği için çakışmıyor. Sıra önemli: LVGL'in İLK çizimi tam ekran, `pb_spec_init` ondan SONRA çağrılmalı. `pb_lv_init` artık çift çağrıya dayanıklı. |
 
 ### Yön çevrimi ek tampon olmadan
 
@@ -618,7 +636,7 @@ karede ayrı ayrı okuyordu; iç içe geçen komut+okuma dizisi çipi bozabilir.
 
 ---
 
-## 9c. M3 — mel + kapı (BURADA KALDIK)
+## 9c. M3 — mel + kapı + sürekli yakalama ✅ TAMAMLANDI
 
 ### Yapılanlar
 
@@ -671,14 +689,45 @@ toplam kare 506, kapi acik 15 (%2), tam pencere 2
 - Taban 2–10 kHz bandında ~-47 dB; M1'de ölçülen ~-36 dBFS geniş bant oda
   gürültüsüyle tutarlı.
 
-### ⚠ KALAN İŞ: kare hızı %9 eksik
+### Sürekli yakalama — kendini yenileyen DMA halka tamponu ✅
 
-Ölçülen ~57 kare/s, olması gereken 62.5 (hop 384 @ 24 kHz). Hat gerçek zamanın
-%91'inde koşuyor, kareler kaçıyor. Sebep `pb_audio_capture`'ın bloklayan olması.
+Eski `pb_audio_capture` bloklayandı: her çağrı FIFO'yu boşaltıp sıfırdan DMA
+kuruyordu; çağrılar arasında gelen örnekler PIO'nun 8 kelimelik FIFO'sunu
+taşırıp düşüyordu → ~57 kare/s (62.5 yerine).
 
-**Yapılacak:** çift tamponlu sürekli yakalama (ping-pong DMA). Yan faydası:
-`s_capture` (~96 KB) kalkar ve TFLM arena'sına (180 KB) yer açılır — arena
-eklenmeden bu şart.
+**Çözüm ([`src/hal/audio_i2s.c`](src/hal/audio_i2s.c)):** klasik ping-pong
+yerine tek halka + iki DMA kanalı:
+
+- **Veri kanalı:** PIO RX → 4096 örneklik halka (16 KB, 24 kHz'de 170 ms).
+  DMA'nın **adres sarma (ring)** özelliği kullanılıyor — yazma adresi tampon
+  sonunda kendiliğinden başa dönüyor. Şartları: boyut ikinin kuvveti VE tampon
+  kendi boyutuna hizalı (`aligned(16384)`).
+- **Kontrol kanalı:** veri kanalı bitince zincirle tetikleniyor, tek iş yapıyor:
+  veri kanalının `al1_transfer_count_trig` register'ına sayacı yeniden yazmak.
+  Bu, kanalı anında yeniden başlatıyor. CPU hiç karışmıyor.
+- İki tur arasındaki birkaç çevrimlik boşluğu PIO RX FIFO'su (~333 µs) kapatıyor.
+
+API: `pb_audio_stream_read` (kesintisiz, gerçek zamanlı hat için),
+`pb_audio_stream_flush` (canlı göstergeler en tazeye atlar),
+`pb_audio_capture` (eski imza korunarak flush+oku sarmalayıcısı oldu —
+teşhis komutları değişmedi).
+
+**Tüketici geride kalırsa:** halkanın 3/4'ünden fazlası birikmişse okuma en
+tazeye atlar ve `fifo_overrun` ile bildirir — sessizce süreksiz veri dönmez.
+
+**Durdururken tuzak:** önce zincir kırılmalı (`al1_ctrl`'de chain_to'yu kendine
+çevir), sonra abort. İptal edilen kanal zinciri tetikleyebiliyor; sıra ters
+olursa kontrol kanalı veri kanalını hemen yeniden başlatıyor.
+
+**Kartta ölçüldü (1 Ağustos 2026):**
+```
+m komutu:  62-63 kare/s, kayip 0            (hedef 62.5, eskiden 57)
+a demosu:  63 kare/s, kayip 0 — LVGL + dokunmatik + spektrogram yüküyle
+           15 s'de 940 kare = 62.7/s, matematik birebir
+```
+
+Kapı davranışı değişmedi (sessiz odada %0–3). Kullanıcı demoyu ekranda
+doğruladı: kart + akan mel spektrogramı + "SES ALGILANDI" yeşil.
 
 ---
 
@@ -717,6 +766,8 @@ Dal `main`, uzak depo yok, çalışma ağacı temiz. Bu oturumun commit'leri
 | `9e7e2dc` | Dokunmatik: zaman aşımlı kendi sürücümüz, satıcı sürücüsü kaldırıldı |
 | `30c6ac9` | M2b: LVGL v9.3 entegrasyonu, 90° yön çevrimi ek tampon olmadan |
 | `cfcc0c4` | Teşhis komutları, derleme hedefleri ve etkileşimli araç kipi |
+| `a7ca72b` | **M3: sürekli yakalama — kendini yenileyen DMA halka tamponu** |
+| `6b27ab6` | Demo komutu `a`: LVGL kart + canlı mel spektrogramı + kapı tek ekranda |
 
 Sıralama **her commit derlenebilir kalsın** diye seçildi: DSP dosyaları
 CMakeLists'e eklenmeden önce commit'lendiği için ara commit'lerde derlemeye
