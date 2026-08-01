@@ -13,6 +13,23 @@
 
 #define PB_FFT_SIZE 512
 #define PB_FFT_BINS (PB_FFT_SIZE / 2)
+/** Gerçek girdi için benzersiz bin sayısı: 0..N/2 dahil. */
+#define PB_FFT_POWER_BINS (PB_FFT_SIZE / 2 + 1)
+
+/**
+ * Hann pencereli güç spektrumu.
+ *
+ * Hem canlı spektrogram hem mel öznitelik hattı bunu kullanıyor — tek kaynak
+ * olsun ki ikisi aynı pencereyi ve aynı DC giderimini görsün.
+ *
+ * Ölçek: girdi tam ölçeğe (32768) bölünüyor, sonra pencerenin tutarlı
+ * kazancına göre normalize ediliyor. Böylece tam ölçekli sinüs, kendi
+ * bin'inde 1.0'a yakın güç veriyor ve dBFS okumaları anlamlı oluyor.
+ *
+ * @param samples PB_FFT_SIZE adet int16
+ * @param power   çıkış, PB_FFT_POWER_BINS adet
+ */
+void pb_fft_power(const int16_t *samples, float *power);
 
 /**
  * `PB_FFT_SIZE` adet int16 örnekten log-ölçekli genlik spektrumu üret.

@@ -40,18 +40,57 @@ static void fft_inplace(float *re, float *im, uint32_t n) {
     }
 }
 
-void pb_fft_spectrum(const int16_t *samples, uint8_t *out, uint32_t n_out,
-                     float floor_db) {
-    if (!s_window_ready) {
-        for (uint32_t i = 0; i < PB_FFT_SIZE; i++) {
-            s_window[i] = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * (float)i /
-                                             (float)(PB_FFT_SIZE - 1));
-        }
-        s_window_ready = 1;
+/* Hann penceresi — periyodik (N'e bölünür), simetrik (N-1) DEĞİL.
+ * Periyodik olan, ardışık karelerin örtüştüğü spektral analizde doğru olan
+ * ve Python tarafının (scipy/librosa `sym=False`) varsayılanı; referansla
+ * karşılaştırma yapacağımız için bu ayrım önemli. */
+static void window_ensure(void) {
+    if (s_window_ready) return;
+    for (uint32_t i = 0; i < PB_FFT_SIZE; i++) {
+        s_window[i] = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * (float)i /
+                                         (float)PB_FFT_SIZE);
     }
+    s_window_ready = 1;
+}
+
+void pb_fft_power(const int16_t *samples, float *power) {
+    window_ensure();
 
     /* DC'yi çıkar — mikrofonun sabit bir ofseti var (M1'de ~15 LSB ölçüldü)
      * ve çıkarılmazsa bin 0'da yapay bir tepe oluşturuyor. */
+    float mean = 0.0f;
+    for (uint32_t i = 0; i < PB_FFT_SIZE; i++) mean += (float)samples[i];
+    mean /= (float)PB_FFT_SIZE;
+
+    for (uint32_t i = 0; i < PB_FFT_SIZE; i++) {
+        s_re[i] = (((float)samples[i] - mean) / 32768.0f) * s_window[i];
+        s_im[i] = 0.0f;
+    }
+    fft_inplace(s_re, s_im, PB_FFT_SIZE);
+
+    /* Pencerenin tutarlı kazancıyla normalize: tam ölçekli bir sinüs kendi
+     * bin'inde 1.0 güç versin, yani 0 dBFS.
+     *
+     * Türetme: x[n] = A·sin(...) Hann ile pencerelenince kendi bin'inde
+     * |X[k]| ≈ A·N/4, güç ise A²N²/16. Bunu A²'ye getirmek için 16/N²
+     * gerekiyor; kazanç sum(w)/N = 0.5 üzerinden yazınca 4/kazanç².
+     * (Önce 2/kazanç² yazılmıştı; o, sinüsün ortalama-karesini yani A²/2'yi
+     * veriyordu ve tam ölçekli sinüs -3 dBFS okunuyordu. Host testi yakaladı.) */
+    const float gain = 0.5f * (float)PB_FFT_SIZE;
+    const float scale = 4.0f / (gain * gain);
+
+    for (uint32_t k = 0; k < PB_FFT_POWER_BINS; k++) {
+        float p = s_re[k] * s_re[k] + s_im[k] * s_im[k];
+        /* DC ve Nyquist'in eşi yok, iki katına çıkarılmaz. */
+        power[k] = (k == 0 || k == PB_FFT_SIZE / 2) ? p * (scale * 0.5f)
+                                                    : p * scale;
+    }
+}
+
+void pb_fft_spectrum(const int16_t *samples, uint8_t *out, uint32_t n_out,
+                     float floor_db) {
+    window_ensure();
+
     float mean = 0.0f;
     for (uint32_t i = 0; i < PB_FFT_SIZE; i++) mean += (float)samples[i];
     mean /= (float)PB_FFT_SIZE;
