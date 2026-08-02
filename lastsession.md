@@ -123,8 +123,21 @@ dogrulama 8/8 pencere BIREBIR ayni logit  <- "PC'de calisiyor cihazda
 core1     62,6 kare/s, overrun 0, birlestirme 8 pencere
 ```
 
-**SIRADAKİ İŞ — ekran hatası (§9n).** M6'nın çıktısını kullanıcıya
-göstermenin önündeki tek engel bu ve M7'nin tamamı ona bağlı.
+**M7 ADIM 1+2 YAZILDI (§9p) — ⚠ GÖZLE DOĞRULANMADI.** Cihaz artık tanıdığı
+türü ekrana basıyor: `c` komutu, solda tanıma kartı (tür adı + güven + ilk 3
++ sayaçlar), sağda canlı spektrogram. Arada bir karar kuralı var
+(`src/ai/karar.c`) ve **eşikleri ölçüldü, tahmin edilmedi**:
+
+```
+girme esigi 0,60   isabet %85,4  kapsam %35,6  yanlis alarm %2,7
+cikma esigi 0,35   isabet %71,7                     <- histerezisin alt ucu
+en az 3 pencere    1 pencerede %70,1 / 3'te %84,9 / 8'de %85,4
+olcum: tools/esik_olc.py -> models/esik.txt (test kumesi, TF gerekmez)
+```
+
+Göz gerektirmeyen kanıt kartta alındı: **1248 kare / 20 s = 62,4 kare/s,
+overrun 0**, LVGL flush 232, satır adımı sapması 0. **Kalan tek şey ekrana
+bakmak** — komutlar §9p'nin sonunda yazılı, kullanıcı çalıştıracak.
 
 Geriye kalan küçük işler: Aşama-1 ikili ağ, Aşama-3 mevsim tablosu (§9k sonu).
 
@@ -315,6 +328,8 @@ Kart USB seri olarak görünüyor: **COM13** (`VID_2E8A PID_0009`).
 | `x` | **tür ağı cihaz-içi doğrulama** + arena + çıkarım süresi (M6) | hayır |
 | `k` | **gerçek zamanlı tanıma** (core 1, mikrofon) | hayır |
 | `K` | aynısı ama kapı yoksayılır — ölçüm kipi | hayır |
+| `c` | **SONUÇ EKRANI (M7)**: tanıma kartı + karar kuralı + spektrogram | **evet** |
+| `C` | sonuç kartı **gösterim testi** — mikrofonsuz, sahte sonuç dizisi | **evet** |
 
 ```bash
 python tools/capture_wav.py --port COM13 --cmd m --sure 8   # 8 s akit, ozeti al
@@ -641,7 +656,8 @@ değil" sonucunu verdi. Bunu bir kez daha kullanın — ucuz ve kesin.
 | ~~**`s_capture` (96 KB)**~~ | ✅ **ÇÖZÜLDÜ (§9g).** 4 KB'lık `s_chunk`'a indi, bss 218.988 → 127.084. Arena'nın önü açık. |
 | ~~**Ekran gerilemesi**~~ | ✅ **ÇÖZÜLDÜ (§9h).** Panel hazır olma penceresi; ekran başlatması açılıştan ≥250 ms sonraya alındı. Bellek kazancı korundu. |
 | **EMI ölçümü — borç neredeyse kapandı** | `e` komutu artık gerçekten aç/kapa ölçüyor (arka ışık düz GPIO'da): **kapalıya göre +0,4 dB**, yani arka ışık mikrofonu bozmuyor. Kalan tek eksik: son üç ölçüm hâlâ `PWM %50` / `PWM %10` diye etiketleniyor, oysa üçü de aynı "açık" durumu. Etiketler düzeltilip yeniden çalıştırılırsa §4'teki "GEÇERSİZ" uyarısı kaldırılabilir. Küçük iş. |
-| **⛔ EKRAN BOZUK** | `o` testinde yalnızca en son çizilen kare görünüyor; `a` demosunda yazı tipi bozuk. **M6 öncesi derlemede de aynı** — gerileme değil, gözden kaçmış bir hata. Bit-bang yolu çalışıyor, PIO/DMA yolu çalışmıyor. Elenen ihtimaller ve sıradaki adım §9n. **M7'nin tamamı buna bağlı.** |
+| ~~**⛔ EKRAN BOZUK**~~ | ✅ **ÇÖZÜLDÜ (§9n).** RASET (0x2B) yok sayılıyor + dar sütun bandında satır kayması. Kart framebuffer'ı (`s_kart_fb`) ile kapandı; panele artık her zaman tam genişlikte basılıyor. Kullanıcı gözle doğruladı. |
+| **Türkçe yazı tipi** | LVGL'in gömülü Montserrat'ında Türkçe harf yok; kart adları ASCII'ye indiriyor (§9p). Gerçek Türkçe için `lv_font_conv` ile özel yazı tipi üretilmeli. Kozmetik, kritik yolda değil. |
 | **Dokunmatik park edildi** | Kritik yolda değil. Kaldığı yer §9b. |
 | **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **GPIO34 (LCD_RST) aşağı çekilemiyor** | Ölçüldü, kök neden aranmadı. Bkz. §5.11. |
@@ -728,7 +744,7 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | M5 | Model eğitimi + damıtma + INT8 | 🔶 **Aşama-2 tür ağı ✅ (§9k)** · Aşama-1 ikili ağ ve Aşama-3 mevsim tablosu kaldı |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | ✅ (§9m) — arena 110 KB, çıkarım 190 ms, doğrulama 8/8 birebir |
 | **—** | **EKRAN HATASI** | **✅ ÇÖZÜLDÜ (§9n)** — RASET yok sayılıyor + dar bantta satır kayması; kart framebuffer'ı ile kapandı |
-| **M7** | **Sonradan işleme, sonuç ekranı, günlük, pil** | **🔵 SIRADAKİ (§9o)** |
+| **M7** | **Sonradan işleme, sonuç ekranı, günlük, pil** | **🔶 adım 1+2 yazıldı ve derlendi (§9p); GÖZLE DOĞRULANMADI. Adım 3-7 duruyor (§9o)** |
 | M8 | Saha kalibrasyonu | |
 
 ---
@@ -2951,7 +2967,10 @@ arasında artık kartı yeniden başlatmak gerekmiyor.
 
 ---
 
-## 9o. 🔵 SIRADAKİ İŞ — M7: cihazı gerçekten "cihaz" yapmak
+## 9o. M7 planı — cihazı gerçekten "cihaz" yapmak
+
+> **Adım 1 ve 2 yapıldı, §9p'ye bakın** (gözle doğrulanmayı bekliyor).
+> Adım 3'ten itibaren duruyor; sıradaki iş oradan devam ediyor.
 
 Ekran kapandığına göre önümüzde engel yok. **M6'nın çıktısı hâlâ yalnızca seri
 porta yazılıyor** — cihaz tür tanıyor ama ekranda göstermiyor. M7'nin ilk ve en
@@ -3027,6 +3046,166 @@ göreceği sayı ikincisi.
 
 ---
 
+## 9p. 🔶 M7 ADIM 1+2 — SONUÇ EKRANI ve KARAR KURALI (gözle doğrulanmadı)
+
+§9o'nun ilk iki adımı yazıldı, derlendi ve karta yüklendi. **Gözle
+doğrulanmadı** — bu bölümün sonundaki iki komutu kullanıcı çalıştıracak.
+
+### Ne eklendi
+
+| Dosya | Ne |
+|---|---|
+| [`src/ai/karar.c`](src/ai/karar.c) / [`.h`](src/ai/karar.h) | karar kuralı: eşik + histerezis + tutma. **Donanımsız** (yalnızca stdint/stdbool) — host testinde zaman ilerletilerek sınanıyor |
+| [`src/ui/sonuc_karti.c`](src/ui/sonuc_karti.c) / [`.h`](src/ui/sonuc_karti.h) | LVGL kartı + Türkçe→ASCII katlama |
+| [`tools/esik_olc.py`](tools/esik_olc.py) | eşik ölçümü → `models/esik.txt`. **numpy yeter, TensorFlow gerekmez** |
+| `src/main.c` | `c` (sonuç ekranı) ve `C` (kart gösterim testi) komutları |
+| `src/ai/tanima.c` / `.h` | core1 → core0 mel sütunu kuyruğu + `kapi_su_an` |
+| `test/dsp_test.c` | `test_karar` — 9 test, zaman ilerleterek |
+
+### ⚠ EŞİKLER ÖLÇÜLDÜ — ve ölçülmesi gereken şey DOĞRULUK DEĞİLDİ
+
+§9k'daki sayılar doğruluk (top-1 %70,40 / top-3 %82,20). Karar kuralının
+ihtiyacı olan başka bir şey: *"p1 şu değerin üstündeyse tür adını yazsam ne
+kadar sık haklı olurum?"* Bu doğruluktan türetilemiyor.
+
+`tools/esik_olc.py` bunu test kümesinde taradı. **TensorFlow gerekmedi**:
+`tools/birlestirme_olc.py`'nin bıraktığı `models/test_olasilik.npy` önbelleği
+zaten her test penceresinin softmax'ıydı; 3.14 ortamındaki numpy yetti.
+
+```
+8 pencere birlestirilmis, 1365 blok
+ esik   kapsam  isabet  yanlis-alarm   (yanlis alarm = negatifi kus sanma)
+ 0,35   %59,7   %71,7      %4,2        <- cikma esigi
+ 0,50   %45,1   %81,8      %3,0
+ 0,60   %35,6   %85,4      %2,7        <- girme esigi
+ 0,80   %20,3   %91,7      %1,5
+```
+
+Seçilenler (`src/ai/karar.h`, hepsi tek yerde):
+
+```
+PB_KARAR_GIRIS_ESIK   0,60    isabet %85,4 — tur adini EKRANA YAZMA esigi
+PB_KARAR_CIKIS_ESIK   0,35    isabet %71,7 — yazilani SILME esigi
+PB_KARAR_MIN_PENCERE  3       1 pencerede %70,1, 3'te %84,9, 8'de %85,4
+PB_KARAR_TUT_MS       5000    desteklenmeyen gosterim ekranda kalma suresi
+PB_KARAR_SES_TUT_MS   700     "ses var" gostergesinin sonme suresi
+```
+
+> **`MIN_PENCERE 3` neden 8 değil:** ölçüm, kazancın tamamının ilk üç
+> pencerede olduğunu söylüyor (%70,1 → %84,9 → %85,4). 8 beklemek 5 saniye
+> daha gecikme demekti, karşılığı 0,5 puan.
+>
+> **`TUT_MS 5000` neden 6000 değil:** `tanima.c`'deki `BAYAT_MS` 6 s'de
+> birleştirme belleğini temizliyor. Tutma onun altında seçildi ki "ekrandan
+> silindi ama hâlâ o türü destekleyen bellek var" hâli oluşmasın.
+
+⚠ **Bu sayılar ÜST SINIR.** Bloklar örtüşmeyen dilimlerden ve dilimler
+BirdNET'in kuş duyduğu yerler; cihazda pencereler 1 sn adımla örtüşüyor, yani
+hatalar daha ilintili. M8 saha kalibrasyonunda `tools/esik_olc.py` yeniden
+çalıştırılıp bu beş sabit güncellenecek.
+
+### Karar kuralı — histerezis tam olarak nerede
+
+```
+ekrandaki turun YERINI ALMAK  ->  girme esigi (0,60) gerekiyor
+ekrandaki turun KALMASI       ->  cikma esigi (0,35) yetiyor
+```
+
+Yani güven eşiğin etrafında salınırken yazı zıplamıyor. Farklı bir tür iki
+eşik arasında bir güvenle gelirse gösterimi **değiştirmiyor**; eskisi tutma
+süresi dolana kadar kalıyor. Bilinçli: ekranı ikinci en iyi tahminle
+titretmektense biraz eski bilgi göstermek yeğ.
+
+Dört kip: `dinliyor` → `SES ALGILANDI` → `olabilir...` (kehribar) →
+`TANINDI` (sarı).
+
+### ⚠ TÜRKÇE HARFLER — LVGL'in gömülü yazı tipinde YOK
+
+`lv_font_montserrat_14/20` ASCII + birkaç simge içeriyor; **ç ğ ı İ ö ş ü
+yok**. Yazılırsa kutu çıkar. Kart bu yüzden adları ASCII'ye indiriyor
+(`pb_ascii_tr`): *"Ak Karınlı Ebabil" → "Ak Karinli Ebabil"*. Gerçek Türkçe
+için `lv_font_conv` ile özel yazı tipi üretmek gerekir — ayrı bir iş, sonuç
+ekranını bekletmedi. Seri porta yazılan adlar tam Türkçe (terminal UTF-8).
+
+### Ekran sözleşmesine uyum
+
+Yeni çizim kodunun panele **doğrudan yazan tek satırı yok**: kartın tamamı
+LVGL'den geçiyor ve `lv_port.c`'nin flush yolu `s_kart_fb` üzerinden panele
+her zaman tam genişlikte basıyor. Kartta ölçüldü: `satir adimi != alan_w: 0`,
+kirli bantların panel sütun genişliği 12..22 — hepsi tam genişlikte basıldı.
+
+Spektrogram zaten tam genişlikte tek satır bandı yazıyor (`pb_lcd_blit(0, ux,
+172, 1, ...)`), değişmedi.
+
+### İş bölümü — mel halkası artık core 1'in malı
+
+`c` çalışırken core 0 `pb_mel_last_frame()` çağıramaz (yarış). Core 1 her
+kareyi 64 elemanlı bir kuyruğa bırakıyor, core 0 boşaltıyor
+(`pb_tanima_mel_al`). Kuyruk dolarsa core 1 **yeni kareyi atıyor ve
+beklemiyor**: gerçek zamanlı hattın arayüz yüzünden durması, spektrogramda bir
+sütun kaybetmekten pahalı. Maliyet 4.096 bayt.
+
+### Ölçülenler (göz gerektirmeyen)
+
+```
+kart derlendi   text 963.216   bss 360.436   (yeni bss +4.416 bayt, nm ile)
+                s_mel_kuyruk 4.096 + kart etiket tamponlari 292 + indeksler
+`x`             8/8 pencere BIREBIR, arena 110.436, cikarim 189,9 ms  (gerileme yok)
+`c` 20 s        1248 kare / 20 s = 62,4 kare/s, overrun 0
+                cikarim 8, kapi kapali diye atlanan 10
+                LVGL flush 232, satir adimi sapmasi 0, panel_w 12..22
+host testleri   22 test, 0 kaldi  (13 eski + 9 yeni karar testi)
+```
+
+Sessiz odada hiçbir çıkarım eşiği geçmedi — beklenen: fan gürültüsü tür
+çağırmıyor.
+
+### ⛔ KULLANICININ ÇALIŞTIRACAĞI İKİ TEST (göz gerekiyor)
+
+**1) Kart gösterim testi — mikrofonsuz, önce bu.** Kartın çizimini tek başına
+sınar: en uzun tür adı, sarma, renkler, ilk 3 satırı, sağda kayan spektrogram
+deseni (düz renk DEĞİL — düz blok kaymayı gizler).
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd C
+```
+
+Dört aşamadan geçip başa dönüyor (2,5 s'de bir), çıkmak için bir tuş:
+`dinliyor` → `SES ALGILANDI` → `olabilir...` (kehribar) → `TANINDI` (sarı,
+en uzun tür adı, %91). Bakılacaklar: yazılar okunuyor mu, satır kayması var
+mı, uzun ad ikinci satıra düzgün sarıyor mu, alt üç satır (2./3. tahmin,
+sayaçlar) sığıyor mu, sağdaki spektrogram şeridi akıyor mu.
+
+**2) Gerçek tanıma — akustik test, kullanıcı elle yapacak (§5.5).**
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd c --sure 60
+```
+
+Cihazın mikrofonuna gerçek bir kuş sesi duyurulmalı (**PC'den ÇALMAYIN** —
+kulaklık takılı, cihaz hiçbir şey duymaz ve test sessizce anlamsız olur).
+Telefondan hoparlörle çalmak ya da pencereden gerçek kuş sesi olur. Ekranda
+tür adı + güven belirmeli, ses kesilince 5 saniye durup `dinliyor`a dönmeli.
+Seri portta aynı olaylar zaman damgasıyla yazılıyor, yani ekranda gördüğünüz
+her değişikliğin terminalde karşılığı var — ikisi tutmuyorsa çizim tarafında
+sorun var demektir.
+
+> **Bilinen tuhaflık (yeni değil, §3'te yazılı):** `--sure` ile çıkış tuşu bazen
+> cihaza ulaşmıyor ve özet **bir sonraki bağlantıda** geliyor. Yaşarsanız
+> `--cmd i` çalıştırın; önce önceki koşunun özeti düşer.
+
+### Bu adımda ELENEN / SEÇİLMEYEN yollar
+
+| Ne | Neden seçilmedi |
+|---|---|
+| Eşiği §9k'daki %70,4'ten türetmek | Doğruluk ≠ güven kalibrasyonu. Ölçülünce görüldü: 0,60 eşiğinde isabet %85,4 ama kapsam %35,6 — doğruluktan bu tabloyu çıkarmak mümkün değildi |
+| `birlestirme_olc.py`'yi TF ile yeniden koşturmak | Gereksiz: `models/test_olasilik.npy` önbelleği zaten duruyordu, ölçüm saniyeler sürdü |
+| Türkçe adları olduğu gibi basmak | Gömülü Montserrat'ta Türkçe harf yok, kutu çıkardı (denemeden önce yazı tipi tablosuna bakıldı) |
+| Kararı `tanima.c`'ye (core 1) koymak | Karar bir ARAYÜZ kararı; core 1'de olsaydı host testinde sınanamazdı ve gerçek zamanlı bütçeyi yerdi |
+| Kartı her yeni sonuçta yeniden çizmek | Her güncelleme 68,8 KB QSPI demek. Kart 4 Hz güncelleniyor ve etiketler yalnızca **metni değiştiyse** yazılıyor |
+
+---
+
 ## 10. Depo düzeni ve git durumu
 
 ```
@@ -3045,9 +3224,11 @@ src/
   ai/         tur_agi(.cc/.h)     ← TFLM sarmalayicisi + arena
               tflm_port.cc        ← DebugLog / micro_time / abort() ezmesi
               tanima(.c/.h)       ← core1 gercek zamanli hat + birlestirme
+              karar(.c/.h)        ← M7: esik + histerezis + tutma (donanimsiz)
               dogrulama_seti.h    ← URETILMIS (GIRIYOR, 94 KB flash)
               siniflar.h          ← URETILMIS (GIRIYOR)
   ui/         spectrogram(.c/.h), lv_conf.h, lv_port(.c/.h)
+              sonuc_karti(.c/.h)  ← M7: tanima karti + Turkce->ASCII
 test/       CMakeLists.txt, dsp_test.c      ← host tarafı DSP testleri
 tools/      capture_wav.py, mel_reference.py,
             species_list.py, xc_fetch.py,
@@ -3058,8 +3239,11 @@ tools/      capture_wav.py, mel_reference.py,
             egit.py, birlestirme_olc.py     ← M5: eğitim + değerlendirme
             dogrulama_seti.py               ← M6: cihaz-içi doğrulama seti
             sinif_tablosu.py                ← M6: sınıf adları -> siniflar.h
+            esik_olc.py                     ← M7: karar eşiği ölçümü (numpy yeter)
 models/     tur_agi_int8.h                  ← C dizisi (GİRİYOR, firmware derliyor)
             rapor.txt, birlestirme.txt      ← doğruluk kayıtları (GİRİYOR)
+            esik.txt                        ← eşik ölçümü (GİRİYOR, §9p)
+            test_olasilik.npy               ← test kümesi softmax önbelleği (girmiyor)
             tur_agi.keras, *.tflite         ← girmiyor, üretilebilir
             ilerleme.html                   ← canlı eğitim panosu (girmiyor)
 data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
