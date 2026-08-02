@@ -1,5 +1,7 @@
 #include "ui/lv_port.h"
 
+#include <stdio.h>
+
 #include "lvgl.h"
 #include "pico/stdlib.h"
 
@@ -30,13 +32,51 @@ static uint16_t s_draw_buf[PB_LCD_W * LV_STRIP_H];
  * Devrik (transpose) kopyası için ikinci bir tampon ayırmıyoruz: panelin bir
  * YATAY satırı, LVGL tamponunun bir DİKEY sütunudur, o da adımlı okumayla
  * doğrudan gönderilebiliyor (bkz. pb_lcd_blit_strided).                   */
+/* ── Flush sayaçları — hizalama gerçekten tutuyor mu (§9n) ────────────────
+ * Panel sütun aralığını 2 piksele yuvarlıyor. Sütun sayısı TEK olursa panel
+ * satır başına bizim gönderdiğimizden bir piksel FAZLA kullanır ve veri her
+ * satırda bir piksel kayar — yazının yatay sürüklenmiş görünmesinin birebir
+ * imzası. `alan_yuvarla` bunu engellemeli; sayaçlar ENGELLEDİĞİNİ ölçüyor.
+ * Göz gerekmiyor: `a`/`u` çıkışında basılıyor. */
+uint32_t pb_lv_flush_say;
+uint32_t pb_lv_flush_hizasiz;      /* panel_x tek ya da panel_w tek */
+uint32_t pb_lv_flush_stride_farkli; /* LVGL'in satır adımı alan genişliği DEĞİL */
+uint32_t pb_lv_flush_w_min = 0xFFFFFFFF, pb_lv_flush_w_max;
+int32_t  pb_lv_son_y1, pb_lv_son_y2, pb_lv_son_x1, pb_lv_son_x2;
+int32_t  pb_lv_son_stride_px, pb_lv_son_alan_w;
+
+static int s_dokum_kalan = 0;
+
+void pb_lv_dokum_iste(int adet) { s_dokum_kalan = adet; }
+
+void pb_lv_flush_sayaclari_sifirla(void)
+{
+    pb_lv_flush_say = 0;
+    pb_lv_flush_hizasiz = 0;
+    pb_lv_flush_stride_farkli = 0;
+    pb_lv_flush_w_min = 0xFFFFFFFF;
+    pb_lv_flush_w_max = 0;
+}
+
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     const int32_t x1 = area->x1, x2 = area->x2;
     const int32_t y1 = area->y1, y2 = area->y2;
-    const int32_t alan_w = x2 - x1 + 1;          /* LVGL tamponunun satır uzunluğu */
+    const int32_t alan_w = x2 - x1 + 1;
 
     const uint16_t *src = (const uint16_t *)(void *)px_map;
+
+    /* ⚠ SATIR ADIMI ALAN GENİŞLİĞİ DEĞİL — LVGL'e sorulmalı.
+     * Devrik okuma `-satir_adimi` ile sütun atlıyor; adım bir piksel bile
+     * şaşarsa görüntü her satırda kayar ve yazı yatay sürüklenmiş görünür.
+     * LVGL çizim tamponunun adımını `LV_DRAW_BUF_STRIDE_ALIGN`e göre
+     * yuvarlayabiliyor, dolayısıyla `x2-x1+1` VARSAYMAK yanlış. */
+    int32_t satir_adimi = alan_w;
+    lv_draw_buf_t *db = lv_display_get_buf_active(disp);
+    if (db && db->header.stride) satir_adimi = (int32_t)(db->header.stride / 2);
+    pb_lv_son_stride_px = satir_adimi;
+    pb_lv_son_alan_w = alan_w;
+    if (satir_adimi != alan_w) pb_lv_flush_stride_farkli++;
 
     /* Panel dikdörtgeni: ui_y aralığı panel X'e, ui_x aralığı panel Y'ye. */
     const uint32_t panel_x = (uint32_t)(PB_LCD_H - 1 - y2);
@@ -44,14 +84,44 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     const uint32_t panel_w = (uint32_t)(y2 - y1 + 1);
     const uint32_t panel_h = (uint32_t)(x2 - x1 + 1);
 
+    pb_lv_flush_say++;
+    if ((panel_x & 1u) || (panel_w & 1u)) pb_lv_flush_hizasiz++;
+    if (panel_w < pb_lv_flush_w_min) pb_lv_flush_w_min = panel_w;
+    if (panel_w > pb_lv_flush_w_max) pb_lv_flush_w_max = panel_w;
+    pb_lv_son_x1 = x1; pb_lv_son_x2 = x2;
+    pb_lv_son_y1 = y1; pb_lv_son_y2 = y2;
+
     /* piksel(panel satırı r, panel sütunu c):
      *     ui_x = x1 + r          -> kaynakta +1 adım
      *     ui_y = y2 - c          -> kaynakta -alan_w adım
      * yani başlangıç, tamponun SON satırının başı. */
+    /* ── Göz gerektirmeyen yazı teşhisi ───────────────────────────────────
+     * Alanı, sürücünün OKUDUĞU indislemeyle seri porta ASCII olarak döküyor.
+     * Terminalde yazı düzgün okunuyorsa hem LVGL'in çizimi hem devrik okuma
+     * doğru demektir ve bozulma daha aşağıda. Okunmuyorsa bozulma LVGL'de.
+     * Satırlar ui yönünde: dış döngü panel sütunu (= ui y), iç döngü panel
+     * satırı (= ui x). */
+    if (s_dokum_kalan > 0 && panel_h <= 320 && panel_w <= 180) {
+        s_dokum_kalan--;
+        printf("#DOKUM ui x(%ld..%ld) y(%ld..%ld) panel %lux%lu adim %ld\n",
+               (long)x1, (long)x2, (long)y1, (long)y2,
+               (unsigned long)panel_w, (unsigned long)panel_h, (long)satir_adimi);
+        for (int32_t c = (int32_t)panel_w - 1; c >= 0; c--) {
+            for (uint32_t r = 0; r < panel_h; r++) {
+                uint16_t px = src[(size_t)(y2 - y1 - c) * satir_adimi + r];
+                /* RGB565 -> kaba parlaklık */
+                uint32_t l = ((px >> 11) & 0x1F) + ((px >> 6) & 0x1F) + (px & 0x1F);
+                putchar(l < 6 ? '.' : (l < 24 ? '+' : '#'));
+            }
+            putchar('\n');
+        }
+        printf("#DOKUM-SON\n");
+    }
+
     pb_lcd_blit_strided(panel_x, panel_y, panel_w, panel_h,
-                        src + (size_t)(y2 - y1) * alan_w,
-                        -alan_w,   /* sütun adımı */
-                        1);        /* satır adımı */
+                        src + (size_t)(y2 - y1) * satir_adimi,
+                        -satir_adimi,   /* sütun adımı: bir ui satırı geri */
+                        1);             /* satır adımı: bir ui sütunu ileri */
 
     lv_display_flush_ready(disp);
 }

@@ -910,6 +910,7 @@ static void cmd_full_demo(void) {
      * konumlandırma 0/1. sütunlara siyah yazar ve iz bırakır — teşhis
      * komutlarından (`z`, `j`, `v`) sonra tam olarak bu olur. */
     pb_lcd_fill(0x0000);
+    pb_lv_flush_sayaclari_sifirla();
 
     bool dokunmatik = pb_lv_init();
     printf("  dokunmatik: %s\n", dokunmatik ? "hazir" : "yok (demoya engel degil)");
@@ -1027,10 +1028,24 @@ static void cmd_full_demo(void) {
     }
 
     printf("\n  toplam kare %lu, son hiz %lu kare/s, kapi acik %%%lu,\n"
-           "  tam pencere %lu, kayip %lu\n\n",
+           "  tam pencere %lu, kayip %lu\n",
            (unsigned long)toplam, (unsigned long)son_hiz,
            (unsigned long)(toplam ? acik * 100 / toplam : 0),
            (unsigned long)pencere_sayisi, (unsigned long)kayip);
+
+    /* LVGL flush hizalamasi (§9n) — goz gerektirmeyen olcum.
+     * Panel sutun araligini 2 piksele yuvarliyor; sutun sayisi TEK olursa
+     * panel satir basina bizim gonderdigimizden bir piksel FAZLA kullanir ve
+     * veri her satirda kayar — yazinin yatay suruklenmis gorunmesinin imzasi. */
+    printf("  LVGL flush %lu, HIZASIZ %lu, satir adimi != alan_w: %lu\n"
+           "  panel_w %lu..%lu, son alan ui x(%ld..%ld) y(%ld..%ld), "
+           "adim %ld px / alan_w %ld px\n\n",
+           (unsigned long)pb_lv_flush_say, (unsigned long)pb_lv_flush_hizasiz,
+           (unsigned long)pb_lv_flush_stride_farkli,
+           (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max,
+           (long)pb_lv_son_x1, (long)pb_lv_son_x2,
+           (long)pb_lv_son_y1, (long)pb_lv_son_y2,
+           (long)pb_lv_son_stride_px, (long)pb_lv_son_alan_w);
 }
 
 /**
@@ -1610,6 +1625,110 @@ static void cmd_cursor_seek(void) {
 
     qspi_caset(0, PB_PANEL_W - 1);
     pb_lcd_imlec_gecersiz();
+}
+
+/**
+ * `L` — yazı teşhisi. GÖZ GEREKMİYOR.
+ *
+ * Ekrandaki yazılar bozuk görünüyor ama teşhisin tamamı temiz çıktı:
+ * WaitIdle bekliyor, CS zamanlaması doğru, sütun hizalaması tutuyor
+ * (HIZASIZ 0), LVGL'in satır adımı alan genişliğine eşit (fark 0). Geriye
+ * iki ihtimal kaldı ve bu komut ikisini ayırıyor:
+ *
+ *   - LVGL yazıyı zaten bozuk çiziyor (yazı tipi/önbellek/bellek sorunu), ya da
+ *   - çizim doğru, bozulma bizim gönderme yolumuzda.
+ *
+ * Tek bir etiket çizdirip flush alanını, **sürücünün okuduğu indislemeyle**,
+ * seri porta ASCII olarak döküyor. Terminalde "PokeBird" okunuyorsa LVGL de
+ * devrik okuma da sağlam demektir.
+ */
+static void cmd_text_dump(void) {
+    printf("\nYazi teshisi — LVGL'in cizdigi ASCII olarak dokuluyor (goz GEREKMEZ)\n");
+    printf("====================================================================\n\n");
+
+    backlight_set(true);
+    pb_lcd_fill(0x0000);
+    pb_lv_init();
+
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_clean(scr);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
+
+    lv_obj_t *etiket = lv_label_create(scr);
+    lv_label_set_text(etiket, "PokeBird");
+    lv_obj_set_style_text_color(etiket, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_text_font(etiket, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(etiket, LV_ALIGN_TOP_LEFT, 4, 4);
+
+    /* Once tum ekrani cizdir (dokum kapali), sonra yalnizca etiketi kirlet. */
+    for (int i = 0; i < 6; i++) { pb_lv_tick(); sleep_ms(10); }
+
+    printf("Asagidaki dokum ui yoneliminde: her satir bir ui y, her karakter\n");
+    printf("bir ui x. Yazi okunuyorsa LVGL ve devrik okuma SAGLAM.\n\n");
+    pb_lv_dokum_iste(1);
+    pb_lcd_satir_dokumu_iste(140);   /* DMA'ya giden s_row'un kendisi */
+    lv_obj_invalidate(etiket);
+    for (int i = 0; i < 6; i++) { pb_lv_tick(); sleep_ms(10); }
+
+    printf("\nBitti.\n\n");
+}
+
+/**
+ * `S` — dar pencerede çok satırlı yazma KAYIYOR MU? GÖZ GEREKİR.
+ *
+ * Yazılım yolunun tamamı ölçüldü ve temiz: LVGL'in çizimi, 90° devrik okuma,
+ * satır adımı, sütun hizalaması, DMA'ya giden `s_row`'un kendisi — hepsi
+ * piksel piksel doğru (`L` komutu). Doğru veri, hizalı pencereyle hatta
+ * çıkıyor. Yine de ekranda yazı bozuk.
+ *
+ * ⚠ Şimdiye kadarki BÜTÜN ekran testleri bu hataya KÖRDÜ: `o`'nun köşeleri,
+ * `z`/`j`'nin kareleri, `d`'nin renkleri, `pb_lcd_fill` — hepsi DÜZ RENK.
+ * Düz bir blok satır satır kaysa bile yine düz blok görünür. Spektrogram da
+ * kör: her itmede TEK satır yazıyor, hata birikemiyor. Bozulan tek şey
+ * LVGL'in yazısı ve o da tek yerde: **dar pencereye çok satırlı yazma.**
+ *
+ * Bu test tam olarak onu sınıyor. Desen düz renk DEĞİL: her satırda aynı iki
+ * pikselde beyaz nokta var, yani doğru yazılırsa iki DÜMDÜZ çizgi çıkar,
+ * kayma varsa çizgiler EĞİLİR. Kaynak `row_step = 0` ile besleniyor, yani
+ * her panel satırı aynı veriyi alıyor — eğilme varsa panelden gelir.
+ */
+static void cmd_stripe_test(void) {
+    enum { SATIR = 300 };                 /* uzun olsun ki kayma birikip belli olsun */
+    static uint16_t desen_tam[PB_PANEL_W];
+    static uint16_t desen_dar[32];
+
+    printf("\nDar pencere kayma testi — cizgiler duz mu, egik mi?\n");
+    printf("===================================================\n\n");
+    backlight_set(true);
+    pb_lcd_fill(0x0000);
+
+    /* ── REFERANS: tam genislikte (172 sutun), bilinen calisan yol ───────── */
+    for (uint32_t i = 0; i < PB_PANEL_W; i++) desen_tam[i] = 0x0000;
+    desen_tam[140] = 0xF800;              /* KIRMIZI */
+    desen_tam[156] = 0xF800;
+    pb_lcd_sutun_penceresi(0, PB_PANEL_W - 1);
+    pb_lcd_akis_basla(0x2C);
+    for (uint32_t r = 0; r < SATIR; r++) pb_lcd_akis_satir(desen_tam, PB_PANEL_W);
+    pb_lcd_akis_bitir();
+    pb_lcd_imlec_gecersiz();
+
+    /* ── SINANAN: dar pencere (32 sutun), LVGL'in kullandigi adimli yol ──── */
+    for (uint32_t i = 0; i < 32; i++) desen_dar[i] = 0x0000;
+    desen_dar[8]  = 0x07E0;               /* YESIL */
+    desen_dar[24] = 0x07E0;
+    /* row_step = 0: her panel satiri AYNI kaynagi okur. Cikti dumduz iki
+     * cizgi olmali; egilirse hata panelde. */
+    pb_lcd_blit_strided(80, 0, 32, SATIR, desen_dar, 1, 0);
+
+    printf("Ekranda DORT yatay cizgi olmali (cihaz USB SAGDA, yatay):\n");
+    printf("  2 KIRMIZI  — tam genislikteki referans yol\n");
+    printf("  2 YESIL    — dar pencere (32 sutun), LVGL'in yolu\n");
+    printf("Hepsi ekranin SOL yarisi boyunca uzaniyor.\n\n");
+    printf("BILDIRIN: yesil cizgiler KIRMIZILAR gibi DUMDUZ mu, yoksa\n");
+    printf("EGIK/merdiven gibi mi (yukari ya da asagi kayiyor mu)?\n\n");
+    printf("  yesil EGIK  -> panel dar pencerede satir basina kayiyor.\n");
+    printf("                 KOK NEDEN BU; yazinin bozuk gorunmesinin sebebi.\n");
+    printf("  yesil DUZ   -> gonderme yolu tamamen saglam; sorun baska yerde.\n\n");
 }
 
 /**
@@ -2308,6 +2427,8 @@ static void print_help(void) {
     printf("  y  melez yol testi: pencere ve piksel ayri yollardan (goz gerekir)\n");
     printf("  z  satir adresleme testi: RASET calisiyor mu (goz gerekir)\n");
     printf("  j  imlec konumlandirma testi: dar pencereyle ucuz atlama (goz gerekir)\n");
+    printf("  L  yazi teshisi: LVGL cizimini ASCII dok (goz GEREKMEZ)\n");
+    printf("  S  dar pencere kayma testi: cizgiler duz mu (goz gerekir)\n");
     printf("  s  canli spektrogram\n");
     printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
     printf("  ?  bu yardim\n\n");
@@ -2413,6 +2534,8 @@ int main(void) {
             case 'y': cmd_hybrid_path(); break;
             case 'z': cmd_row_addr(); break;
             case 'j': cmd_cursor_seek(); break;
+            case 'L': cmd_text_dump(); break;
+            case 'S': cmd_stripe_test(); break;
             case 'o': cmd_orientation(); break;
             case 't': cmd_touch_probe(); break;
             case 'u': cmd_ui_demo(); break;

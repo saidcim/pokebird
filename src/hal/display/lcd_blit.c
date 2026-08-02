@@ -1,5 +1,7 @@
 #include "lcd_blit.h"
 
+#include <stdio.h>
+
 #include "DEV_Config.h"
 #include "LCD_3in49.h"
 #include "qspi_pio.h"
@@ -83,8 +85,25 @@ void pb_lcd_akis_basla(uint8_t ramwr) {
     pb_lcd_imlec_gecersiz();
 }
 
+/* Son yazılım aşamasının dökümü: DMA'ya giden `s_row`'un kendisi. Buraya
+ * kadar her şey ölçüldü (kaynak veri, devrik okuma, satır adımı, hizalama,
+ * CS zamanlaması); geriye doğrulanmamış tek aşama buydu. */
+static int s_satir_dokum = 0;
+void pb_lcd_satir_dokumu_iste(int adet) { s_satir_dokum = adet; }
+
 /** s_row'daki n pikseli (zaten bayt sırası çevrilmiş) panele DMA ile yaz. */
 static void satiri_gonder(uint32_t n) {
+    if (s_satir_dokum > 0) {
+        s_satir_dokum--;
+        printf("#SATIR %lu ", (unsigned long)n);
+        for (uint32_t i = 0; i < n; i++) {
+            /* s_row big-endian; parlaklık için geri çevir */
+            uint16_t px = (uint16_t)((s_row[i] >> 8) | (s_row[i] << 8));
+            uint32_t l = ((px >> 11) & 0x1F) + ((px >> 6) & 0x1F) + (px & 0x1F);
+            putchar(l < 6 ? '.' : (l < 24 ? '+' : '#'));
+        }
+        putchar('\n');
+    }
     dma_channel_configure(dma_tx, &c,
                           &qspi.pio->txf[qspi.sm],
                           s_row,

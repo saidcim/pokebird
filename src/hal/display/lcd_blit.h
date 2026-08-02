@@ -113,4 +113,7 @@ void pb_lcd_sutun_penceresi(uint32_t x1, uint32_t x2);
  */
 void pb_lcd_imlec_gecersiz(void);
 
+/** Sonraki `adet` satırı DMA'ya giderken seri porta ASCII dök (teşhis). */
+void pb_lcd_satir_dokumu_iste(int adet);
+
 #endif /* POKEBIRD_LCD_BLIT_H */
