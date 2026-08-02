@@ -5,7 +5,7 @@
 > içinde; burada onun özeti, şu ana kadar yapılanlar, **denenip işe yaramayanlar**
 > ve sıradaki adımlar var.
 >
-> Son güncelleme: 1 Ağustos 2026.
+> Son güncelleme: 2 Ağustos 2026.
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
@@ -30,9 +30,29 @@ bir arada) kapattı.
 172 tür tam 40 kayıt · 6 tür 39 · Küçük Kartal 37 (XC'de o kadar var)
 ```
 
-**SIRADAKİ İŞ — BirdNET segmentasyonu. Adım adım tarifi §9e'de**
-(kurulum, komutlar, Python sürüm çakışması, kabul ölçütü). Ondan sonrası
-§9f: negatif madenciliği → veri artırma → M5 eğitim.
+**M4 BirdNET segmentasyonu ✅ BİTTİ (§9e).** Dört araç yazıldı, 79 saatlik
+sesin tamamı tarandı:
+
+```
+178 tür · 95.033 dilim tarandı · data/segmentler.csv (79.932 satır)
+hedef güven >=0.25: 58.151 dilim = tür başına 327   (kabul ölçütü >=100)
+0.25'te 100 dilimin altında kalan yalnızca 6 tür (üçü balıkçıl)
+```
+
+**Kullanıcı kararı (2 Ağustos 2026): negatif TOPLAMA askıya alındı.** İlk
+doğrulama testi boş odada bilgisayardan kuş sesi çalarak yapılacak; o
+senaryoda şehir gürültüsü yok. Odak tür tanımada. Ayrıntı ve *ama*'sı
+§9f-4'te — negatif **sınıfı** yine de bir şeyle doldurulmak zorunda.
+
+**SIRADAKİ İŞ — iki aday, ikisi de kritik yolda:**
+
+1. **Eğitim kümesini kurmak** (§9f-5, sonra M5) — `segmentler.csv`'den
+   dengeli eğitim/doğrulama bölmesi, veri artırma, damıtmayla eğitim.
+   Uzun iş.
+2. **`s_capture` (96 KB) temizliği** (§6) — M6'nın TFLM arena'sı (180 KB)
+   bunsuz sığmıyor, yani cihazda test etmenin önündeki engel bu. Bir
+   oturumluk iş. Sürekli yakalama halkası geldiğinden beri teşhis
+   komutları halkadan okuyabiliyor, yol açık.
 
 ---
 
@@ -147,6 +167,11 @@ DSP hatası ayıklamak çok pahalı; **DSP değişikliklerini önce burada doğr
 - ARM GCC 14.3: `~/.platformio/packages/toolchain-rp2040-earlephilhower` — [`cmake/toolchain.cmake`](cmake/toolchain.cmake) otomatik buluyor
 - Pico SDK 2.3.0 ve LVGL 9.3.0: `third_party/` altına klonlu, **git'e girmiyor**
 - Python 3.14, pyserial 3.5, numpy 2.4 kurulu (librosa YOK, gerekmiyor)
+- **`.venv-birdnet/`** — BirdNET-Analyzer 2.4.0 + TensorFlow 2.21 için ayrı
+  **Python 3.11** ortamı (3.14'te kurulmuyor). Git'e girmiyor. Kurulumdaki
+  iki tuzak §5.13 (pip sertifikası) ve §5.14 (model indirme).
+  `tools/birdnet_run.py` ve `birdnet_slist.py` **bu ortamın** python'uyla
+  çalışır; `birdnet_ozet.py` ve `segment_kes.py` saf stdlib, 3.14 yeter.
 
 Yoksa:
 ```bash
@@ -416,6 +441,66 @@ satır bazında onarıldı, derleme doğrulandı.
 
 **Kaynak dosyaları Edit aracıyla düzenleyin, PowerShell ile değil.**
 
+### 5.13 Yeni bir venv'in pip'i hiçbir şey indiremiyor — sertifika
+
+`py -3.11 -m venv` ile açılan ortamın pip'i (24.0) her indirmede
+`CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain`
+veriyor. Ağda araya giren bir sertifika var. Sistemdeki Python 3.14'ün pip'i
+(25.x) aynı adresi sorunsuz indiriyor — **fark truststore**: yeni pip
+Windows sertifika deposunu kullanıyor, 24.0 yalnızca certifi'ye bakıyor.
+
+```bash
+python -m pip install --use-feature=truststore --upgrade pip
+```
+
+Bir kez pip yükseltilince gerisi normal çalışıyor. `pip.ini` aramayın, yok.
+
+### 5.14 BirdNET modelini kendi adresinden indirmek
+
+`ensure_model_exists()` 214 MB'lık `V2.4.zip`'i `tuc.cloud`'dan çekiyor.
+Ölçüldü: tek bağlantı **20–113 kB/s**, ve iki denemede de **95 MB'de
+takıldı** (`requests` timeout'u ateşlemeden). Sunucu Range destekliyor (206)
+ama 12 paralel parça denemesinde 12 bağlantının hepsi 0 bayt kaldı —
+eşzamanlılığı kısıtlıyor.
+
+**Çözüm:** aynı V2.4 dosyaları GitHub'da deponun **`v1.5.1`** etiketinde
+duruyor (2.x'te depodan çıkarılıp tuc.cloud'a taşınmışlar). 36 dosya,
+`raw.githubusercontent.com`'dan dakikalar içinde iniyor. Her dosyayı git
+ağacındaki boyutuna karşı doğrulayın; `birdnet_analyzer.utils.check_birdnet_files()`
+listenin tamamını istiyor (TFJS parçaları dahil), biri eksikse yeniden
+indirmeye kalkıyor.
+
+### 5.15 BirdNET'in kendi süreç havuzu kilitleniyor
+
+`analyze(threads=N)` içeride `multiprocessing.Pool` açıyor. `threads=14`
+ile 40 dosyalık bir türde **37 dosyadan sonra kilitlendi**: 16 süreç ayakta,
+toplam CPU 962 sn'de sabit, kalan 3 dosya hiç işlenmedi. Aynı üç dosya
+`threads=1` ile sorunsuz bitti (21,4 / 0,7 / 10,9 sn) — yani dosyalarda
+sorun yok, havuzda var (Windows + TensorFlow).
+
+**Çözüm:** paralellik `tools/birdnet_run.py` içinde kuruluyor — N bağımsız
+süreç, her biri kendi tür kümesini `threads=1` ile işliyor, her birinin
+ayrı günlüğü var. Ölçülen: **124 dosya/dk** (10 işçi).
+
+### 5.16 Tür eşlemesini bilimsel adla yapmak — sessiz veri kaybı
+
+Özet betiği hedef türü bilimsel adla arıyordu. BirdNET iki türde **eski cins
+adında** kalmış:
+
+| | bizde | BirdNET |
+|---|---|---|
+| Küçük Karga (`eurjac`) | `Coloeus monedula` | `Corvus monedula` |
+| Ak Karınlı Ebabil (`alpswi1`) | `Tachymarptis melba` | `Apus melba` |
+
+Kendi adımızla arasaydık bu iki türün güveni **her dilimde 0** çıkardı ve
+ikisi de sessizce eğitim dışı kalırdı — hiçbir hata mesajı vermeden.
+Eşleme artık **eBird kodu** üzerinden, BirdNET'in kendi
+`eBird_taxonomy_codes_2024E.json`'ıyla kuruluyor ve sonuç
+`data/birdnet_ad_haritasi.csv`'ye yazılıyor (görünür olsun diye).
+
+> **Ders:** dış bir modelle isim üzerinden eşleşiyorsanız, eşleşmeyenleri
+> saydırın. "178/178 bulundu" demek yetmez; *neyle* bulunduğunu da yazdırın.
+
 ---
 
 ## 6. Açık konular / borçlar
@@ -498,7 +583,7 @@ s_capture'ı kaldırmanın yolu açık.
 | M2a | Ekran sürücüsü + canlı spektrogram | ✅ (§9a) |
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
-| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 veri hazır (178 tür, 7.111 WAV); segmentasyon + negatifler kaldı (§9d, §9e)** |
+| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 veri ✅ (178 tür, 7.111 WAV) · segmentasyon ✅ (§9e) · negatifler kaldı (§9f-4)** |
 | M5 | Model eğitimi + damıtma + INT8 | |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
@@ -889,9 +974,72 @@ Uzun kayıt ağırlıklı bir kümede WAV daha büyük olurdu — bu yüzden öl
 
 ---
 
-## 9e. SIRADAKİ İŞ — M4 adım 3: BirdNET segmentasyonu
+## 9e. M4 adım 3 — BirdNET segmentasyonu ✅ TAMAMLANDI
 
-> Bu bölüm yeni bir oturumun hiçbir şey sormadan başlayabilmesi için yazıldı.
+### Araçlar
+
+| Dosya | Ne | Hangi python |
+|---|---|---|
+| [`tools/birdnet_slist.py`](tools/birdnet_slist.py) | tür listesi **ve** `ebird_kodu → BirdNET etiketi` haritası | `.venv-birdnet` |
+| [`tools/birdnet_run.py`](tools/birdnet_run.py) | 7.111 kaydı 3 sn'lik dilimlere ayırıp skorları yazar | `.venv-birdnet` |
+| [`tools/birdnet_ozet.py`](tools/birdnet_ozet.py) | sonuçları tek segment tablosuna indirir, zayıf türleri bildirir | 3.14 (stdlib) |
+| [`tools/segment_kes.py`](tools/segment_kes.py) | dinleyip doğrulamak için örnek dilim keser | 3.14 (stdlib) |
+
+```bash
+.venv-birdnet\Scripts\python -u tools/birdnet_slist.py
+.venv-birdnet\Scripts\python -u tools/birdnet_run.py --isci 10
+python tools/birdnet_ozet.py
+python tools/segment_kes.py --adet 10
+```
+
+`birdnet_run.py` **yeniden başlatılabilir** — yarıda kesilirse aynı komut
+kaldığı yerden devam eder (`skip_existing_results`). Bu oturumda işe yaradı:
+koşu %62'de kesildi, aynı komutla tamamlandı.
+
+### Planın üç maddesi ölçümle değişti
+
+**1. `--slist` VERİLMİYOR.** Plan 178 türlük liste vermeyi öngörüyordu.
+Kurulu sürümde tür listesi filtresi **çıkarımdan sonra** uygulanıyor
+(`analyze/utils.py:689`) — yani hiç hız kazandırmıyor, sadece satır eliyor.
+Listesiz koşunca aynı sürede iki şey fazladan geliyor:
+
+```
+0.0-3.0  Engine                   0.2877   <- kus disi sinif
+3.0-5.4  Corvus cornix  (hedef)   0.5201
+3.0-5.4  Corvus corone  (akraba)  0.4368   <- karisma sinyali
+```
+
+`Engine`/`Human vocal`/`Dog`/`Siren` gibi kuş dışı sınıflar **negatif
+madenciliği için kanal uyumlu negatif** demek (§9f-4); akraba tür skoru da
+bulaşık dilimi ayıklamaya yarıyor. 178 türe süzme özet aşamasında yapılıyor.
+
+**2. BirdNET'in kendi süreç havuzu kullanılmıyor** — kilitleniyor, §5.15.
+Paralellik 10 bağımsız süreçte, ölçülen hız **124 dosya/dk**.
+
+**3. Ses kesilmiyor, DİZİN çıkarılıyor.** Plan `birdnet_analyzer.segments`
+ile dilimleri ayrı WAV'lara kesmeyi öngörüyordu. Tür başına ~400 dilim ×
+178 tür × 144 KB ≈ **10 GB** eder; diskte 28 GB kalmıştı. Dizin birkaç MB
+ve eğitim zaten orijinal WAV'dan istediği ofsetten mel çıkarabiliyor.
+Kesme yalnızca dinlenecek örnekler için (`segment_kes.py`).
+
+### segmentler.csv — eğitimin okuyacağı tablo
+
+| Sütun | Ne |
+|---|---|
+| `ebird_kodu`, `dosya` | hangi türün hangi kaydı |
+| `baslangic`, `bitis` | dilimin saniye cinsinden yeri |
+| `hedef_guven` | dizinin türü bu dilimde ne kadar güvenle duyuldu |
+| `en_iyi_tur`, `en_iyi_guven` | dilimin en yüksek skorlu türü — hedef değilse **bulaşık dilim** |
+| `kus_disi_tur`, `kus_disi_guven` | Engine / Human vocal / Dog / Siren... |
+
+`hedef_guven = 0` "sessizlik" demek değil: BirdNET 0.1'in altını hiç
+yazmıyor. Dilimin kaydın neresine düştüğü `baslangic`'ta duruyor.
+
+### ⚠ Bu türde iki sessiz hata vardı — biri yakalandı
+
+Tür eşlemesi bilimsel adla yapılırsa **iki tür sessizce eğitim dışı kalıyor**
+(Küçük Karga, Ak Karınlı Ebabil). Ayrıntı ve çözüm §5.16. Eşleme artık eBird
+kodu üzerinden ve `data/birdnet_ad_haritasi.csv`'de görünür.
 
 ### Elimizde ne var (envanter)
 
@@ -922,49 +1070,34 @@ Ayrıca BirdNET'in **çıkış olasılıkları öğretmen sinyali** olarak sakla
 M5'teki damıtma (distillation) bunları kullanacak. Yani sadece "hangi dilim"
 değil, "BirdNET ne kadar emin" de kaydedilmeli.
 
-### Kurulum — ⚠ PYTHON SÜRÜM ÇAKIŞMASI
+### Kurulum — nasıl çözüldü
+
+Makinede **Python 3.11 ve 3.14** var; BirdNET-Analyzer 2.4.0 3.11'e kuruldu:
 
 ```bash
-pip install birdnet-analyzer
+py -3.11 -m venv .venv-birdnet
+.venv-birdnet\Scripts\python -m pip install --use-feature=truststore --upgrade pip
+.venv-birdnet\Scripts\python -m pip install birdnet-analyzer
 ```
 
-**Bu makinede Python 3.14 kurulu, BirdNET-Analyzer 3.12 istiyor.** Kurulum
-büyük olasılıkla TensorFlow bağımlılığında patlayacak. Üç seçenek, sırayla
-denenmeli:
-
-1. Ayrı bir 3.12 sanal ortamı (en temiz):
-   ```bash
-   py -3.12 -m venv .venv-birdnet     # 3.12 yoksa python.org'dan kurulur
-   .venv-birdnet\Scripts\pip install birdnet-analyzer
-   ```
-2. `pip install birdnet-analyzer` doğrudan 3.14'te — çalışırsa iş biter
-3. Docker imajı (repo'da Dockerfile var)
-
-### Komutlar (dokümantasyondan doğrulandı)
+İkinci satır şart — yoksa venv'in pip'i sertifika hatasıyla hiçbir şey
+indiremiyor (§5.13). Model (214 MB) paketin kendi adresinden inmiyor,
+GitHub'dan alındı (§5.14). Kurulum doğrulaması:
 
 ```bash
-# 1. Analiz — her kayıt için 3 sn'lik dilim tespitleri
-python -m birdnet_analyzer.analyze data/wav -o data/birdnet_sonuc \
-       --slist data/birdnet_slist.txt --min_conf 0.1 --overlap 0.0
-
-# 2. Segment çıkarma — tespit edilen dilimleri ayrı dosyalara kes
-python -m birdnet_analyzer.segments data/wav -o data/segment \
-       -r data/birdnet_sonuc --min_conf 0.1 --max_segments 400
+.venv-birdnet\Scripts\python -c "from birdnet_analyzer.utils import check_birdnet_files; print(check_birdnet_files())"
 ```
 
-Bayraklar: `-o/--output`, `-r/--results`, `--min_conf` (varsayılan 0.25),
-`--overlap` [0.0–2.9], `-b/--batch_size`, `-t/--threads`, `--max_segments`
-(varsayılan 100), `--slist` **ya da** `--lat/--lon/--week` (ikisi birlikte
-kullanılamaz).
+**`--slist` biçimi doğrulandı** (plan "DOĞRULANMADI" diyordu): paketin
+`labels/V2.4/*.txt` dosyalarında satırlar `Bilimsel ad_İngilizce ad`.
+Ama İngilizce adı kendi CSV'mizden yazmayın — modelin kendi etiket
+dosyasıyla birebir tutmazsa BirdNET satırı sessizce yok sayar. Eşleme
+`eBird_taxonomy_codes_2024E.json` üzerinden yapılıyor (§5.16).
 
-**`--min_conf` neden 0.25 değil 0.1:** yumuşak etiket topluyoruz. Düşük
-güvenli dilimler de damıtma için bilgi taşıyor; eşiği eğitim tarafında
-ayarlamak, veriyi baştan atmaktan iyi.
-
-**`--slist` dosyası** `species_istanbul.csv`'den üretilmeli. Biçimi
-`Bilimsel ad_İngilizce ad` satırları olmalı (**DOĞRULANMADI** — BirdNET'in
-`labels/` dosyalarından birine bakıp teyit edin, yanlış biçimde sessizce
-boş liste kullanır). Küçük bir script yazın; İngilizce adlar CSV'de var.
+**`--min_conf` 0.25 değil 0.1:** yumuşak etiket topluyoruz. Düşük güvenli
+dilimler de damıtma için bilgi taşıyor; eşiği eğitim tarafında yükseltmek
+kolay, atılan veriyi geri getirmek için 79 saatlik analizi tekrarlamak
+gerekir.
 
 ### ⚠ 24 kHz meselesi — bilerek böyle
 
@@ -980,16 +1113,75 @@ daha az emin olabilir. Kabul edilmiş bir bedel — orijinal mp3'ler silindi,
 geri dönüş yok. Bu türlerde tespit sayısı çok düşük çıkarsa `--min_conf`
 onlar için ayrıca düşürülebilir.
 
-### Beklenen çıktı ve kabul ölçütü
+### Sonuç — ölçüldü (2 Ağustos 2026)
 
-- Tür başına **≥100 segment** (3 sn) hedeflenmeli; 40 kayıt × ~39 sn ham
-  sesin makul bir kısmı hedef tür olmalı
-- Segment sayısı çok düşük çıkan türler **not edilmeli** — M5'te sınıf
-  dengesizliği olarak karşımıza çıkacak, focal loss ile ele alınacak
-- BirdNET güven skorları kayıt başına saklanmalı (öğretmen sinyali)
-- Sağlama: rastgele 10 segment dinlenip gerçekten hedef tür mü, bakılmalı.
-  *Bu projede dolaylı ölçüme fazla güvenmek iki kez pahalıya patladı (§5.10);
-  segmentasyonda da tek doğrudan gözlem dinlemektir.*
+```
+178 tür · 7.111 kayıt · 95.033 dilim (3 sn) tarandı
+79.932 dilim en az bir tespit aldı (%84)
+data/segmentler.csv  ·  79.932 satır
+
+hedef güven >= 0.10 : 63.059 dilim   tür başına 354
+hedef güven >= 0.25 : 58.151 dilim   tür başına 327   <- hedef >=100 idi
+hedef güven >= 0.50 : 52.415 dilim   tür başına 294
+```
+
+Koşu: 10 işçi, **~245 dosya/dk**, toplam ~50 dk (yarıda kesilip devam etti).
+
+**0.25 eşiğinde 100 dilimin altında kalan 6 tür** — M5'te sınıf dengesizliği
+olarak karşımıza çıkacak, focal loss ve veri artırma bunları hedefleyecek:
+
+| Tür | Dilim | Hedef en yüksek |
+|---|---|---|
+| Alaca Balıkçıl (`squher1`) | 25 | %30 |
+| Küçük Ak Balıkçıl (`litegr`) | 50 | %32 |
+| Büyük Ak Balıkçıl (`greegr`) | 53 | %36 |
+| Kara Karınlı Kumkuşu (`dunlin`) | 83 | %67 |
+| Çaprazgaga (`redcro`) | 88 | %45 |
+| Yalıçapkını (`comkin1`) | 89 | %58 |
+
+Altısının üçü **balıkçıl**. "Hedef en yüksek" %30–36 demek: tespit alan
+dilimlerin üçte ikisinde kayıttaki baskın ses başka bir kuş. Sebep tahmin
+değil, desen belli — balıkçıllar az ötüyor ve XC kayıtları sulak alanda,
+yani başka türlerle dolu. Bu türlerde ya eşik ayrıca düşürülmeli ya da
+`en_iyi_tur` sütununa bakıp bulaşık dilimler ayıklanmalı.
+
+> ⚠ **Kuş dışı ses içeren dilim yalnızca 204** (95.033 içinde binde 2).
+> Bir ara bunu "negatif madenciliği için bedava kaynak" diye not etmiştim;
+> **ölçünce öyle çıkmadı**. XC kayıtları temiz kayıtlar, içlerinde araba ve
+> insan sesi neredeyse yok. Negatif sınıfı için gerçek kaynak lazım
+> (§9f-4).
+>
+> İkinci aday: hiç tespit almayan **15.101 dilim** (95.033 − 79.932).
+> Bunlar sessizlik ve belirsiz arka plan. Kullanılabilir ama **riskli** —
+> içlerinde eşiğin altında kalmış zayıf kuş sesi olabilir, negatif diye
+> öğretilirse Aşama-1 gerçek kuşu reddetmeyi öğrenir.
+
+### Kabul ölçütü — durum
+
+| Ölçüt | Durum |
+|---|---|
+| Tür başına ≥100 segment (3 sn) | ✅ **327/tür** (0.25 eşiğinde) — yukarıdaki sayılar |
+| Zayıf türler not edilmeli | ✅ `birdnet_ozet.py` 0.25 eşiğinde 100 altını listeliyor |
+| BirdNET güven skorları saklanmalı (öğretmen sinyali) | ✅ `segmentler.csv` + kayıt başına ham CSV |
+| **Rastgele segmentler DİNLENMELİ** | ⏳ **KULLANICIDA** — aşağıya bakın |
+
+**Son ölçüt hâlâ açık ve önemli.** Bu projede dolaylı ölçüme fazla güvenmek
+iki kez pahalıya patladı (§5.10). Segmentasyonda tek doğrudan gözlem
+dinlemektir.
+
+`data/segment_ornek/` altında **10 örnek kesilmiş, dinlenmeyi bekliyor.**
+Objektif sağlamalar yapıldı ve hepsi geçti — dilimler tam 3,00 sn, 24 kHz,
+RMS -25…-43 dBFS (yani sessizlik değil), ve on örneğin **onunda da hedef
+tür dilimin en yüksek skorlu türü**. Ama bunların hiçbiri "kesilen ses
+gerçekten o kuş mu" sorusunu cevaplamıyor; **dinlemenin yerini tutmaz.**
+
+```bash
+python tools/segment_kes.py --adet 10        # rastgele 10 dilim kes
+python tools/segment_kes.py --tur eurbla --esik 0.9 --adet 5
+```
+
+Dosya adı `<kod>_<XCkimligi>_<baslangic>.wav`; ekrana hedef güveni ve
+dilimin en yüksek skorlu türü de basılıyor, dinlerken karşılaştırın.
 
 ---
 
@@ -997,11 +1189,33 @@ onlar için ayrıca düşürülebilir.
 
 1. ✅ Tür listesi — 178 tür
 2. ✅ Kayıt indirme + 24 kHz mono WAV dönüşümü — **7.111 dosya, doğrulandı**
-3. ⏳ **BirdNET segmentasyonu** — §9e
-4. ⏳ **Negatif madenciliği** — plan *"atlanırsa cihaz sahada kullanılamaz"*
-   diyor: şehir gürültüsünü sürekli kuş sanar.
+3. ✅ **BirdNET segmentasyonu** — §9e, `data/segmentler.csv`
+4. ⏸ **Negatif TOPLAMA — KULLANICI KARARIYLA ASKIYA ALINDI (2 Ağustos 2026)**
 
-   Araştırıldı (anahtarsız kaynaklar):
+   Plan *"atlanırsa cihaz sahada kullanılamaz"* diyor. Kullanıcı yine de
+   erteledi ve **gerekçesi sağlam**: ilk doğrulama testi *boş bir odada
+   bilgisayardan kuş sesi çalarak* yapılacak. O senaryoda şehir gürültüsü
+   yok, dolayısıyla negatifler o testi hiç etkilemiyor. Öncelik tür tanımayı
+   çalıştırmak. Saha kaydı turu (ezan, vapur, simitçi, trafik) **M8 saha
+   kalibrasyonuna** kaydı.
+
+   > **AMA ikisini karıştırmayın:** *toplama* askıya alındı; **negatif
+   > sınıfı yine de doldurulmak zorunda.** Aşama-1'in "kuş değil" ve
+   > Aşama-2'nin "bilinmiyor" sınıflarına bir şey konmazsa model her sesi
+   > bir kuşa atar — boş odada bile, kendi nefesinizi bile.
+   >
+   > **ÖLÇÜLDÜ, tahmin değil:** kendi kayıtlarımızdan çıkan kuş dışı dilim
+   > sayısı **204** (95.033 içinde). Bir ara bunu yeterli bir kaynak sandım;
+   > **değil**. XC kayıtları temiz, içlerinde şehir sesi yok.
+   >
+   > Askıya alma kararını bozmayan çözüm: **ESC-50 indirmek** (879 MB,
+   > anahtar gerekmiyor, aşağıdaki tabloda). Bu bir *indirme*, saha turu
+   > değil — kullanıcının ertelediği şey dışarı çıkmaktı. `chirping_birds`
+   > sınıfını çıkarmayı unutmayın. İstanbul'a özgü sesler (ezan, vapur,
+   > simitçi) M8'e kalıyor; onlar doğruluğu artırır ama ilk çalışan sürüm
+   > için şart değil.
+
+   Saha turuna dönüldüğünde araştırılmış kaynaklar (anahtarsız):
    | Kaynak | Lisans | Not |
    |---|---|---|
    | **ESC-50** (github.com/karolpiczak/ESC-50) | CC BY-NC | 2000 klip, 50 sınıf: korna, siren, motor, yağmur, rüzgâr, köpek. 879 MB. **`chirping_birds` sınıfı ÇIKARILMALI** — negatife kuş sesi karışırsa Aşama 1 bozulur |
@@ -1054,36 +1268,41 @@ test/       CMakeLists.txt, dsp_test.c      ← host tarafı DSP testleri
 tools/      capture_wav.py, mel_reference.py,
             species_list.py, xc_fetch.py,
             xc_convert.py, m4_run.py        ← M4 veri boru hattı
+            birdnet_slist.py, birdnet_run.py,
+            birdnet_ozet.py, segment_kes.py ← M4 adım 3: segmentasyon
 data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
+            birdnet_ad_haritasi.csv         ← kod→BirdNET adı (GİRİYOR, §5.16)
             .xc_key                         ← XC API anahtarı (GİRMİYOR)
             wav/                            ← eğitim verisi (girmiyor)
             xc/kayitlar.csv                 ← lisans/atıf kaydı (girmiyor)
             cache/                          ← API önbelleği (girmiyor)
+            birdnet_sonuc/                  ← kayıt başına sonuç CSV (girmiyor)
+            birdnet_log/                    ← işçi günlükleri (girmiyor)
+            segmentler.csv                  ← dilim dizini (girmiyor, üretilebilir)
+.venv-birdnet/  BirdNET 3.11 ortamı + model (girmiyor, ~1 GB)
 third_party/  pico-sdk/, lvgl/              (ikisi de git'e girmiyor)
 rsvpnano/     kullanıcının kopyası           (git'e girmiyor)
 ```
 
 ### Git
 
-Dal `main`, uzak depo yok, çalışma ağacı temiz. Bu oturumun commit'leri
-(eskiden yeniye):
+Dal `main`, uzak depo yok, çalışma ağacı temiz.
+
+Bu oturumun (2 Ağustos 2026) commit'leri:
 
 | Commit | Ne |
 |---|---|
-| `7273768` | **Ekran çalışıyor: CS, PIO veriyi hatta çıkarmadan yükseliyordu** (§5.9) |
-| `68ba8b2` | Spektrogram: frekans ekseni yönü kartta ölçülüp düzeltildi |
-| `768cda9` | **M3: mel öznitelik hattı + kapı, host testleriyle doğrulandı** |
-| `9e7e2dc` | Dokunmatik: zaman aşımlı kendi sürücümüz, satıcı sürücüsü kaldırıldı |
-| `30c6ac9` | M2b: LVGL v9.3 entegrasyonu, 90° yön çevrimi ek tampon olmadan |
-| `cfcc0c4` | Teşhis komutları, derleme hedefleri ve etkileşimli araç kipi |
-| `a7ca72b` | **M3: sürekli yakalama — kendini yenileyen DMA halka tamponu** |
-| `6b27ab6` | Demo komutu `a`: LVGL kart + canlı mel spektrogramı + kapı tek ekranda |
+| `ae9ae90` | **M4 adım 3: BirdNET segmentasyon boru hattı** — dört araç, üç ölçülmüş karar, bir sessiz hata (§9e, §5.13–5.16) |
 
-Sıralama **her commit derlenebilir kalsın** diye seçildi: DSP dosyaları
-CMakeLists'e eklenmeden önce commit'lendiği için ara commit'lerde derlemeye
-girmiyorlar ve firmware bozulmuyor. `CMakeLists.txt` ve `main.c` tek parça
-halinde son commit'te — birbirine bağlı oldukları için etkileşimli staging
-olmadan bölünemezlerdi.
+Önceki oturumlardan (eskiden yeniye): `7273768` ekran çalışıyor (§5.9) ·
+`68ba8b2` spektrogram yönü · `768cda9` M3 mel + kapı · `9e7e2dc` dokunmatik
+sürücüsü · `30c6ac9` M2b LVGL · `cfcc0c4` teşhis komutları · `a7ca72b` M3
+sürekli yakalama · `6b27ab6` `a` demosu · `5bedba4`/`9deba1b`/`e7bc464`
+M4 hazırlığı · `038230e` M4 veri toplama tamamlandı.
+
+Firmware tarafındaki commit sıralaması **her commit derlenebilir kalsın**
+diye seçilmişti: DSP dosyaları CMakeLists'e eklenmeden önce commit'lendiği
+için ara commit'lerde derlemeye girmiyorlar ve firmware bozulmuyor.
 
 ### rsvpnano referansı
 
