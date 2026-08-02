@@ -44,31 +44,22 @@ doğrulama testi boş odada bilgisayardan kuş sesi çalarak yapılacak; o
 senaryoda şehir gürültüsü yok. Odak tür tanımada. Ayrıntı ve *ama*'sı
 §9f-4'te — negatif **sınıfı** yine de bir şeyle doldurulmak zorunda.
 
-**`s_capture` temizliği ✅ BİTTİ (§9g)** — ama **bir GERİLEME açığa çıkardı
-(§9h). ÖNCE ONU OKUYUN.**
+**`s_capture` temizliği ✅ BİTTİ (§9g)** ve açığa çıkardığı **ekran
+gerilemesi de ✅ ÇÖZÜLDÜ (§9h).**
 
 ```
 bss  218.988  ->  127.084 bayt     (91.904 bayt serbest, hedef <=130.000)
 arena (180 KB) ile birlikte 311.404  ->  520 KB SRAM'de ~208 KB pay
 ```
 
-Kabul ölçütünün 4'ü geçti (bellek, kayıt sürekliliği, gürültü tabanı, kare
-hızı). **5. ölçüt DÜŞTÜ: `a` demosunda EKRAN BOZUK** — panel karıncalanma
-gösteriyor (§5.9'daki tabloyla aynı).
+Beş kabul ölçütünün beşi de karşılandı. Kartta HEAD duruyor, çalışıyor.
 
-> ### 🔴 KARTTA HEAD DEĞİL, TEŞHİS İKİLİSİ (`probe`) DURUYOR
-> Oturum kapanırken kartta **`probe`** firmware'i kaldı: HEAD'in kodu, tek
-> farkı `s_chunk`'ın 48000 elemanlı bırakılması (§9h). **Ekranı çalışıyor**,
-> ama bss'i 218.988 — yani bellek kazancı o ikilide YOK ve **hiçbir commit'e
-> karşılık gelmiyor.**
->
-> HEAD'i (bss 127.084) derleyip yüklerseniz **ekran karıncalanır** — bu
-> beklenen, teşhisi konmuş durum, yeni bir sürpriz değil. Kök neden
-> `s_capture` temizliği DEĞİL; o temizlik kodda zaten var olan gizli bir
-> hatayı görünür yaptı. Kanıt ve yöntem §9h'de.
+**M4 tamamen bitti.** Veri (178 tür · 7.111 WAV) ✅, segmentasyon
+(`data/segmentler.csv`, 79.932 satır) ✅, negatif toplama kullanıcı kararıyla
+M8'e ertelendi (§9f-4 — *ama negatif sınıfı yine de doldurulmalı*).
 
-**SIRADAKİ İŞ — §9h'deki sınır dışı yazmayı bulmak.** Ondan sonrası eğitim
-kümesi (§9f-5) → M5; `data/segmentler.csv` hazır bekliyor.
+**SIRADAKİ İŞ — eğitim kümesi (§9f-5) → M5.** Bellek bütçesi artık ölçülmüş
+bir rakam, model boyutu ona göre seçilebilir. Ayrıntı §9i'de.
 
 ---
 
@@ -519,13 +510,39 @@ Eşleme artık **eBird kodu** üzerinden, BirdNET'in kendi
 
 ---
 
+### 5.17 Belleği küçültmek zamanlama payını da yiyebilir
+
+`s_capture` temizliği (96 KB → 4 KB) ekranı bozdu. Sebep bellek bozulması
+**değildi** — kanarya testi bunu eledi. bss küçülünce crt0'ın sıfırlaması
+kısaldı, firmware panel başlatmaya ~1 ms erken vardı ve AXS15231B'nin hazır
+olma penceresini kaçırdı. Panele donanım reset'i atamadığımız için (§5.11)
+durum kalıcı oldu.
+
+**İki ders:**
+
+1. **Bellek değişikliği bir zamanlama değişikliğidir.** "Sadece tampon
+   küçülttüm, mantığa dokunmadım" güvenli demek değil. Açılış sırasındaki
+   herhangi bir işi kısaltmak, ondan sonra gelen ve zamanlamaya duyarlı
+   donanımı vurabilir.
+2. **Zamanlama kısıtını `sleep_ms` ile değil mutlak alt sınırla ifade edin.**
+   `sleep_ms(N)` o anki paya N ekler; kendinden önceki kod hızlanınca aynı
+   tuzak yeniden kurulur. `while (to_ms_since_boot(...) < N) ...` kısıtın
+   kendisini söyler ve önceki kodun süresinden bağımsızdır.
+
+Teşhis yolu da kayda değer: üç koşuluk A/B (eski / yeni / **yeni mantık +
+eski yerleşim**) mantığı yerleşimden ayırdı ve tek başına "hata mantıkta
+değil" sonucunu verdi. Bunu bir kez daha kullanın — ucuz ve kesin.
+
+---
+
 ## 6. Açık konular / borçlar
 
 | Konu | Durum |
 |---|---|
 | **EMI ölçümü geçersiz** | M1'deki tarama PWM ile yapıldı, ışık hep kapalıydı. `e` komutu aç/kapa olarak düzeltilip yeniden ölçülmeli (§4). |
 | ~~**`s_capture` (96 KB)**~~ | ✅ **ÇÖZÜLDÜ (§9g).** 4 KB'lık `s_chunk`'a indi, bss 218.988 → 127.084. Arena'nın önü açık. |
-| 🔴 **Ekran gerilemesi** | **SIRADAKİ İŞ — §9h.** HEAD'in firmware'inde `a` demosunda panel karıncalanıyor. Kök neden bellek yerleşimine bağlı gizli bir sınır dışı yazma; üç koşuluk A/B ile kanıtlandı. Bellek kazancından vazgeçilmemeli. |
+| ~~**Ekran gerilemesi**~~ | ✅ **ÇÖZÜLDÜ (§9h).** Panel hazır olma penceresi; ekran başlatması açılıştan ≥250 ms sonraya alındı. Bellek kazancı korundu. |
+| **EMI ölçümü — borç neredeyse kapandı** | `e` komutu artık gerçekten aç/kapa ölçüyor (arka ışık düz GPIO'da): **kapalıya göre +0,4 dB**, yani arka ışık mikrofonu bozmuyor. Kalan tek eksik: son üç ölçüm hâlâ `PWM %50` / `PWM %10` diye etiketleniyor, oysa üçü de aynı "açık" durumu. Etiketler düzeltilip yeniden çalıştırılırsa §4'teki "GEÇERSİZ" uyarısı kaldırılabilir. Küçük iş. |
 | **Dokunmatik park edildi** | Kritik yolda değil. Kaldığı yer §9b. |
 | **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **GPIO34 (LCD_RST) aşağı çekilemiyor** | Ölçüldü, kök neden aranmadı. Bkz. §5.11. |
@@ -607,7 +624,7 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | M2a | Ekran sürücüsü + canlı spektrogram | ✅ (§9a) |
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
-| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **🔶 veri ✅ (178 tür, 7.111 WAV) · segmentasyon ✅ (§9e) · negatifler kaldı (§9f-4)** |
+| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **✅ veri (178 tür, 7.111 WAV) · segmentasyon (§9e) · negatif toplama M8'e ertelendi (§9f-4) · eğitim kümesi §9i'de** |
 | M5 | Model eğitimi + damıtma + INT8 | |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
@@ -1432,7 +1449,7 @@ sessiz bozulma iki kez pahalıya patladı (§5.10); kopukluk sessizce geçmemeli
 | 2 | `r` çalışıyor, WAV süreksizlik içermiyor | ✅ objektif · 🔶 dinleme aşağıda |
 | 3 | `--cmd n` tabanı öncesiyle ±1 dB içinde | ✅ **0,6 dB** fark |
 | 4 | `--cmd m` 62–63 kare/s, kayıp 0 | ✅ **63 kare/s, kayıp 0** |
-| 5 | `--cmd a` tam demo ekranda çalışıyor | ❌ **DÜŞTÜ — ekran bozuk, §9h** (ses hattı 63 kare/s, kayıp 0) |
+| 5 | `--cmd a` tam demo ekranda çalışıyor | ✅ (önce düştü, §9h'de çözüldü) |
 
 > ⚠ **Bu satırı bir ara "✅ 63 kare/s" diye yazmıştım — YANLIŞTI.** Ölçülen
 > şey yalnızca ses hattının kare hızıydı; ölçütün asıl kısmı olan "ekranda
@@ -1487,11 +1504,11 @@ kez yanılttı (§5.10), o yüzden objektif sağlamalar yeterli sayılmadı:
 
 ### Bundan sonra
 
-Önce §9h (ekran gerilemesi), sonra eğitim kümesi (§9f-5) → M5.
+§9h çözüldü. Sıradaki iş: eğitim kümesi → M5 (§9i).
 
 ---
 
-## 9h. 🔴 SIRADAKİ İŞ — bellek yerleşimine bağlı ekran gerilemesi
+## 9h. Ekran gerilemesi ✅ ÇÖZÜLDÜ — panel hazır olma penceresi
 
 ### Belirti
 
@@ -1564,32 +1581,132 @@ Mel hattı demoda sürekli çalıştığı için **mel halkaları birinci şüph
 gönderilen İLK komut `a` idi; `s_chunk`'ı kullanan hiçbir komut (`n`, `r`,
 `e`, `l`, `s`) hiç çalışmamıştı. Kurban `s_chunk` olabilir ama fail o değil.
 
-### Sonraki oturumda izlenecek yol
+### Kanarya testi — bellek bozulmasını ELEDİ
 
-1. **Kurbanı doğrulayın (kanarya).** `s_draw_buf`'ın önüne ve arkasına bilinen
-   desenli guard dizileri koyun (ör. 64 bayt `0xA5`), `pb_lv_tick` sonrası
-   kontrol edip bozulanı seri porta yazdırın. Hangi tamponun, hangi yönden ve
-   kaç bayt ezildiğini doğrudan söyler. Bu, göz gerektirmeyen bir test —
-   §5.10'un aksine burada dolaylı ölçüm meşru, çünkü *bellek* ölçüyoruz.
-2. **Eşiği ikiye bölün.** `s_chunk`'ı 48000 → 24000 → 12000 → 8000 → 4096
-   yapıp ekranın hangi boyutta bozulmaya başladığını bulun. Kırılma noktası,
-   taşmanın kaç bayt olduğunu doğrudan verir (kabaca: bozulmanın başladığı
-   boyut ≈ taşma miktarı).
-3. Şüpheli tamponları yazan kodu okuyun: `src/dsp/mel.c` (halka indeksleme),
-   `src/ui/spectrogram.c`, `src/ui/lv_port.c` (kısmi render + devrik blit —
-   negatif adımlı `pb_lcd_blit_strided` sınır hesabı burada kolay kaçar).
-4. **Bellek kazancından VAZGEÇMEYİN.** Hata gerçek ve zaten oradaydı; TFLM
-   arena'sı (180 KB) geldiğinde yerleşimi nasılsa yine kaydıracak ve aynı
-   çökme M6'nın ortasında, çok daha pahalı bir yerde çıkacaktı. **Şimdi
-   bulmak ucuz.** `s_capture` temizliği bu hatayı *yaratmadı*, ortaya çıkardı.
+`s_chunk` 96.000 baytlık bir "dedektör şeridi" olarak `0xA5` ile dolduruldu
+(`pencere.2`'nin hemen arkasında duruyor), demo 12 s çalıştırıldı, sonra
+taranarak raporlandı. Sonuç: **bozulma yok, şerit hiç yazılmamış.**
 
-### Kabul ölçütü
+Yani ortada sınır dışı yazma **yoktu**. Yukarıdaki "kurban" teorisi yanlıştı;
+bellek haritası doğru okunmuştu ama yanlış mekanizmaya bağlanmıştı.
 
-- Kanarya testi hangi tamponun ezildiğini söylüyor ve kök neden bulunuyor
-- `s_chunk[CHUNK_SAMPLES]` (4 KB) hâliyle `--cmd a` **ekranda düzgün**
-  (kullanıcı bakacak — bu ölçüt göz gerektiriyor, ölçümle geçilmiş sayılmaz)
-- bss ≤ 130.000 korunuyor
-- `--cmd m` 63 kare/s kayıp 0, `--cmd r` sürekliliği bozulmamış
+> `v` teşhisi bu turda da yalan söyledi: çalışan ve bozuk ikilide çıktısı
+> **birebir aynı** ("panel komutlara uymuyor", register okumaları hep 00).
+> §5.10'un tarif ettiği tuzağın aynısı — bu paneldeki TE ve okuma testleri
+> hiçbir şey kanıtlamıyor, gösterge olarak kullanmayın.
+
+### ✅ GERÇEK KÖK NEDEN — panel hazır olma penceresi (zamanlama)
+
+AXS15231B **açılıştan sonra kısa bir süre başlatma dizisini kabul etmiyor.**
+Erken başlatılırsa panel kendi başlatılmamış GRAM'ını göstermeye devam ediyor
+(karıncalanma) ve bu durum **KALICI**: GPIO34 dışarıdan yüksek tutulduğu için
+panele donanım reset'i atamıyoruz (§5.11), yani yeniden deneme şansı yok.
+
+bss 218.988 → 127.084 inince crt0'ın bss sıfırlaması kısaldı ve firmware panel
+başlatmaya **~1 ms daha erken** varmaya başladı. Kartta ölçüldü:
+
+| Gecikme | Ekran |
+|---|---|
+| yok | ❌ bozuk |
+| 20 ms | ✅ düzgün |
+| 500 ms | ✅ düzgün |
+
+> **Eski hâl bu pencereyi KIL PAYI geçiyormuş.** `s_capture` temizliği bir
+> hata *yaratmadı*, var olan payı bitirdi. Hata kodda zaten duruyordu ve
+> M6'da TFLM arena'sı yerleşimi kaydırdığında çok daha pahalı bir yerde
+> patlayacaktı.
+
+### Düzeltme — neden `sleep_ms` değil
+
+```c
+/* main.c, QSPI_GPIO_Init'ten hemen once */
+while (to_ms_since_boot(get_absolute_time()) < 250) sleep_ms(5);
+```
+
+Sabit uyku yalnızca o anki paya sabit bir miktar ekler; kendinden **önceki**
+kod hızlanırsa aynı tuzak yeniden kurulur — bizi buraya tam olarak bu düşürdü.
+Mutlak alt sınır kısıtın kendisini ifade ediyor ve önceki kodun süresinden
+bağımsız. USB beklemesi zaten uzun sürdüyse hiç beklemiyor, normal koşulda
+bedeli sıfır. Ölçülen eşik ≤20 ms; 250 ms bilerek cömert.
+
+**Bu satırı silmeyin ve `sleep_ms`'e çevirmeyin.**
+
+### Kabul ölçütü — durum
+
+| Ölçüt | Sonuç |
+|---|---|
+| `--cmd a` ekranda düzgün | ✅ kullanıcı doğruladı |
+| bss ≤ 130.000 | ✅ **127.084** korundu |
+| `--cmd m` 63 kare/s, kayıp 0 | ✅ |
+| `--cmd r` sürekliliği bozulmamış | ✅ sınır maks 649 vs genel maks 2073 |
+
+> Küçük bir dürüstlük notu: kullanıcının gözle onayladığı ikili **20 ms**
+> sürümüydü. Gönderilen sürüm 250 ms alt sınırı, yani kesinlikle daha
+> korumalı, ve göz gerektirmeyen ölçütlerin hepsi onda çalıştırıldı.
+> Yeni oturumda ilk iş olarak `--cmd a` ile 10 saniyelik bir bakış atın.
+
+---
+
+## 9i. 🔵 SIRADAKİ İŞ — eğitim kümesi (M4 adım 4) → M5
+
+> Firmware tarafı şimdilik bitti; bu iş tamamen **PC tarafı**. Karta gerek yok.
+
+### Elde ne var
+
+```
+data/segmentler.csv   79.932 satir — hangi kaydin hangi 3 sn'lik diliminde
+                      hangi tur, ne guvenle duyuldu (BirdNET yumusak etiketi)
+data/wav/<kod>/*.wav  7.111 kayit, 178 tur, 24 kHz mono 16-bit
+data/species_istanbul.csv   tur tablosu + aylik dagilim (mevsim onceligi icin)
+data/xc/kayitlar.csv        lisans + atif
+```
+
+Eşikler (§9e): güven ≥0.25'te **58.151 dilim, tür başına 327**.
+
+### Yapılacak: `tools/egitim_kumesi.py`
+
+`segmentler.csv` + WAV'lardan model girdisi üretmek. Cihazdaki
+`pb_mel_window()` çıktısıyla **birebir aynı** olmak zorunda:
+
+- girdi **64×187 int8**, 3 s pencere
+- FFT 512, hop 384, 24 kHz
+- mel **HTK**, 150 Hz–11.5 kHz, **alan normalizasyonu YOK**
+- pencere **periyodik** Hann (`sym=False`)
+
+> Bu dört ayrıntıdan biri tutmazsa model PC'de iyi, cihazda kötü çalışır ve
+> sebebi **hiçbir yerde hata olarak görünmez.** `tools/mel_reference.py`
+> zaten bu parametrelerin numpy referansı — eğitim kümesi onu kullanmalı,
+> yeniden yazmamalı. Sağlaması: aynı 3 sn'lik sesi hem cihazdan (`--cmd m`
+> ya da `s`) hem betikten geçirip mel matrislerini karşılaştırın.
+
+### ⚠ Dört tuzak
+
+**1. Bölmeyi DİLİM bazında yapmayın, KAYIT bazında yapın.** Aynı XC kaydından
+çıkan dilimler hem eğitimde hem doğrulamada olursa model kaydı ezberler,
+doğruluk sahte yükselir. Bölme `dosya` sütununa göre olmalı; aynı kaydın tüm
+dilimleri aynı kümeye. İdealde **kaydeden kişiye** göre de ayırın (aynı kişi
+aynı ekipman/lokasyon).
+
+**2. Bulaşık dilimleri ayıklayın.** `en_iyi_tur != hedef` olan dilimde
+kayıttaki baskın ses başka bir kuş. Özellikle 6 zayıf türde (§9e) tespit alan
+dilimlerin üçte ikisi böyle. Ya bu dilimleri atın ya da yumuşak etiketle
+eğitin — ama **sessizce hedef etiketiyle eğitmeyin.**
+
+**3. Negatif sınıfı doldurulmak ZORUNDA (§9f-4).** Toplama ertelendi, sınıf
+ertelenmedi. Kendi kayıtlarımızdan çıkan kuş dışı dilim **yalnızca 204** —
+ölçüldü, yetmiyor. Çözüm: **ESC-50 indirin** (879 MB, anahtarsız,
+github.com/karolpiczak/ESC-50), **`chirping_birds` sınıfını ÇIKARIN.** Bu bir
+indirme, saha turu değil; kullanıcının ertelediği şey dışarı çıkmaktı.
+
+**4. Sınıf dengesizliği.** 6 tür 100 dilimin altında (§9e tablosu). Focal loss
++ veri artırma bunları hedeflemeli; ayrıca o türlerde eşiği ayrıca düşürmek
+seçenek.
+
+### Sonra M5
+
+Damıtma (BirdNET yumuşak çıktıları öğretmen), INT8 niceleştirme, karışıklık
+matrisi. Kısıtlar: **≤30 MMAC/pencere**, **tensor arena ≤180 KB** — bütçe
+artık ölçülü (§7: bss 127.084, arena ile ~208 KB pay).
 
 ---
 
@@ -1640,12 +1757,11 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | `ae9ae90` | **M4 adım 3: BirdNET segmentasyon boru hattı** — dört araç, üç ölçülmüş karar, bir sessiz hata (§9e, §5.13–5.16) |
 | `1ddf465` | **`s_capture` temizliği** — teşhis komutları akışa çevrildi, bss 218.988 → 127.084 (§9g) |
 | `b69145e` | lastsession.md: commit hash'i yazıldı |
-| `7db6961` | lastsession.md: **§9h ekran gerilemesi** — üç koşuluk A/B, bellek haritası, izlenecek yol |
+| `7db6961` | lastsession.md: §9h ekran gerilemesi — üç koşuluk A/B, bellek haritası |
+| `dba7a01` | **Panel hazır olma penceresi** — ekran başlatması açılıştan ≥250 ms sonra (§9h kök neden) |
 
-> ⚠ **HEAD derlenebiliyor ve ses tarafı sağlam, ama `a` demosunda ekran
-> bozuk (§9h).** Bu bilinerek commit'lendi: hata `s_capture` temizliğinin
-> yarattığı bir şey değil, açığa çıkardığı gerçek bir hata. Geri almak onu
-> yeniden gizlerdi ve TFLM arena'sı geldiğinde M6'nın ortasında patlardı.
+> HEAD sağlam: bss 127.084, ekran çalışıyor, ses hattı 63 kare/s kayıp 0.
+> Kartta HEAD duruyor.
 
 Önceki oturumlardan (eskiden yeniye): `7273768` ekran çalışıyor (§5.9) ·
 `68ba8b2` spektrogram yönü · `768cda9` M3 mel + kapı · `9e7e2dc` dokunmatik
