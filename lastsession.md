@@ -1519,7 +1519,7 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | Commit | Ne |
 |---|---|
 | `ae9ae90` | **M4 adım 3: BirdNET segmentasyon boru hattı** — dört araç, üç ölçülmüş karar, bir sessiz hata (§9e, §5.13–5.16) |
-| *(bu tur)* | **`s_capture` temizliği** — teşhis komutları akışa çevrildi, bss 218.988 → 127.084 (§9g) |
+| `1ddf465` | **`s_capture` temizliği** — teşhis komutları akışa çevrildi, bss 218.988 → 127.084 (§9g) |
 
 Önceki oturumlardan (eskiden yeniye): `7273768` ekran çalışıyor (§5.9) ·
 `68ba8b2` spektrogram yönü · `768cda9` M3 mel + kapı · `9e7e2dc` dokunmatik
