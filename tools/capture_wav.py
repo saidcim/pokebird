@@ -189,13 +189,14 @@ def main():
     ap.add_argument("--out", default="kayit.wav")
     ap.add_argument("--cmd", default="r",
                     choices=["r", "n", "e", "i", "l", "d", "s", "b", "v", "o",
-                             "t", "u", "m", "a", "x", "k", "K", "w", "y"],
+                             "t", "u", "m", "a", "x", "k", "K", "w", "y", "z"],
                     help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
                          "l=canli seviye, d=ekran testi, b=arka isik, "
                          "v=QSPI veri yolu teshisi, s=spektrogram (Ctrl+C ile cik), "
                          "m=mel+kapi hatti, a=tam demo, "
                          "w=QSPI zamanlama teshisi (goz gerekmez), "
                          "y=melez yol testi (goz gerekir, etkilesimli), "
+                         "z=satir adresleme testi (goz gerekir, etkilesimli), "
                          "x=tur agi cihaz ici dogrulama, k=gercek zamanli tanima")
     ap.add_argument("--sure", type=float, default=0.0,
                     help="m/a icin: bu kadar saniye akit, sonra cihazdan cik")
@@ -225,7 +226,7 @@ def main():
                 print("\n")
             return
 
-        if args.cmd in ("d", "b", "v", "t", "u", "y") or (args.cmd in ("m", "a", "k", "K") and args.sure <= 0):
+        if args.cmd in ("d", "b", "v", "t", "u", "y", "z") or (args.cmd in ("m", "a", "k", "K") and args.sure <= 0):
             # Etkilesimli teshis: canli akis + klavyeyi cihaza ilet.
             run_interactive(ser, args.cmd)
             return

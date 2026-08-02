@@ -68,4 +68,22 @@ void pb_lcd_fill(uint16_t color);
  */
 void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel);
 
+/**
+ * Ham piksel akışı — panelin GERÇEK sözleşmesini ifade eden üçlü.
+ *
+ * Bu panelde (AXS15231B) satır penceresi (RASET, 0x2B) YOK SAYILIYOR; yazma
+ * imlecinin satırını yalnızca RAMWR/RAMWRC belirliyor:
+ *   0x2C (RAMWR)  — imleci sütun penceresinin EN ÜSTÜNE alır
+ *   0x3C (RAMWRC) — bir önceki yazmanın bittiği yerden DEVAM eder
+ * Sütun aralığı CASET (0x2A) ile ayrı ayarlanır. Kaynak: panelin çalışan iki
+ * bağımsız sürücüsü (rsvpnano, ESP32 ve RP2350-PIO) — ikisi de RASET
+ * yollamıyor. Ayrıntı lastsession.md §9n.
+ *
+ * `basla` CS'i indirip komutu yollar, `renk` düz renk akıtır (kaç kez
+ * çağrılırsa), `bitir` CS'i kaldırır. Pencereyi çağıran ayarlar.
+ */
+void pb_lcd_akis_basla(uint8_t ramwr);
+void pb_lcd_akis_renk(uint16_t renk, uint32_t piksel);
+void pb_lcd_akis_bitir(void);
+
 #endif /* POKEBIRD_LCD_BLIT_H */

@@ -1353,6 +1353,141 @@ static void cmd_hybrid_path(void) {
     printf("  [1] disinda hicbiri calismiyorsa -> PIO yolu bastan asagi bozuk.\n\n");
 }
 
+/* ── §9n: satır adresleme testi ────────────────────────────────────────────
+ *
+ * `y` altı bileşimin ALTISINDA da aynı sonucu verdi (mavi ekran + kenarda
+ * beyaz kutu). Yani hata yolda (PIO/bit-bang) da, saat hızında da DEĞİL —
+ * gönderilen komutlarda.
+ *
+ * Panelin ÇALIŞAN iki bağımsız sürücüsü (rsvpnano'nun ESP32 ve RP2350-PIO
+ * sürücüleri) **RASET (0x2B) komutunu hiç yollamıyor**: yalnızca CASET (0x2A)
+ * ile sütun aralığı ayarlanıyor, satır ise RAMWR (0x2C, sütun penceresinin
+ * en üstünden başla) ve RAMWRC (0x3C, kaldığın yerden devam et) ile
+ * belirleniyor. Bizim sürücümüz RASET yollayıp satırın oraya gitmesini
+ * bekliyor.
+ *
+ * Bu, gözlenen HER ŞEYİ açıklıyor: tam ekran düz dolgu çalışıyor (zaten
+ * satır 0'dan başlıyor), ama her kısmi çizim satır 0'a düşüyor —
+ * `pb_lcd_fill`'in 640 satırı hep aynı üst satıra biniyor (ekran
+ * "temizlenmiyor"), `o`'nun dört karesi üst üste geliyor (yalnızca sonuncusu
+ * görünüyor), `a`'da LVGL'in her parçası tepede birikiyor.
+ *
+ * `z` bunu doğruluyor: aynı kare, beş farklı yöntemle. */
+
+static void qspi_reg_yaz(uint8_t reg, const uint8_t *veri, size_t n) {
+    QSPI_Select(qspi);
+    QSPI_REGISTER_Write(qspi, reg);
+    for (size_t i = 0; i < n; i++) QSPI_DATA_Write(qspi, veri[i]);
+    QSPI_Deselect(qspi);
+}
+
+static void qspi_caset(uint16_t x1, uint16_t x2) {
+    uint8_t d[] = { (uint8_t)(x1 >> 8), (uint8_t)x1, (uint8_t)(x2 >> 8), (uint8_t)x2 };
+    qspi_reg_yaz(0x2A, d, 4);
+}
+
+static void qspi_raset(uint16_t y1, uint16_t y2) {
+    uint8_t d[] = { (uint8_t)(y1 >> 8), (uint8_t)y1, (uint8_t)(y2 >> 8), (uint8_t)y2 };
+    qspi_reg_yaz(0x2B, d, 4);
+}
+
+/** Tüm ekranı tek renge boya — panelin gerçek sözleşmesiyle (CASET + RAMWR).
+ *  Bu yolun çalıştığı ölçüldü (`y`'nin altı adımında da ekran masmaviydi). */
+static void z_zemin(uint16_t renk) {
+    qspi_caset(0, PB_PANEL_W - 1);
+    pb_lcd_akis_basla(0x2C);
+    pb_lcd_akis_renk(renk, (uint32_t)PB_PANEL_W * PB_PANEL_H);
+    pb_lcd_akis_bitir();
+}
+
+/**
+ * `z` — satır adresleme testi. GÖZ GEREKİR, etkileşimli.
+ *
+ * Beş yöntem, hepsinde aynı hedef: panelin (66,300) konumuna, yani TAM
+ * ORTASINA 40x40 beyaz kare. Tek soru: kare ORTADA mı, UÇTA mı?
+ */
+static void cmd_row_addr(void) {
+    enum { KX = 66, KY = 300, KW = 40, KH = 40 };
+    const uint16_t MAVI = 0x001F, BEYAZ = 0xFFFF;
+
+    printf("\nSatir adresleme testi — RASET (0x2B) bu panelde calisiyor mu?\n");
+    printf("=============================================================\n\n");
+    printf("Her adimda ekran MAVI, uzerinde 40x40 BEYAZ kare olacak.\n");
+    printf("Kare panelin TAM ORTASINA cizilmek isteniyor.\n");
+    printf("  ORTADA ise  -> o yontem DOGRU\n");
+    printf("  UCTA/kenarda ise -> satir adresi yok sayiliyor\n\n");
+
+    backlight_set(true);
+
+    for (int adim = 1; adim <= 5; adim++) {
+        switch (adim) {
+        case 1:
+            printf("  [1] SIMDIKI YOL: CASET + RASET + ciplak 0x2C, sonra RAMWR (kontrol)\n");
+            z_zemin(MAVI);
+            LCD_3IN49_SetWindows(KX, KY, KX + KW, KY + KH);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+
+        case 2:
+            printf("  [2] CASET + RASET, ciplak 0x2C YOK\n");
+            z_zemin(MAVI);
+            qspi_caset(KX, KX + KW - 1);
+            qspi_raset(KY, KY + KH - 1);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+
+        case 3:
+            printf("  [3] Sira ters: once RASET sonra CASET\n");
+            z_zemin(MAVI);
+            qspi_raset(KY, KY + KH - 1);
+            qspi_caset(KX, KX + KW - 1);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+
+        case 4:
+            printf("  [4] REFERANS YOL: yalniz CASET; satir RAMWR'den itibaren\n");
+            printf("      sayiliyor — %d satir mavi atlanip sonra beyaz yaziliyor\n", KY);
+            z_zemin(MAVI);
+            qspi_caset(KX, KX + KW - 1);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(MAVI,  (uint32_t)KY * KW);   /* atla */
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+
+        case 5:
+            printf("  [5] REFERANS + RAMWRC: atlama ayri islemde, beyaz 0x3C ile\n");
+            printf("      devam ediyor (kalici cozumun ucuz olup olmadigini soyler)\n");
+            z_zemin(MAVI);
+            qspi_caset(KX, KX + KW - 1);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(MAVI, (uint32_t)KY * KW);
+            pb_lcd_akis_bitir();
+            pb_lcd_akis_basla(0x3C);                      /* RAMWRC — devam et */
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+        }
+        melez_bekle();
+        printf("\n");
+    }
+
+    printf("Bildirin: hangi adimlarda kare ORTADAYDI?\n");
+    printf("  [4] ortada, [1][2][3] ucta  -> RASET yok sayiliyor. KOK NEDEN BU.\n");
+    printf("  [5] de ortada               -> RAMWRC calisiyor, cozum ucuz:\n");
+    printf("                                 LVGL akisi bastan sona tek gecis.\n");
+    printf("  [5] ucta ama [4] ortada     -> RAMWRC yok, her cizim atlama bedeli oder.\n\n");
+
+    /* Pencereyi tam ekrana geri birak. */
+    qspi_caset(0, PB_PANEL_W - 1);
+}
+
 /**
  * Dokunmatik bring-up ve koordinat eşlemesi.
  *
@@ -2047,6 +2182,7 @@ static void print_help(void) {
     printf("  v  QSPI veri yolu teshisi\n");
     printf("  w  QSPI zamanlama teshisi (WaitIdle olcumu, goz GEREKMEZ)\n");
     printf("  y  melez yol testi: pencere ve piksel ayri yollardan (goz gerekir)\n");
+    printf("  z  satir adresleme testi: RASET calisiyor mu (goz gerekir)\n");
     printf("  s  canli spektrogram\n");
     printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
     printf("  ?  bu yardim\n\n");
@@ -2150,6 +2286,7 @@ int main(void) {
             case 'v': cmd_datapath_probe(); break;
             case 'w': cmd_qspi_timing(); break;
             case 'y': cmd_hybrid_path(); break;
+            case 'z': cmd_row_addr(); break;
             case 'o': cmd_orientation(); break;
             case 't': cmd_touch_probe(); break;
             case 'u': cmd_ui_demo(); break;

@@ -25,11 +25,14 @@ M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
 > Yani hata M6'dan önce de vardı; bu oturumda yalnızca *fark edildi*.
 > Ayrıntı, elenen ihtimaller ve sıradaki adım §9n'de.
 >
-> **Yeni (ölçüldü):** `QSPI_WaitIdle` sağlam, zaman aşımına GİRMİYOR, CS
-> veri hatta çıktıktan sonra yükseliyor — §5.9 geri gelmemiş. Sıradaki iş
-> `y` melez yol testi: pencere komutlarıyla piksel verisini ayrı yollardan
-> yollayıp hangisinin düştüğünü ayırmak. **Göz gerekiyor, kullanıcı
-> çalıştırmalı.**
+> **KÖK NEDEN BULUNDU (§9n):** veri yolu hiçbir zaman sorun değildi.
+> `QSPI_WaitIdle` sağlam (ölçüldü, zaman aşımı 0), yol ve saat hızı de
+> elendi (`y`: altı bileşim de birebir aynı). Asıl sorun: **bu panel
+> `0x2B` (RASET) komutunu YOK SAYIYOR.** Panelin çalışan iki bağımsız
+> sürücüsü de (rsvpnano ESP32 + RP2350-PIO) RASET'i hiç yollamıyor;
+> satır konumu `0x2C` (RAMWR = en üste dön) ve `0x3C` (RAMWRC = kaldığın
+> yerden devam) ile belirleniyor. Bizim her kısmi çizimimiz satır 0'a
+> düşüyor. Doğrulama testi `z` kartta hazır — **göz gerekiyor.**
 >
 > Nasıl gözden kaçmış: §9h'de kullanıcının gözle onayladığı ikili **20 ms**
 > sürümüydü; gönderilen **250 ms** sürümüne hiç bakılmadı ve o oturumun
@@ -294,6 +297,7 @@ Kart USB seri olarak görünüyor: **COM13** (`VID_2E8A PID_0009`).
 | `v` | QSPI veri yolu teşhisi | çoğu adım hayır |
 | `w` | **QSPI zamanlama teşhisi** — `QSPI_WaitIdle` ölçümü (§9n) | hayır |
 | `y` | **melez yol testi** — pencere ve piksel ayrı yollardan (§9n) | **evet**, etkileşimli |
+| `z` | **satır adresleme testi** — RASET çalışıyor mu (§9n) | **evet**, etkileşimli |
 | `t` | dokunmatik teşhisi (canlı akış) | **evet** |
 | `u` | LVGL demo ekranı | **evet** |
 | `m` | **mel + kapı hattı (M3)** | hayır |
@@ -2584,7 +2588,104 @@ ayırıyor:
    çalışıyor — yani "bit-bang çalışıyor, PIO çalışmıyor" farkı yol farkı değil
    **hız** farkı da olabilir.
 
-### 🔵 SIRADAKİ ADIM — `y` melez yol testi (GÖZ GEREKİR, kullanıcı çalıştırır)
+### ✅ `y` ÇALIŞTIRILDI — altı adımın ALTISI da aynı (kullanıcı gözle)
+
+> **"Bütün adımlarda masmavi ekran + sol alt köşede beyaz kutu vardı."**
+
+Bu iki şeyi birden söylüyor:
+
+- **Yol ve saat hızı elendi.** Bit-bang, PIO/DMA, 37,5 / 3,75 / 0,94 MHz —
+  hepsi *birebir aynı*. Hata bunların hiçbirinde değil. Bu ekseni kapatın.
+- **Tam ekran düz dolgu ÇALIŞIYOR** (ekran masmavi oldu, altı adımda da).
+  Bozuk olan yalnızca **konumlandırma**: panelin tam ortasına istenen 40x40
+  kare uca düştü — ve **şerit değil, kutu** olarak. Yani sütun aralığı
+  (CASET, 40 piksel genişlik) uygulanmış, **satır yok sayılmış**.
+
+### ✅ KÖK NEDEN (iki bağımsız kaynakla) — bu panel RASET'i yok sayıyor
+
+`rsvpnano`'daki **çalışan** iki sürücü de aynı şeyi yapıyor:
+
+```
+rsvpnano-main/src/drivers/display/axs15231b/axs15231b.cpp          (ESP32)
+rsvpnano-main/src/drivers/display/axs15231b_pio/axs15231b_pio.cpp  (RP2350 + PIO)
+```
+
+**İkisi de `0x2B` (RASET) komutunu HİÇ yollamıyor.** İkisinde de tek pencere
+komutu `setColumnWindow()` → `0x2A` (CASET). Satır konumu komutla değil,
+yazma sırasıyla belirleniyor — RP2350 sürücüsünden birebir:
+
+```cpp
+setColumnWindow(context, x, x + width - 1);
+// RAMWR (0x2C) resets the panel's write pointer; RAMWRC (0x3C) continues an
+pioPushSingleLineByte(0x32);
+pioPushSingleLineByte(0x00);
+pioPushSingleLineByte(y == 0 ? 0x2C : 0x3C);
+```
+
+Yani panelin sözleşmesi:
+
+| Komut | Ne yapar |
+|---|---|
+| `0x2A` CASET | sütun aralığını ayarlar — **çalışıyor** |
+| `0x2B` RASET | **yok sayılıyor** |
+| `0x2C` RAMWR | imleci sütun penceresinin **en üstüne** alır |
+| `0x3C` RAMWRC | bir önceki yazmanın **bittiği yerden devam** eder |
+
+Bizim sürücümüz RASET yollayıp satırın oraya gitmesini bekliyor. Gitmiyor:
+**her RAMWR satır 0'a dönüyor.**
+
+### Bu, gözlenen HER ŞEYİ açıklıyor
+
+| Belirti | Açıklama |
+|---|---|
+| `pb_lcd_fill` "ekranı temizlemiyor" | 640 satırın 640'ı da aynı **üst satıra** yazılıyor |
+| `o`'da yalnızca sarı görünüyor | dört kare üst üste biniyor, sonuncusu kazanıyor |
+| `a`'da yazı bozuk, zemin beyaz | LVGL'in her kısmi çizimi tepede birikiyor |
+| yeşil "ses algılandı" tepki veriyor | her karede **en son** çizilen o |
+| bit-bang düz renk çalışıyor (§9n) | tam ekran zaten satır 0'dan başlıyor — RASET'e ihtiyaç yok |
+| tüm veri yolu ölçümleri temiz | veri yolu hiçbir zaman sorun değildi |
+
+**Neden şimdiye kadar fark edilmedi:** kabul ölçütlerinin hepsi ya tam ekran
+düz dolguydu ya da göz gerektirmeyen sayaçlardı. Hata sürücüde **baştan beri**
+duruyordu; §5.9 ve §9h gerçek ve ayrı hatalardı, bu üçüncüsü onların altında
+kalmış.
+
+### 🔵 SIRADAKİ ADIM — `z` satır adresleme testi (GÖZ GEREKİR, kullanıcı çalıştırır)
+
+`python tools/capture_wav.py --port COM13 --cmd z` — beş adım, hepsinde aynı
+hedef: panelin **tam ortasına** 40x40 beyaz kare. Tek soru: kare **ORTADA** mı,
+**UÇTA** mı?
+
+| Adım | Yöntem | Beklenen |
+|---|---|---|
+| 1 | şimdiki yol: CASET + RASET + çıplak `0x2C` | uçta |
+| 2 | CASET + RASET, çıplak `0x2C` yok | uçta |
+| 3 | sıra ters: önce RASET sonra CASET | uçta |
+| 4 | **referans yol**: yalnız CASET, 300 satır atlanıp yazılıyor | **ortada** |
+| 5 | referans + `0x3C` RAMWRC ile devam | ortada (kalıcı çözüm ucuzsa) |
+
+[4] ortada ve [1][2][3] uçtaysa kök neden doğrulanmış olur. [5] de ortadaysa
+RAMWRC çalışıyor demektir ve çözüm ucuz: LVGL akışı baştan sona tek geçiş,
+atlama bedeli yok. [5] uçtaysa her çizim atlama bedeli öder (bkz. aşağısı).
+
+### Çözüm tasarımı — `z` doğrularsa
+
+`pb_lcd_blit(x, y, w, h)` artık RASET'e güvenemez. İki seçenek:
+
+1. **Atlamalı** (her zaman doğru, bedeli var): CASET `x..x+w-1`, `0x2C`, sonra
+   `y*w` piksel atlama verisi, sonra gerçek veri. En kötü durum (y=600,
+   w=172) 103.200 piksel atlama = tam ekranın kendisi kadar. Küçük
+   dikdörtgenlerde ucuz (`w` dar olduğu için), tam genişlikte pahalı.
+2. **RAMWRC ile akış** (ucuz, sıra kısıtı var): panelin bir karesi baştan sona
+   **tek geçişte, yukarıdan aşağı** yazılır; ilk parça `0x2C`, gerisi `0x3C`.
+   LVGL'in flush'ı zaten bu sırayla geliyor (§9b'deki 90° çevrim korunur).
+   `ui/spectrogram.c` ve `lv_port.c` bu sözleşmeye uydurulmalı.
+
+Doğrusu 2, 1'i de yedek olarak bırakmak. Ama **önce `z` ile ölçün** —
+`pb_lcd_akis_basla/renk/bitir` üçlüsü ([lcd_blit.h](src/hal/display/lcd_blit.h))
+bu sözleşmeyi ifade etmek için zaten eklendi.
+
+### (geçersiz kaldı) `y` melez yol testi — ne yapıyordu
 
 `python tools/capture_wav.py --port COM13 --cmd y` — etkileşimli, altı adım.
 Her adımda ekran **mavi** olmalı ve **ortasında 40x40 beyaz kare**. Pencere

@@ -83,13 +83,15 @@ void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
     QSPI_Deselect(qspi);
 }
 
-void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel) {
+void pb_lcd_akis_basla(uint8_t ramwr) {
+    QSPI_Select(qspi);
+    QSPI_Pixel_Write(qspi, ramwr);          /* 0x2C bastan, 0x3C devam */
+    channel_config_set_dreq(&c, pio_get_dreq(qspi.pio, qspi.sm, true));
+}
+
+void pb_lcd_akis_renk(uint16_t renk, uint32_t piksel) {
     const uint16_t be = (uint16_t)((renk >> 8) | (renk << 8));
     for (uint32_t i = 0; i < PB_PANEL_W; i++) s_row[i] = be;
-
-    QSPI_Select(qspi);
-    QSPI_Pixel_Write(qspi, 0x2c);           /* RAMWR */
-    channel_config_set_dreq(&c, pio_get_dreq(qspi.pio, qspi.sm, true));
 
     while (piksel) {
         uint32_t n = (piksel > PB_PANEL_W) ? PB_PANEL_W : piksel;
@@ -101,8 +103,16 @@ void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel) {
         while (dma_channel_is_busy(dma_tx)) tight_loop_contents();
         piksel -= n;
     }
+}
 
+void pb_lcd_akis_bitir(void) {
     QSPI_Deselect(qspi);
+}
+
+void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel) {
+    pb_lcd_akis_basla(0x2c);
+    pb_lcd_akis_renk(renk, piksel);
+    pb_lcd_akis_bitir();
 }
 
 void pb_lcd_fill(uint16_t color) {
