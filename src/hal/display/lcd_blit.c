@@ -91,6 +91,36 @@ void pb_lcd_akis_basla(uint8_t ramwr) {
 static int s_satir_dokum = 0;
 void pb_lcd_satir_dokumu_iste(int adet) { s_satir_dokum = adet; }
 
+/* ── Aktarım yığını — rsvpnano'nun tekniği ────────────────────────────────
+ *
+ * Çalışan referans sürücü (rsvpnano/src/drivers/display/axs15231b_pio/
+ * axs15231b_pio.cpp, `pushColors`) dikdörtgeni satır satır DEĞİL, bitişik bir
+ * tamponda toplayıp **tek DMA** ile yolluyor:
+ *
+ *     const size_t byteCount = width * height * sizeof(uint16_t);
+ *     dma_channel_configure(..., data, byteCount, true);
+ *
+ * Bizim eski yolumuz her satır için ayrı DMA açıyor ve aralarda CPU bayt
+ * sırasını çevirirken hat CS aşağıdayken boşta kalıyordu. Kartta ölçüldü
+ * (`S` komutu): dar pencerede satır satır yazınca içerik her satırda kayıyor
+ * (merdiven), tam genişlikte kaymıyor. Bayt sırası, pencere komutu ve CS
+ * zamanlaması referansla zaten aynıydı; ayrıldığımız tek yer buydu.
+ *
+ * Yığın 4096 piksel = 8 KB. LVGL'in en geniş flush'ı 172 sütun; 4096/172 = 23
+ * satır, tipik dar bant (32 sütun) için 128 satır — yani neredeyse her
+ * dikdörtgen TEK DMA'ya sığıyor. */
+#define PB_YIGIN_PIKSEL 4096
+static uint16_t s_yigin[PB_YIGIN_PIKSEL];
+
+static void yigini_gonder(uint32_t piksel) {
+    dma_channel_configure(dma_tx, &c,
+                          &qspi.pio->txf[qspi.sm],
+                          s_yigin,
+                          piksel * 2,
+                          true);
+    while (dma_channel_is_busy(dma_tx)) tight_loop_contents();
+}
+
 /** s_row'daki n pikseli (zaten bayt sırası çevrilmiş) panele DMA ile yaz. */
 static void satiri_gonder(uint32_t n) {
     if (s_satir_dokum > 0) {
@@ -189,14 +219,6 @@ static void imleci_isaretle(uint32_t x1, uint32_t x2, uint32_t satir) {
     s_imlec_satir = satir;
 }
 
-/** s_row'un ilk iki pikseli panelin 0/1 sütunuysa şeridi güncelle. */
-static inline void seridi_guncelle(uint32_t x1, uint32_t satir) {
-    if (x1 == 0 && satir < PB_PANEL_H) {
-        s_serit[satir][0] = s_row[0];
-        s_serit[satir][1] = s_row[1];
-    }
-}
-
 /**
  * Pencereyi 2 piksele hizala. Dönen aralık x1 çift, x2 tek.
  * `sol` ve `sag`: kaç piksellik kenar dolgusu gerektiği (0 veya 1).
@@ -224,18 +246,31 @@ void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
     imleci_konumla(x1, x2, y);
 
-    for (uint32_t row = 0; row < h; row++) {
-        const uint16_t *src = buf + (size_t)row * w;
-        for (uint32_t i = 0; i < w; i++) {
-            s_row[sol + i] = (uint16_t)((src[i] >> 8) | (src[i] << 8));
-        }
-        /* Hizalama dolgusu: kenar pikseli kopyalanıyor. Hizalı çağrılarda
-         * (LVGL dahil, bkz. lv_port.c'deki alan_yuvarla) hiç çalışmaz. */
-        if (sol) s_row[0] = s_row[1];
-        if (sag) s_row[pw - 1] = s_row[pw - 2];
+    /* Satır satır DEĞİL, yığın yığın: bitişik tampon + tek DMA (yukarıya bak) */
+    uint32_t satir_basi = PB_YIGIN_PIKSEL / pw;
+    if (satir_basi == 0) satir_basi = 1;
 
-        seridi_guncelle(x1, y + row);
-        satiri_gonder(pw);
+    for (uint32_t row0 = 0; row0 < h; row0 += satir_basi) {
+        uint32_t n = h - row0;
+        if (n > satir_basi) n = satir_basi;
+
+        uint16_t *dst = s_yigin;
+        for (uint32_t r = 0; r < n; r++) {
+            const uint16_t *src = buf + (size_t)(row0 + r) * w;
+            for (uint32_t i = 0; i < w; i++) {
+                dst[sol + i] = (uint16_t)((src[i] >> 8) | (src[i] << 8));
+            }
+            /* Hizalama dolgusu: kenar pikseli kopyalanıyor. Hizalı çağrılarda
+             * (LVGL dahil, bkz. lv_port.c'deki alan_yuvarla) hiç çalışmaz. */
+            if (sol) dst[0] = dst[1];
+            if (sag) dst[pw - 1] = dst[pw - 2];
+            if (x1 == 0 && y + row0 + r < PB_PANEL_H) {
+                s_serit[y + row0 + r][0] = dst[0];
+                s_serit[y + row0 + r][1] = dst[1];
+            }
+            dst += pw;
+        }
+        yigini_gonder(n * pw);
     }
 
     pb_lcd_akis_bitir();
@@ -257,17 +292,29 @@ void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
     imleci_konumla(x1, x2, y);
 
-    for (uint32_t row = 0; row < h; row++) {
-        const uint16_t *src = buf + (int32_t)row * row_step;
-        for (uint32_t i = 0; i < w; i++) {
-            uint16_t px = src[(int32_t)i * col_step];
-            s_row[sol + i] = (uint16_t)((px >> 8) | (px << 8));
-        }
-        if (sol) s_row[0] = s_row[1];
-        if (sag) s_row[pw - 1] = s_row[pw - 2];
+    uint32_t satir_basi = PB_YIGIN_PIKSEL / pw;
+    if (satir_basi == 0) satir_basi = 1;
 
-        seridi_guncelle(x1, y + row);
-        satiri_gonder(pw);
+    for (uint32_t row0 = 0; row0 < h; row0 += satir_basi) {
+        uint32_t n = h - row0;
+        if (n > satir_basi) n = satir_basi;
+
+        uint16_t *dst = s_yigin;
+        for (uint32_t r = 0; r < n; r++) {
+            const uint16_t *src = buf + (int32_t)(row0 + r) * row_step;
+            for (uint32_t i = 0; i < w; i++) {
+                uint16_t px = src[(int32_t)i * col_step];
+                dst[sol + i] = (uint16_t)((px >> 8) | (px << 8));
+            }
+            if (sol) dst[0] = dst[1];
+            if (sag) dst[pw - 1] = dst[pw - 2];
+            if (x1 == 0 && y + row0 + r < PB_PANEL_H) {
+                s_serit[y + row0 + r][0] = dst[0];
+                s_serit[y + row0 + r][1] = dst[1];
+            }
+            dst += pw;
+        }
+        yigini_gonder(n * pw);
     }
 
     pb_lcd_akis_bitir();
