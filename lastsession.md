@@ -32,7 +32,13 @@ M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
 > sürücüsü de (rsvpnano ESP32 + RP2350-PIO) RASET'i hiç yollamıyor;
 > satır konumu `0x2C` (RAMWR = en üste dön) ve `0x3C` (RAMWRC = kaldığın
 > yerden devam) ile belirleniyor. Bizim her kısmi çizimimiz satır 0'a
-> düşüyor. Doğrulama testi `z` kartta hazır — **göz gerekiyor.**
+> düşüyordu.
+>
+> **`z` ile doğrulandı ve sürücü düzeltildi.** `pb_lcd_fill` tek geçişe indi
+> (2560 CS işlemi → 2, 27,2 → 11,8 ms), `pb_lcd_blit` imleç takip ediyor,
+> `o` tek geçişte çiziliyor, LVGL'in kirli alanı sola yayılıyor. **Açık
+> kalan:** `a` demosunun spektrogramı (LVGL ile sıra alınca imleç kayıyor).
+> Onu `j` testinin sonucu belirleyecek — **göz gerekiyor.**
 >
 > Nasıl gözden kaçmış: §9h'de kullanıcının gözle onayladığı ikili **20 ms**
 > sürümüydü; gönderilen **250 ms** sürümüne hiç bakılmadı ve o oturumun
@@ -298,6 +304,7 @@ Kart USB seri olarak görünüyor: **COM13** (`VID_2E8A PID_0009`).
 | `w` | **QSPI zamanlama teşhisi** — `QSPI_WaitIdle` ölçümü (§9n) | hayır |
 | `y` | **melez yol testi** — pencere ve piksel ayrı yollardan (§9n) | **evet**, etkileşimli |
 | `z` | **satır adresleme testi** — RASET çalışıyor mu (§9n) | **evet**, etkileşimli |
+| `j` | **imleç konumlandırma testi** — dar pencereyle ucuz atlama (§9n) | **evet**, etkileşimli |
 | `t` | dokunmatik teşhisi (canlı akış) | **evet** |
 | `u` | LVGL demo ekranı | **evet** |
 | `m` | **mel + kapı hattı (M3)** | hayır |
@@ -2668,7 +2675,77 @@ hedef: panelin **tam ortasına** 40x40 beyaz kare. Tek soru: kare **ORTADA** mı
 RAMWRC çalışıyor demektir ve çözüm ucuz: LVGL akışı baştan sona tek geçiş,
 atlama bedeli yok. [5] uçtaysa her çizim atlama bedeli öder (bkz. aşağısı).
 
-### Çözüm tasarımı — `z` doğrularsa
+### ✅ `z` ÇALIŞTIRILDI — kök neden DOĞRULANDI (kullanıcı gözle)
+
+> **"[1] [2] ve [3]'te sol köşede beyaz kutu; [4] [5] ortada."**
+
+| Adım | Yöntem | Sonuç |
+|---|---|---|
+| 1 | CASET + RASET + çıplak `0x2C` (şimdiki sürücü) | ❌ uçta |
+| 2 | CASET + RASET, çıplak `0x2C` yok | ❌ uçta |
+| 3 | önce RASET sonra CASET | ❌ uçta |
+| 4 | **yalnız CASET**, satır RAMWR'den sayılıyor | ✅ **ortada** |
+| 5 | yalnız CASET + `0x3C` RAMWRC ile devam | ✅ **ortada** |
+
+İki sonuç birden: **RASET yok sayılıyor** (kök neden kesin) ve **RAMWRC
+çalışıyor** — yani ardışık yazımlar atlama bedeli ödemeden zincirlenebiliyor.
+
+### ✅ SÜRÜCÜ DÜZELTİLDİ
+
+[`lcd_blit.c`](src/hal/display/lcd_blit.c) panelin gerçek sözleşmesine göre
+yeniden yazıldı. Artık `0x2B` hiç yollanmıyor; sürücü **yazma imlecini takip
+ediyor** (`s_imlec_*`): hedef satır imlecin durduğu yerse `0x3C` ile bedava
+devam ediyor, değilse `0x2C` + atlama.
+
+| Değişiklik | Etki |
+|---|---|
+| `pb_lcd_fill` tek geçişe indi | 2560 CS işlemi → **2**; 27,2 ms → **11,8 ms** (ölçüldü, kuramsal taban 11,74) |
+| `pb_lcd_blit` / `_strided` imleç kullanıyor | ardışık çizim bedava; rastgele erişim atlama ödüyor |
+| `o` (yön testi) tek geçişe çevrildi | dört köşe artık **aynı RAMWR akışında** üretiliyor |
+| LVGL `alan_yuvarla` (yeni) | kirli alanın `x1`i 0'a sabitlendi → `panel_y` hep 0 → atlama yok |
+| `pb_lcd_sutun_penceresi` / `pb_lcd_akis_basla` | dışarıdan çağrılınca imleci **kendiliğinden** geçersiz kılıyor |
+
+> LVGL'de `x2`ye bilerek dokunulmadı: onu da tam genişliğe çekmek her
+> yenilemede panelin tamamını çizdirir ve `a` demosunda spektrogram şeridini
+> siler. Kirli alan yalnızca **sola** büyütülüyor.
+
+### ⚠ AÇIK KALAN — `a` demosunun spektrogramı
+
+`ui/spectrogram.c` panel satırı `200+k`'ya yazıyor ve her karede LVGL flush'ı
+ile sıra alıyor. LVGL yazınca imleç kayıyor, sonraki spektrogram yazımı imleci
+tutturamıyor ve `(200+k)*172` piksellik atlama hem pahalı hem **kartı siliyor**.
+Ardışık kalması da mümkün değil: her itme 2 satır yazıp 1 satır ilerliyor
+(veri + "şimdi" imleci), yani her karede **1 satır geri** gitmek gerekiyor —
+panel geri gitmeye izin vermiyor.
+
+Bunu `j` testinin sonucu belirliyor (aşağıda). `o`, `d`, `u` ve `pb_lcd_fill`
+şu anki hâliyle doğru; **`a` hâlâ bozuk** ve öyle olduğu biliniyor.
+
+### 🔵 SIRADAKİ ADIM — `j` imleç konumlandırma testi (GÖZ GEREKİR)
+
+`python tools/capture_wav.py --port COM13 --cmd j` — üç adım, mimariyi
+belirleyen tek soru: **sütun penceresi daraltılırsa satır daha ucuza
+ilerletilebilir mi, ve pencere yeniden genişleyince satır korunur mu?**
+
+Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor. Pencere 1 piksel
+genişse `y` satır ilerletmek `172*y` yerine **`y`** piksele mal olur.
+
+| Adım | Yöntem | Beklenen (çalışıyorsa) |
+|---|---|---|
+| 1 | dar atlama aynı sütunda (x=66), sonra CASET genişlet + RAMWRC | ortada + **ince** kırmızı çizgi |
+| 2 | dar atlama başka sütunda (x=0), sonra CASET 66..105 + RAMWRC | ortada + ince kırmızı çizgi kenarda |
+| 3 | kontrol: `z[4]` ile aynı (geniş atlama) | ortada + **geniş** kırmızı blok |
+
+- **[1] ve [2] ortadaysa** → ucuz konumlandırma var. `pb_lcd_blit` genel amaçlı
+  kalır, spektrogram ile LVGL aynı ekranda yaşar, bedel satır başına 1 piksel.
+- **[1]/[2] uçtaysa** → pencere değişince satır sıfırlanıyor. Panel yalnızca
+  yukarıdan aşağı **tek geçiş** çizime izin veriyor; arayüz katmanı (`a`
+  demosunun kart + şerit düzeni) buna göre yeniden kurulmalı.
+
+Aynı turda **`o` da bakılmalı**: dört köşe artık dört ayrı köşede olmalı.
+Bu, §9n'in baş belirtisinin gerçekten kapandığının gözle onayı.
+
+### Çözüm tasarımı — `z` doğrularsa (yapıldı, yukarıda)
 
 `pb_lcd_blit(x, y, w, h)` artık RASET'e güvenemez. İki seçenek:
 

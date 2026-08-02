@@ -90,6 +90,25 @@ static void indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     data->state = LV_INDEV_STATE_PRESSED;
 }
 
+/* ── Kirli alanı arayüzün SOL KENARINA yay ────────────────────────────────
+ *
+ * Panel RASET'i (0x2B) yok sayıyor (§9n): bir yazma ancak sütun penceresinin
+ * EN ÜST satırından (RAMWR) ya da imlecin durduğu yerden (RAMWRC)
+ * başlayabiliyor. Ara satırlara gitmenin tek yolu üzerini yazmak.
+ *
+ * `flush_cb`'de panel_y = area->x1. `x1`i 0'a sabitlemek panel_y'yi HER
+ * ZAMAN 0 yapıyor: her flush RAMWR ile sütun penceresinin tepesinden başlar,
+ * atlama bedeli de üzerine yazma da olmaz.
+ *
+ * `x2`ye DOKUNMUYORUZ — bilerek. Onu da tam genişliğe çekmek LVGL'e her
+ * yenilemede panelin tamamını çizdirir ve `a` demosunda spektrogram şeridini
+ * (arayüz x 200..639) siler. Kirli alan yalnızca sola doğru büyütülüyor. */
+static void alan_yuvarla(lv_event_t *e)
+{
+    lv_area_t *alan = (lv_area_t *)lv_event_get_param(e);
+    if (alan) alan->x1 = 0;
+}
+
 /* LVGL'in zaman tabanı. v9'da makro değil, çalışma anında veriliyor. */
 static uint32_t tick_cb(void)
 {
@@ -110,6 +129,7 @@ bool pb_lv_init(void)
 
     lv_display_t *disp = lv_display_create(PB_LCD_W, PB_LCD_H);
     lv_display_set_flush_cb(disp, flush_cb);
+    lv_display_add_event_cb(disp, alan_yuvarla, LV_EVENT_INVALIDATE_AREA, NULL);
     lv_display_set_buffers(disp, s_draw_buf, NULL, sizeof(s_draw_buf),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 

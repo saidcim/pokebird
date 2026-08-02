@@ -1093,7 +1093,7 @@ static void cmd_ui_demo(void) {
  */
 static void cmd_orientation(void) {
     enum { KARE = 40 };
-    static uint16_t blok[KARE * KARE];
+    static uint16_t satir[PB_PANEL_W];
 
     const struct { uint32_t x, y; uint16_t renk; const char *ad; } kose[] = {
         { 0,               0,               0xF800, "KIRMIZI = panel (0,0)"         },
@@ -1104,11 +1104,31 @@ static void cmd_orientation(void) {
 
     printf("\nYon testi — ekranda dort renkli kare var.\n");
     backlight_set(true);
-    pb_lcd_fill(0x0000);
+
+    /* TEK GEÇİŞ — panelin sözleşmesi bu (§9n).
+     *
+     * Eski hâli önce ekranı doldurup sonra dört kareyi ayrı ayrı blit
+     * ediyordu; bu panelde her RAMWR satır 0'a döndüğü için dördü de üst
+     * üste biniyor ve yalnızca sonuncusu görünüyordu — ekran hatasının en
+     * çok görülen belirtisi buydu. Şimdi 640 satırın her biri yerinde
+     * üretilip tek RAMWR akışında yollanıyor: dört köşe de doğru yerde. */
+    pb_lcd_sutun_penceresi(0, PB_PANEL_W - 1);
+    pb_lcd_akis_basla(0x2C);
+    for (uint32_t y = 0; y < PB_PANEL_H; y++) {
+        for (uint32_t x = 0; x < PB_PANEL_W; x++) satir[x] = 0x0000;
+        for (size_t i = 0; i < sizeof(kose) / sizeof(kose[0]); i++) {
+            if (y >= kose[i].y && y < kose[i].y + KARE) {
+                for (uint32_t x = kose[i].x; x < kose[i].x + KARE; x++) {
+                    satir[x] = kose[i].renk;
+                }
+            }
+        }
+        pb_lcd_akis_satir(satir, PB_PANEL_W);
+    }
+    pb_lcd_akis_bitir();
+    pb_lcd_imlec_gecersiz();
 
     for (size_t i = 0; i < sizeof(kose) / sizeof(kose[0]); i++) {
-        for (int p = 0; p < KARE * KARE; p++) blok[p] = kose[i].renk;
-        pb_lcd_blit(kose[i].x, kose[i].y, KARE, KARE, blok);
         printf("  %s\n", kose[i].ad);
     }
 
@@ -1195,10 +1215,12 @@ static void cmd_qspi_timing(void) {
         pb_lcd_fill(0x0000);
         int64_t gecen = absolute_time_diff_us(t0, get_absolute_time());
 
-        /* PIO tabani: satir basina 440 bayt (2 pencere islemi 32'ser, ciplak
-         * RAMWR 16, piksel islemi 16 + 344 veri). Bayt basina 4 PIO cevrimi. */
+        /* PIO tabani: tek gecis oldugu icin yalnizca piksel verisi —
+         * W*H*2 bayt, bayt basina 4 PIO cevrimi. (§9n duzeltmesinden once
+         * satir basina ayri pencere+RAMWR vardi ve taban 440 bayt/satirdi.) */
         uint32_t pio_hz = (uint32_t)(clock_get_hz(clk_sys) / 2);
-        uint64_t taban_us = (uint64_t)PB_PANEL_H * 440ull * 4ull * 1000000ull / pio_hz;
+        uint64_t taban_us = (uint64_t)PB_PANEL_W * PB_PANEL_H * 2ull
+                            * 4ull * 1000000ull / pio_hz;
 
         qspi_sayac_yazdir();
         printf("     gecen sure               : %lu us\n", (unsigned long)gecen);
@@ -1241,6 +1263,7 @@ static void cmd_qspi_timing(void) {
 
         /* Pencereyi tam ekrana geri al; sonraki cizim dogru yere dussun. */
         LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, PB_PANEL_H);
+        pb_lcd_imlec_gecersiz();   /* panele disaridan yazildi (lcd_blit.h) */
     }
 }
 
@@ -1486,6 +1509,97 @@ static void cmd_row_addr(void) {
 
     /* Pencereyi tam ekrana geri birak. */
     qspi_caset(0, PB_PANEL_W - 1);
+    pb_lcd_imlec_gecersiz();
+}
+
+/**
+ * `j` — imleç konumlandırma testi. GÖZ GEREKİR, etkileşimli.
+ *
+ * `z` şunu kanıtladı: satırı yalnızca RAMWR (en üste dön) ve RAMWRC (kaldığın
+ * yerden devam et) belirliyor. Geriye MİMARİYİ belirleyen tek soru kaldı:
+ *
+ *   Sütun penceresi DARALTILIRSA satır daha ucuza ilerletilebilir mi, ve
+ *   pencere yeniden genişletilince satır KORUNUR mu?
+ *
+ * Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor. Pencere 1
+ * piksel genişse `y` satır ilerletmek `y` piksele mal olur — 172*y yerine.
+ * Sonra pencere gerçek aralığa alınıp RAMWRC ile devam edilebiliyorsa
+ * elimizde **ucuz bir konumlandırma** var:
+ *
+ *   ÇALIŞIRSA  `pb_lcd_blit` genel amaçlı kalır; spektrogram ile LVGL aynı
+ *              ekranda yaşayabilir (`a` demosu), bedel satır başına 1 piksel.
+ *   ÇALIŞMAZSA panel yalnızca yukarıdan aşağı TEK GEÇİŞ çizime izin veriyor
+ *              demektir; arayüz katmanı buna göre yeniden kurulmalı.
+ *
+ * Atlama verisi KIRMIZI: neyin üzerine yazıldığı gözle görülsün.
+ */
+static void cmd_cursor_seek(void) {
+    enum { KX = 66, KY = 300, KW = 40, KH = 40 };
+    const uint16_t MAVI = 0x001F, BEYAZ = 0xFFFF, KIRMIZI = 0xF800;
+
+    printf("\nImlec konumlandirma testi — dar pencereyle ucuz atlama\n");
+    printf("======================================================\n\n");
+    printf("Her adimda hedef ayni: MAVI zemin + ORTADA 40x40 BEYAZ kare.\n");
+    printf("Atlama verisi KIRMIZI — nereye yazildigini gorun.\n\n");
+
+    backlight_set(true);
+
+    for (int adim = 1; adim <= 3; adim++) {
+        z_zemin(MAVI);
+
+        switch (adim) {
+        case 1:
+            printf("  [1] DAR ATLAMA, ayni sutunda: pencere 1 piksel (x=%d),\n", KX);
+            printf("      %d piksel kirmizi, sonra pencere genisletilip RAMWRC\n", KY);
+            qspi_caset(KX, KX);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(KIRMIZI, KY);          /* satir 0 -> KY */
+            pb_lcd_akis_bitir();
+            qspi_caset(KX, KX + KW - 1);
+            pb_lcd_akis_basla(0x3C);                /* RAMWRC — satir korunuyor mu? */
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+
+        case 2:
+            printf("  [2] DAR ATLAMA, BASKA sutunda: pencere 1 piksel (x=0),\n");
+            printf("      %d piksel kirmizi, sonra pencere x=%d..%d ve RAMWRC\n",
+                   KY, KX, KX + KW - 1);
+            qspi_caset(0, 0);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(KIRMIZI, KY);
+            pb_lcd_akis_bitir();
+            qspi_caset(KX, KX + KW - 1);
+            pb_lcd_akis_basla(0x3C);
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+
+        case 3:
+            printf("  [3] KONTROL (z[4] ile ayni, dogru oldugu biliniyor):\n");
+            printf("      pencere %d..%d, %d satir kirmizi atlama, sonra beyaz\n",
+                   KX, KX + KW - 1, KY);
+            qspi_caset(KX, KX + KW - 1);
+            pb_lcd_akis_basla(0x2C);
+            pb_lcd_akis_renk(KIRMIZI, (uint32_t)KY * KW);
+            pb_lcd_akis_renk(BEYAZ, KW * KH);
+            pb_lcd_akis_bitir();
+            break;
+        }
+        melez_bekle();
+        printf("\n");
+    }
+
+    printf("Bildirin (her adim icin): beyaz kare ORTADA mi, UCTA mi?\n");
+    printf("Kirmizi nasil gorunuyor: INCE cizgi mi, GENIS blok mu, yok mu?\n\n");
+    printf("  [1] ve [2] ortada + INCE kirmizi cizgi -> UCUZ KONUMLANDIRMA VAR.\n");
+    printf("      pb_lcd_blit genel amacli kalir, `a` demosu duzelir.\n");
+    printf("  [1]/[2] ucta -> pencere degisince satir sifirlaniyor. Panel\n");
+    printf("      yalnizca yukaridan asagi TEK GECIS cizime izin veriyor;\n");
+    printf("      arayuz katmani ona gore kurulacak.\n\n");
+
+    qspi_caset(0, PB_PANEL_W - 1);
+    pb_lcd_imlec_gecersiz();
 }
 
 /**
@@ -2183,6 +2297,7 @@ static void print_help(void) {
     printf("  w  QSPI zamanlama teshisi (WaitIdle olcumu, goz GEREKMEZ)\n");
     printf("  y  melez yol testi: pencere ve piksel ayri yollardan (goz gerekir)\n");
     printf("  z  satir adresleme testi: RASET calisiyor mu (goz gerekir)\n");
+    printf("  j  imlec konumlandirma testi: dar pencereyle ucuz atlama (goz gerekir)\n");
     printf("  s  canli spektrogram\n");
     printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
     printf("  ?  bu yardim\n\n");
@@ -2287,6 +2402,7 @@ int main(void) {
             case 'w': cmd_qspi_timing(); break;
             case 'y': cmd_hybrid_path(); break;
             case 'z': cmd_row_addr(); break;
+            case 'j': cmd_cursor_seek(); break;
             case 'o': cmd_orientation(); break;
             case 't': cmd_touch_probe(); break;
             case 'u': cmd_ui_demo(); break;

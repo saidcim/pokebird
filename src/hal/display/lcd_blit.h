@@ -27,6 +27,21 @@
 #define PB_PANEL_H 640
 
 /**
+ * ⚠ PANELİN SÖZLEŞMESİ — RASET (0x2B) YOK SAYILIYOR (ölçüldü, §9n)
+ *
+ * Bu panelde satır penceresi diye bir şey yok. Yazma imlecinin satırını
+ * yalnızca iki komut belirliyor:
+ *   0x2C RAMWR   → imleç sütun penceresinin EN ÜST satırına döner
+ *   0x3C RAMWRC  → imleç bir önceki yazmanın bittiği yerden DEVAM eder
+ * Sütun aralığı CASET (0x2A) ile ayarlanıyor ve o çalışıyor.
+ *
+ * Sonuç: **y>0 olan bir dikdörtgene rastgele erişim ücretsiz değil.** Sürücü
+ * imleci takip ediyor; imleç zaten hedef satırdaysa RAMWRC ile bedava devam
+ * eder, değilse RAMWR'den başlayıp aradaki satırları SİYAHLA geçer — yani
+ * **o sütun aralığında yukarısı silinir.** Doğru kullanım: bir kareyi
+ * yukarıdan aşağı, sırayla çizmek. Bunu ihlal eden kod sessizce değil,
+ * gözle görülür biçimde bozulur.
+ *
  * `buf`'taki w*h pikseli panelin (x,y) konumuna yaz.
  * `buf` satır sıralı ve ardışık olmalı (w piksel, sonra bir sonraki satır).
  * Piksel biçimi: normal RGB565 (little-endian uint16_t).
@@ -84,6 +99,18 @@ void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel);
  */
 void pb_lcd_akis_basla(uint8_t ramwr);
 void pb_lcd_akis_renk(uint16_t renk, uint32_t piksel);
+/** Tek satır (n piksel, normal RGB565) akıt; bayt sırasını kendi çevirir. */
+void pb_lcd_akis_satir(const uint16_t *src, uint32_t n);
 void pb_lcd_akis_bitir(void);
+
+/** Sütun aralığı (CASET, 0x2A). Kapsayıcı: x1 ve x2 dahil. */
+void pb_lcd_sutun_penceresi(uint32_t x1, uint32_t x2);
+
+/**
+ * Panele bu dosyanın dışından komut/veri yollayan her kod bunu çağırmalı.
+ * Sürücü imlecin nerede olduğunu takip ediyor; başkası panele yazınca bu
+ * bilgi yanlışa döner ve bir sonraki blit sessizce yanlış yere düşer.
+ */
+void pb_lcd_imlec_gecersiz(void);
 
 #endif /* POKEBIRD_LCD_BLIT_H */
