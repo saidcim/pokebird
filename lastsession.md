@@ -44,21 +44,31 @@ doğrulama testi boş odada bilgisayardan kuş sesi çalarak yapılacak; o
 senaryoda şehir gürültüsü yok. Odak tür tanımada. Ayrıntı ve *ama*'sı
 §9f-4'te — negatif **sınıfı** yine de bir şeyle doldurulmak zorunda.
 
-**`s_capture` temizliği ✅ BİTTİ (§9g).** Teşhis komutları 96 KB'lık bitişik
-tampon yerine 4 KB'lık parçalarla akışa çevrildi:
+**`s_capture` temizliği ✅ BİTTİ (§9g)** — ama **bir GERİLEME açığa çıkardı
+(§9h). ÖNCE ONU OKUYUN.**
 
 ```
 bss  218.988  ->  127.084 bayt     (91.904 bayt serbest, hedef <=130.000)
 arena (180 KB) ile birlikte 311.404  ->  520 KB SRAM'de ~208 KB pay
 ```
 
-Beş kabul ölçütünün **dördü ölçümle doğrulandı**; beşincisi (WAV'ı dinlemek ve
-`a` demosunu ekranda görmek) kullanıcının gözü/kulağı gerektiriyor —
-oturum sonunda dosyalar gönderildi, sonuç §9g'de.
+Kabul ölçütünün 4'ü geçti (bellek, kayıt sürekliliği, gürültü tabanı, kare
+hızı). **5. ölçüt DÜŞTÜ: `a` demosunda EKRAN BOZUK** — panel karıncalanma
+gösteriyor (§5.9'daki tabloyla aynı).
 
-**SIRADAKİ İŞ — eğitim kümesi (§9f-5) → M5.** `data/segmentler.csv` hazır
-bekliyor. Tensor arena bütçesi artık ölçülmüş bir rakam: M5'e gerçek sayıyla
-girilebilir.
+> ### 🔴 KARTTA HEAD DEĞİL, TEŞHİS İKİLİSİ (`probe`) DURUYOR
+> Oturum kapanırken kartta **`probe`** firmware'i kaldı: HEAD'in kodu, tek
+> farkı `s_chunk`'ın 48000 elemanlı bırakılması (§9h). **Ekranı çalışıyor**,
+> ama bss'i 218.988 — yani bellek kazancı o ikilide YOK ve **hiçbir commit'e
+> karşılık gelmiyor.**
+>
+> HEAD'i (bss 127.084) derleyip yüklerseniz **ekran karıncalanır** — bu
+> beklenen, teşhisi konmuş durum, yeni bir sürpriz değil. Kök neden
+> `s_capture` temizliği DEĞİL; o temizlik kodda zaten var olan gizli bir
+> hatayı görünür yaptı. Kanıt ve yöntem §9h'de.
+
+**SIRADAKİ İŞ — §9h'deki sınır dışı yazmayı bulmak.** Ondan sonrası eğitim
+kümesi (§9f-5) → M5; `data/segmentler.csv` hazır bekliyor.
 
 ---
 
@@ -515,6 +525,7 @@ Eşleme artık **eBird kodu** üzerinden, BirdNET'in kendi
 |---|---|
 | **EMI ölçümü geçersiz** | M1'deki tarama PWM ile yapıldı, ışık hep kapalıydı. `e` komutu aç/kapa olarak düzeltilip yeniden ölçülmeli (§4). |
 | ~~**`s_capture` (96 KB)**~~ | ✅ **ÇÖZÜLDÜ (§9g).** 4 KB'lık `s_chunk`'a indi, bss 218.988 → 127.084. Arena'nın önü açık. |
+| 🔴 **Ekran gerilemesi** | **SIRADAKİ İŞ — §9h.** HEAD'in firmware'inde `a` demosunda panel karıncalanıyor. Kök neden bellek yerleşimine bağlı gizli bir sınır dışı yazma; üç koşuluk A/B ile kanıtlandı. Bellek kazancından vazgeçilmemeli. |
 | **Dokunmatik park edildi** | Kritik yolda değil. Kaldığı yer §9b. |
 | **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **GPIO34 (LCD_RST) aşağı çekilemiyor** | Ölçüldü, kök neden aranmadı. Bkz. §5.11. |
@@ -1421,7 +1432,13 @@ sessiz bozulma iki kez pahalıya patladı (§5.10); kopukluk sessizce geçmemeli
 | 2 | `r` çalışıyor, WAV süreksizlik içermiyor | ✅ objektif · 🔶 dinleme aşağıda |
 | 3 | `--cmd n` tabanı öncesiyle ±1 dB içinde | ✅ **0,6 dB** fark |
 | 4 | `--cmd m` 62–63 kare/s, kayıp 0 | ✅ **63 kare/s, kayıp 0** |
-| 5 | `--cmd a` tam demo ekranda çalışıyor | ✅ 63 kare/s, kayıp 0 · 🔶 göz aşağıda |
+| 5 | `--cmd a` tam demo ekranda çalışıyor | ❌ **DÜŞTÜ — ekran bozuk, §9h** (ses hattı 63 kare/s, kayıp 0) |
+
+> ⚠ **Bu satırı bir ara "✅ 63 kare/s" diye yazmıştım — YANLIŞTI.** Ölçülen
+> şey yalnızca ses hattının kare hızıydı; ölçütün asıl kısmı olan "ekranda
+> çalışıyor" hiç doğrulanmamıştı. Kullanıcı ekrana bakınca panelin
+> karıncalanma gösterdiği ortaya çıktı. *Ders, §5.10'un aynısı: göz
+> gerektiren bir ölçütü göz gerektirmeyen bir ölçümle geçmiş saymayın.*
 
 **Ölçüt 3 — aynı odada, aynı oturumda, önce/sonra:**
 
@@ -1470,7 +1487,109 @@ kez yanılttı (§5.10), o yüzden objektif sağlamalar yeterli sayılmadı:
 
 ### Bundan sonra
 
-Eğitim kümesi (§9f-5) → M5. `segmentler.csv` hazır bekliyor.
+Önce §9h (ekran gerilemesi), sonra eğitim kümesi (§9f-5) → M5.
+
+---
+
+## 9h. 🔴 SIRADAKİ İŞ — bellek yerleşimine bağlı ekran gerilemesi
+
+### Belirti
+
+`a` demosunda panel **karıncalanma** gösteriyor: her pikselin farklı renk
+olduğu, değişmeyen bir kar deseni — §5.9'daki "panel kendi başlatılmamış
+GRAM'ını gösteriyor" tablosunun aynısı. Tek istisna sol alt köşede küçük bir
+koyu kutu ve içinde LVGL'in yazıları okunuyor, yani **LVGL'in çizdiği alanın
+bir kısmı panele ulaşıyor**, gerisi ulaşmıyor.
+
+Ses tarafı bu sırada tamamen sağlam: 63 kare/s, kayıp 0.
+
+### Üç koşuluk A/B — kanıt
+
+Kullanıcı üç ikiliyi de ekranda gördü. Bu tablo teşhisin tamamı:
+
+| İkili | Mantık | bss | Ekran |
+|---|---|---|---|
+| `old` (commit `5a5bdf0`) | eski | 218.988 | ✅ **düzgün** |
+| `new` (commit `1ddf465`, HEAD) | yeni | 127.084 | ❌ **bozuk** |
+| `probe` (yeni mantık + eski yerleşim) | **yeni** | 218.988 | ✅ **düzgün** |
+
+`probe` = HEAD'in kodu, tek fark `s_chunk`'ın **48000 elemanlı** bırakılması
+(yalnızca ilk 2048'i kullanılıyor). Yani:
+
+> **Mantık değişikliklerim ekranı bozmuyor. Bozan şey yalnızca bss
+> yerleşiminin kayması.** Kodda zaten var olan gizli bir sınır dışı yazma,
+> eskiden zararsız bir yere düşerken şimdi canlı bir tamponu eziyor.
+
+`probe`'u yeniden üretmek (tek satır, commit etmeyin):
+
+```c
+/* src/main.c, s_chunk tanimi */
+static int16_t s_chunk[48000];   /* yerine: s_chunk[CHUNK_SAMPLES] */
+```
+
+### Bellek haritası — kurbanı daraltan asıl ipucu
+
+`nm --size-sort -S -td build/pokebird.elf`, bss, adrese göre:
+
+```
+                       PROBE (calisan)        YENI (bozuk)
+s_ring (ses, 16 KB)    536887296              536887296     ] ayni
+work_mem_int (LVGL)    536904464              536904464     ] adres
+blok.4                 536929840              536929840     ]
+pencere.0 (mel)        536937392              536937392     ]
+pencere.2 (mel)        536949360              536949360     ]
+s_chunk                536961368  96000       536961368  4096
+  (344 bayt bosluk = s_row, lcd_blit.c'nin satir tamponu)
+s_draw_buf (LVGL)      537057712              536965808     ] 91.904
+s_ring (mel)           537088508              536996604     ] bayt
+s_weights              537100824              537008920     ] kaydi
+```
+
+Nesne **sırası iki derlemede de aynı**. `s_chunk`'tan öncekiler aynı adreste,
+sonrakiler blok hâlinde 91.904 bayt kaydı. Bundan çıkan sonuç dar:
+
+- Kaydıran nesnelerin **birbirine göre** konumu değişmedi → aralarındaki bir
+  taşma iki derlemede de aynı davranırdı. **Eleyin.**
+- Değişen tek ilişki: `s_chunk`'tan **ÖNCEKİ** nesnelerle **SONRAKİLER**
+  arasındaki mesafe. Önceki bir tampondan ileri taşan bir yazma, probe'da
+  96.000 baytlık `s_chunk`'ın ortasına zararsızca düşüyor; yeni yerleşimde
+  4 KB'ı aşıp **`s_row` ve `s_draw_buf`'a** (LVGL çizim tamponu) ulaşıyor.
+
+**Şüpheliler — `s_chunk`'tan önce duran ve `a` demosunun kullandığı nesneler:**
+`pencere.0` / `pencere.2` (mel halkaları, 64×187 = 11.968 bayt, hemen
+`s_chunk`'ın önünde), `work_mem_int` (LVGL havuzu), `s_ring` (ses halkası).
+Mel hattı demoda sürekli çalıştığı için **mel halkaları birinci şüpheli**.
+
+**`s_chunk`'ın kendisi taşmıyor — elendi.** Yeni firmware yüklendikten sonra
+gönderilen İLK komut `a` idi; `s_chunk`'ı kullanan hiçbir komut (`n`, `r`,
+`e`, `l`, `s`) hiç çalışmamıştı. Kurban `s_chunk` olabilir ama fail o değil.
+
+### Sonraki oturumda izlenecek yol
+
+1. **Kurbanı doğrulayın (kanarya).** `s_draw_buf`'ın önüne ve arkasına bilinen
+   desenli guard dizileri koyun (ör. 64 bayt `0xA5`), `pb_lv_tick` sonrası
+   kontrol edip bozulanı seri porta yazdırın. Hangi tamponun, hangi yönden ve
+   kaç bayt ezildiğini doğrudan söyler. Bu, göz gerektirmeyen bir test —
+   §5.10'un aksine burada dolaylı ölçüm meşru, çünkü *bellek* ölçüyoruz.
+2. **Eşiği ikiye bölün.** `s_chunk`'ı 48000 → 24000 → 12000 → 8000 → 4096
+   yapıp ekranın hangi boyutta bozulmaya başladığını bulun. Kırılma noktası,
+   taşmanın kaç bayt olduğunu doğrudan verir (kabaca: bozulmanın başladığı
+   boyut ≈ taşma miktarı).
+3. Şüpheli tamponları yazan kodu okuyun: `src/dsp/mel.c` (halka indeksleme),
+   `src/ui/spectrogram.c`, `src/ui/lv_port.c` (kısmi render + devrik blit —
+   negatif adımlı `pb_lcd_blit_strided` sınır hesabı burada kolay kaçar).
+4. **Bellek kazancından VAZGEÇMEYİN.** Hata gerçek ve zaten oradaydı; TFLM
+   arena'sı (180 KB) geldiğinde yerleşimi nasılsa yine kaydıracak ve aynı
+   çökme M6'nın ortasında, çok daha pahalı bir yerde çıkacaktı. **Şimdi
+   bulmak ucuz.** `s_capture` temizliği bu hatayı *yaratmadı*, ortaya çıkardı.
+
+### Kabul ölçütü
+
+- Kanarya testi hangi tamponun ezildiğini söylüyor ve kök neden bulunuyor
+- `s_chunk[CHUNK_SAMPLES]` (4 KB) hâliyle `--cmd a` **ekranda düzgün**
+  (kullanıcı bakacak — bu ölçüt göz gerektiriyor, ölçümle geçilmiş sayılmaz)
+- bss ≤ 130.000 korunuyor
+- `--cmd m` 63 kare/s kayıp 0, `--cmd r` sürekliliği bozulmamış
 
 ---
 
@@ -1520,6 +1639,13 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 |---|---|
 | `ae9ae90` | **M4 adım 3: BirdNET segmentasyon boru hattı** — dört araç, üç ölçülmüş karar, bir sessiz hata (§9e, §5.13–5.16) |
 | `1ddf465` | **`s_capture` temizliği** — teşhis komutları akışa çevrildi, bss 218.988 → 127.084 (§9g) |
+| `b69145e` | lastsession.md: commit hash'i yazıldı |
+| *(bu tur)* | lastsession.md: **§9h ekran gerilemesi** — üç koşuluk A/B, bellek haritası, izlenecek yol |
+
+> ⚠ **HEAD derlenebiliyor ve ses tarafı sağlam, ama `a` demosunda ekran
+> bozuk (§9h).** Bu bilinerek commit'lendi: hata `s_capture` temizliğinin
+> yarattığı bir şey değil, açığa çıkardığı gerçek bir hata. Geri almak onu
+> yeniden gizlerdi ve TFLM arena'sı geldiğinde M6'nın ortasında patlardı.
 
 Önceki oturumlardan (eskiden yeniye): `7273768` ekran çalışıyor (§5.9) ·
 `68ba8b2` spektrogram yönü · `768cda9` M3 mel + kapı · `9e7e2dc` dokunmatik
