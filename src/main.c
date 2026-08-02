@@ -1692,43 +1692,76 @@ static void cmd_text_dump(void) {
  * kayma varsa çizgiler EĞİLİR. Kaynak `row_step = 0` ile besleniyor, yani
  * her panel satırı aynı veriyi alıyor — eğilme varsa panelden gelir.
  */
-static void cmd_stripe_test(void) {
-    enum { SATIR = 300 };                 /* uzun olsun ki kayma birikip belli olsun */
-    static uint16_t desen_tam[PB_PANEL_W];
-    static uint16_t desen_dar[32];
+static void kayma_bandi(uint32_t x1, uint32_t genislik, uint32_t n_piksel,
+                        uint16_t renk, uint32_t satir) {
+    static uint16_t desen[PB_PANEL_W];
+    for (uint32_t i = 0; i < PB_PANEL_W; i++) desen[i] = 0x0000;
+    desen[8]  = renk;
+    desen[24] = renk;
 
-    printf("\nDar pencere kayma testi — cizgiler duz mu, egik mi?\n");
-    printf("===================================================\n\n");
+    pb_lcd_sutun_penceresi(x1, x1 + genislik - 1);
+    pb_lcd_akis_basla(0x2C);
+    for (uint32_t r = 0; r < satir; r++) pb_lcd_akis_satir(desen, n_piksel);
+    pb_lcd_akis_bitir();
+    pb_lcd_imlec_gecersiz();
+}
+
+/**
+ * `S` — dar pencerede panelin GERÇEK satır adımı kaç piksel? GÖZ GEREKİR.
+ *
+ * ÖLÇÜLDÜ (kullanıcı gözle): 32 sütunluk pencereye 32 piksel/satır
+ * yazınca çizgiler merdiven gibi AŞAĞI kayıyor; tam genişlikte (172) düz.
+ * Yani panelin bir satırda tükettiği piksel sayısı, pencere genişliği
+ * OLARAK HESAPLADIĞIMIZ değere eşit değil — ve fark yazıyı bozuyor.
+ *
+ * Bu tur tahmin etmiyor, ÖLÇÜYOR: aynı 32 sütunluk pencereye satır başına
+ * 31 / 32 / 33 / 34 piksel yazan dört bant basılıyor. Hangisinin çizgileri
+ * DÜMDÜZ çıkarsa panelin gerçek satır adımı odur. Desen bilerek düz renk
+ * değil; düz blok kaysa bile düz görünür (§9n'de bütün testleri kör eden şey
+ * tam olarak buydu).
+ */
+static void cmd_stripe_test(void) {
+    enum { SATIR = 200, GENISLIK = 32 };
+
+    const struct { uint32_t x1, n; uint16_t renk; const char *ad; } bant[] = {
+        {   8, 31, 0xF800, "KIRMIZI = satir basina 31 piksel" },
+        {  40, 32, 0x07E0, "YESIL   = satir basina 32 piksel (su anki varsayim)" },
+        {  72, 33, 0x001F, "MAVI    = satir basina 33 piksel" },
+        { 104, 34, 0xFFE0, "SARI    = satir basina 34 piksel" },
+    };
+
+    printf("\nDar pencere satir adimi olcumu — hangi bant DUZ?\n");
+    printf("================================================\n\n");
     backlight_set(true);
     pb_lcd_fill(0x0000);
 
-    /* ── REFERANS: tam genislikte (172 sutun), bilinen calisan yol ───────── */
-    for (uint32_t i = 0; i < PB_PANEL_W; i++) desen_tam[i] = 0x0000;
-    desen_tam[140] = 0xF800;              /* KIRMIZI */
-    desen_tam[156] = 0xF800;
-    pb_lcd_sutun_penceresi(0, PB_PANEL_W - 1);
-    pb_lcd_akis_basla(0x2C);
-    for (uint32_t r = 0; r < SATIR; r++) pb_lcd_akis_satir(desen_tam, PB_PANEL_W);
-    pb_lcd_akis_bitir();
-    pb_lcd_imlec_gecersiz();
+    /* Referans: tam genislik. Bunun duz oldugu olculdu; "duz nasil gorunur"un
+     * karsilastirma olcegi olsun diye duruyor. */
+    {
+        static uint16_t desen[PB_PANEL_W];
+        for (uint32_t i = 0; i < PB_PANEL_W; i++) desen[i] = 0x0000;
+        desen[148] = 0xFFFF;
+        desen[164] = 0xFFFF;
+        pb_lcd_sutun_penceresi(0, PB_PANEL_W - 1);
+        pb_lcd_akis_basla(0x2C);
+        for (uint32_t r = 0; r < SATIR; r++) pb_lcd_akis_satir(desen, PB_PANEL_W);
+        pb_lcd_akis_bitir();
+        pb_lcd_imlec_gecersiz();
+    }
 
-    /* ── SINANAN: dar pencere (32 sutun), LVGL'in kullandigi adimli yol ──── */
-    for (uint32_t i = 0; i < 32; i++) desen_dar[i] = 0x0000;
-    desen_dar[8]  = 0x07E0;               /* YESIL */
-    desen_dar[24] = 0x07E0;
-    /* row_step = 0: her panel satiri AYNI kaynagi okur. Cikti dumduz iki
-     * cizgi olmali; egilirse hata panelde. */
-    pb_lcd_blit_strided(80, 0, 32, SATIR, desen_dar, 1, 0);
+    for (size_t i = 0; i < sizeof(bant) / sizeof(bant[0]); i++) {
+        kayma_bandi(bant[i].x1, GENISLIK, bant[i].n, bant[i].renk, SATIR);
+        printf("  %s\n", bant[i].ad);
+    }
 
-    printf("Ekranda DORT yatay cizgi olmali (cihaz USB SAGDA, yatay):\n");
-    printf("  2 KIRMIZI  — tam genislikteki referans yol\n");
-    printf("  2 YESIL    — dar pencere (32 sutun), LVGL'in yolu\n");
-    printf("Hepsi ekranin SOL yarisi boyunca uzaniyor.\n\n");
-    printf("BILDIRIN: yesil cizgiler KIRMIZILAR gibi DUMDUZ mu, yoksa\n");
-    printf("EGIK/merdiven gibi mi (yukari ya da asagi kayiyor mu)?\n\n");
-    printf("  yesil EGIK  -> panel dar pencerede satir basina kayiyor.\n");
-    printf("                 KOK NEDEN BU; yazinin bozuk gorunmesinin sebebi.\n");
-    printf("  yesil DUZ   -> gonderme yolu tamamen saglam; sorun baska yerde.\n\n");
+    printf("\nEkranda BES cift yatay cizgi var (cihaz USB SAGDA, yatay).\n");
+    printf("Hepsi ekranin SOL ucundan baslayip ortaya dogru uzaniyor.\n");
+    printf("  2 BEYAZ  — tam genislikteki referans, DUZ olmali\n");
+    printf("  kirmizi / yesil / mavi / sari — dort aday satir adimi\n\n");
+    printf("BILDIRIN: hangi RENK cifti beyazlar gibi DUMDUZ?\n");
+    printf("(digerlerinin merdiven gibi yukari ya da asagi kaymasi bekleniyor)\n\n");
+    printf("Duz cikan renk, panelin dar penceredeki GERCEK satir adimini verir.\n");
+    printf("Sürücü ona göre düzeltilecek — yazinin bozuk gorunmesinin sebebi bu.\n\n");
 }
 
 /**
