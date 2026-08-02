@@ -15,7 +15,7 @@ M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
 
 Çalışma ağacı temiz, her şey commit edildi (§10). **Dal `m6`**, `main` değil.
 
-> ### ⛔ EKRAN BOZUK — ve bu M6'DAN GELMİYOR, ÖLÇÜLDÜ
+> ### ✅ EKRAN ÇÖZÜLDÜ (§9n) — aşağısı hatanın tarihçesi
 >
 > `o` testi (dört köşeye dört renk) kartta şunu veriyor: **ekran
 > temizlenmiyor ve yalnızca EN SON çizilen kare görünüyor.** Aynı belirti `a`
@@ -25,7 +25,10 @@ M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
 > Yani hata M6'dan önce de vardı; bu oturumda yalnızca *fark edildi*.
 > Ayrıntı, elenen ihtimaller ve sıradaki adım §9n'de.
 >
-> **KÖK NEDEN BULUNDU (§9n):** veri yolu hiçbir zaman sorun değildi.
+> **✅ KAPANDI.** Kullanıcı gözle doğruladı: `o` dört köşe doğru, `u` yazılar
+> okunuyor, `a` kart + akan spektrogram + kapı hepsi çalışıyor.
+>
+> **KÖK NEDEN (§9n):** veri yolu hiçbir zaman sorun değildi.
 > `QSPI_WaitIdle` sağlam (ölçüldü, zaman aşımı 0), yol ve saat hızı de
 > elendi (`y`: altı bileşim de birebir aynı). Asıl sorun: **bu panel
 > `0x2B` (RASET) komutunu YOK SAYIYOR.** Panelin çalışan iki bağımsız
@@ -724,8 +727,8 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | M4 | Veri boru hattı + tür listesi (PC tarafı) | ✅ veri (178 tür, 7.111 WAV) · segmentasyon (§9e) · **eğitim kümesi (§9j)** · negatif saha turu M8'e ertelendi (§9f-4) |
 | M5 | Model eğitimi + damıtma + INT8 | 🔶 **Aşama-2 tür ağı ✅ (§9k)** · Aşama-1 ikili ağ ve Aşama-3 mevsim tablosu kaldı |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | ✅ (§9m) — arena 110 KB, çıkarım 190 ms, doğrulama 8/8 birebir |
-| **—** | **EKRAN HATASI** | **⛔ M6 öncesinden geliyor, M7'yi tıkıyor (§9n)** |
-| M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
+| **—** | **EKRAN HATASI** | **✅ ÇÖZÜLDÜ (§9n)** — RASET yok sayılıyor + dar bantta satır kayması; kart framebuffer'ı ile kapandı |
+| **M7** | **Sonradan işleme, sonuç ekranı, günlük, pil** | **🔵 SIRADAKİ (§9o)** |
 | M8 | Saha kalibrasyonu | |
 
 ---
@@ -2945,6 +2948,82 @@ arasında artık kartı yeniden başlatmak gerekmiyor.
   Ucuz A/B: `dba7a01`'i 250 → 20 yapıp derleyin ve baktırın.
 - Son çare: bit-bang yolu çalıştığına göre ekran oradan sürülebilir — yavaş
   ama M7'yi açar.
+
+---
+
+## 9o. 🔵 SIRADAKİ İŞ — M7: cihazı gerçekten "cihaz" yapmak
+
+Ekran kapandığına göre önümüzde engel yok. **M6'nın çıktısı hâlâ yalnızca seri
+porta yazılıyor** — cihaz tür tanıyor ama ekranda göstermiyor. M7'nin ilk ve en
+değerli parçası bu.
+
+### Elde ne var (hepsi ölçülmüş, çalışıyor)
+
+```
+core1 tanima hatti     `k` / `K` — 62,6 kare/s, overrun 0, 8 pencere birlestirme
+tur agi                8/8 pencere PC ile BIREBIR, cikarim 189 ms
+sinif adlari           src/ai/siniflar.h (URETILMIS, 178 tur + negatif)
+ekran                  kart (LVGL, 200x172) + spektrogram + kapi, hepsi calisiyor
+ses                    63 kare/s kayip 0, mel + kapi hatti
+```
+
+### Adım 1 — SONUÇ EKRANI (ilk iş, tek başına anlamlı)
+
+`k`'nın core1 hattını LVGL kartına bağla. Kartta görünmesi gerekenler:
+
+- **tür adı** (`siniflar.h`'den) + **güven** (%)
+- durum: `dinliyor` / `ses algılandı` / `tür: …`
+- altta canlı spektrogram (zaten var)
+
+Bu bittiğinde cihaz ilk kez *demo edilebilir* oluyor: mikrofona kuş sesi, ekranda
+tür adı.
+
+### Adım 2 — SONRADAN İŞLEME (kararı kararlı hâle getirmek)
+
+Birleştirme (8 pencere) var ama **karar kuralı yok**: ekran her pencerede
+zıplarsa okunmuyor. Gerekli olan:
+
+- güven eşiği + **histerezis** (girme eşiği çıkma eşiğinden yüksek)
+- kısa süreli tutma: tür N saniye ekranda kalsın
+- kapı kapalıyken "dinliyor"a dön
+
+⚠ Eşikleri **ölçerek** koyun. §9k'da ölçülmüş sayılar: pencere başına top-1
+%58,07; 8 pencere birleştirmede top-1 %70,40 / top-3 %82,20. Kullanıcının
+göreceği sayı ikincisi.
+
+### Adım 3 ve sonrası (sırayla, her biri bağımsız)
+
+| # | İş | Not |
+|---|---|---|
+| 3 | **Aşama-1 ikili ağ** (kuş var/yok) | şu an kapı yalnızca enerji tabanlı; sessizlikte yanlış tür çağrısını bu keser (M5'ten kalan) |
+| 4 | **Aşama-3 mevsim tablosu** | ay bazlı ön olasılık; kartta RTC var (I2C1, §2) — önce RTC bring-up |
+| 5 | **Günlük** | SD kart bağlı (GPIO26-31), tespitleri zaman damgasıyla yaz |
+| 6 | **Pil** | BAT_ADC GPIO40, bölücü 1.5 (§2) |
+| 7 | **Dokunmatik** | M2b'de park edildi (§9b); RST çekilemiyor (§5.11) — dönülürse ilk bakılacak yer orası |
+
+### ⛔ M7'ye girerken bilinmesi gerekenler
+
+- **İlk akustik doğrulama testini KULLANICI çalıştırır.** PC'de kulaklık takılı
+  (§5.5); hoparlörden ses çalıp cihazın duymasını bekleyen test KURMAYIN.
+- **Göz gerektiren testleri kullanıcı çalıştırır** (§9n'in bütün tarihçesi).
+  Ve göndermeden önce: desen asla düz renk olmasın, düz blok kaymayı gizler.
+- Ekran sözleşmesi: **panele her zaman tam genişlikte (0..171) bas.** Dar sütun
+  bandına çok satırlı yazma KAYIYOR (§9n). LVGL yolu bunu `s_kart_fb`
+  üzerinden hallediyor; yeni çizim kodu yazarken aynı kurala uyun.
+- Spektrogram panel satırı 200..639'da, kart 0..199'da. LVGL ekranı 200x172.
+
+### Temizlik borçları (küçük, acil değil)
+
+- `a`/`u` çıkışındaki **`HIZASIZ` sayacı artık anlamsız** — eski dar-pencere
+  hizalamasını ölçüyordu, o yol kullanılmıyor. Kaldırın ya da "tam genişlik
+  dışına çıkan flush" sayacına çevirin.
+- `pb_lcd_blit_strided` LVGL yolunda **artık kullanılmıyor** (devrik işleme
+  `flush_cb`'de). Duruyor; kullanan kalmazsa silinebilir.
+- Teşhis komutları: **`w` ve `S` KALSIN** — `w` göz gerektirmeyen tek QSPI
+  ölçümü, `S` ise kaymayı yakalayan tek test (düz renk testlerin hepsi kördü).
+  `y`, `z`, `j`, `L` işlerini bitirdi; kanıtları §9n'de yazılı, silinebilirler.
+- `flush_cb` ve `satiri_gonder` içindeki ASCII döküm kancaları duruyor
+  (bir karşılaştırma daha gerekirse en hızlı yol onlar).
 
 ---
 
