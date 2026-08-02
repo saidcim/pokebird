@@ -57,3 +57,9 @@ data/segment_ornek/
 # negatif/: ESC-50 (879 MB zip + 1.840 cevrilmis klip)
 data/egitim/
 data/negatif/
+
+# M5 egitim ciktilari
+# tur_agi_int8.h ve rapor.txt GIRER: firmware .h'yi derliyor, rapor kayittir.
+# .keras her egitimde yeniden uretiliyor ve buyuk; ilerleme.html gecici pano.
+models/*.keras
+models/ilerleme.html

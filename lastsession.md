@@ -1938,6 +1938,130 @@ duyduğu kadar yakalar.
 
 ---
 
+## 9k. 🔵 M5 — Aşama-2 tür ağı: damıtma + INT8
+
+### Araç
+
+[`tools/egit.py`](tools/egit.py) — `.venv-birdnet` (Python 3.11 + TF 2.21) ile
+çalışır, 3.14 ortamında TensorFlow yok.
+
+```bash
+.venv-birdnet\Scripts\python -u tools/egit.py --duman   # 2 dk, hat calisiyor mu
+.venv-birdnet\Scripts\python -u tools/egit.py --devir 60
+```
+
+Çıktılar `models/` altında: `tur_agi.keras`, `tur_agi_int8.tflite`,
+`tur_agi_int8.h` (firmware'in derleyeceği C dizisi), `rapor.txt`,
+`ilerleme.html` (canlı pano, 10 sn'de bir kendini yeniler).
+
+### ⚠ GPU kullanılamıyor — ölçüldü, alternatif değerlendirildi
+
+Makinede **RTX 4050** var ama **TensorFlow ≥2.11 native Windows'ta GPU
+desteklemiyor** (TF'in kendi uyarısı). Seçenekler ve neden CPU seçildi:
+
+| Yol | Neden seçilmedi |
+|---|---|
+| WSL2 + CUDA | Sıfırdan TF+CUDA kurulumu; saatler, kritik yolda değil |
+| PyTorch + CUDA (Windows'ta çalışır) | Çıktı **TFLite int8** olmak zorunda; ONNX→TF→TFLite zinciri bu projedeki en pahalı hata sınıfını (sessiz sapma) davet ediyor |
+| tensorflow-directml | TF 2.10'da donmuş, ölü |
+
+**CPU (20 çekirdek) ile ölçülen: 100 sn/devir**, 60 devir ≈ 1 saat 40 dk.
+Kabul edilebilir. Model büyütülecekse GPU tekrar değerlendirilmeli.
+
+### Cihaz sözleşmesi — modelin girdisi HAM int8 mel penceresi
+
+Bu, M6'yı ucuza getiren tek karar. Keras girdisi ham int8 değerleri
+(-128..127 float olarak), modelin **ilk katmanı** `Rescaling(4/127)` — yani
+int8→sigma çevrimi **modelin içinde**, cihazda değil. TFLite'a `int8`
+girdiyle dönüştürülünce ölçüldü:
+
+```
+girdi tensoru: int8 (1, 187, 64, 1)   olcek 1.000000   sifir noktasi 0
+```
+
+Yani M6'da cihaz kodu şu kadar: `pb_mel_window(buf)` →
+`memcpy(input->data.int8, buf, 187*64)`. Betik bu ölçeği **assert ediyor**;
+tutmazsa rapora gereken dönüşümü yazıyor. Kayarsa sessiz doğruluk kaybı olur.
+
+### Model — bütçenin neresindeyiz
+
+Derinlemesine ayrılabilir CNN (daraltılmış MobileNet, ARCHITECTURE §4),
+aktivasyon **ReLU6** (INT8'de aralığı sınırlı tutuyor, kalibrasyon kuyruk
+değerlerine daha az duyarlı):
+
+```
+209.107 parametre  (~204 KB int8, plan 300-400 KB diyordu)
+MAC/pencere  6,6 M      butce 30 M      <- %78 bos pay var
+aktivasyon tepesi (kaba) 141 KB   arena butcesi 180 KB
+tflite dosyasi 270 KB
+```
+
+> **MAC'te bol pay bilerek bırakıldı.** Doğruluk yetersiz çıkarsa
+> `--genislik 1.5` ile model büyütülebilir; betik MAC bütçesini aşarsa
+> **duruyor**. Asıl sıkışık olan MAC değil **arena**: en büyük katman
+> girişteki 94×32×24 (70 KB) ve arena ardışık iki aktivasyonu birden
+> tutuyor. Model büyütülürse ilk katmanın kanal sayısına dikkat.
+>
+> **141 KB bir TAHMİN, ölçüm değil.** Gerçek arena M6'da
+> `arena_used_bytes()` ile ölçülecek. Bu projede tahmine güvenmek iki kez
+> pahalıya patladı (§9d-2, §9g); bu sayıyı ölçüm sanmayın.
+
+### Kayıp — üç tuzağın karşılığı
+
+```
+kayip = ornek_agirligi * focal(sert etiket) + 0,5 * CE(ogretmen dagilimi)
+```
+
+- **Bulaşık dilimlerde `ornek_agirligi = 0`** — sert etiket hiç kullanılmıyor,
+  o dilimler yalnızca BirdNET'in yumuşak dağılımından öğreniliyor. §9i
+  tuzak 2'nin istediği tam olarak bu.
+- **Focal loss** (γ=2) + sınıf ağırlığı `α = √(ortanca/sayı)`, [0,5 … 4]
+  aralığına kırpılmış. Ölçülen aralık **0,50 … 3,66**. Karekök bilerek:
+  ham ters frekans 1:31'lik oranda en zayıf türü aşırı ağırlıklandırıp
+  eğitimi dengesizleştiriyordu.
+- **Öğretmen dağılımının kapsamı abartılmamalı:** BirdNET sigmoid skorları
+  yazıyor, softmax değil, ve 0.1 altını hiç yazmıyor. Ölçüldü: satır başına
+  sıfırdan büyük sınıf **1,11**. Yani damıtmanın katkısı *belirsiz*
+  dilimlerde toplanıyor (hedef + akraba türün birlikte skor aldığı yerler),
+  genel bir "karanlık bilgi" kaynağı değil.
+
+### Veri artırma — ve NEDEN gürültü karıştırma burada YOK
+
+Uygulanan: zaman kaydırma (±16 kare ≈ 256 ms) + SpecAugment (zaman ve
+frekans maskeleri).
+
+Maskeler **sıfırla** dolduruluyor ve bu tam olarak doğru olan: cihazdaki
+pencere normalizasyonu ortalamayı sıfıra çekiyor ([`mel.c`](src/dsp/mel.c)),
+yani 0 = pencerenin ortalama enerjisi. Rastgele bir sabit değil, anlamlı
+bir değer.
+
+> **Plan §6-5'teki "negatiflerle çeşitli SNR'lerde gürültü karıştırma"
+> BURADA YAPILAMAZ.** Mel logaritmik: iki mel matrisini toplamak iki sesi
+> karıştırmak değil. Doğru yeri dalga formu, o da her artırılmış örnek için
+> yeniden mel çıkarmak demek. M8 saha kayıtlarıyla birlikte yapılacak —
+> asıl değerini de orada verecek zaten (gerçek İstanbul gürültüsüyle).
+
+### Durum
+
+🔵 **Eğitim çalışıyor** (60 devir, ~1 sa 40 dk). İlk devir sonunda doğrulama
+top-1 **%25,56**, top-3 %43,39 — 179 sınıfta rastgele %0,56 olduğuna göre
+hat öğreniyor. Sonuçlar `models/rapor.txt`'e yazılacak; beklenti
+ARCHITECTURE §4'te **top-1 %65–75, top-3 %85–90** (temiz kayıtlarda).
+
+### Bundan sonra (M5'in kalanı)
+
+1. Eğitim bitince `rapor.txt`: top-1/top-3, INT8 bedeli, en kötü 20 sınıf
+   ve en çok karıştıkları tür.
+2. **Aşama-1 ikili ağ** (~15 KB): kuş var mı yok mu. Aynı veri, iki sınıf
+   (178 tür → "kuş", negatif → "kuş değil").
+3. Aşama-3 mevsim tablosu: `species_istanbul.csv`'deki `ay_01..ay_12`'den
+   178×12 log-öncelik tablosu, ±2.0 logit tavanıyla.
+4. M6: TFLM entegrasyonu, gerçek arena ölçümü, cihaz-içi doğrulama seti
+   (ARCHITECTURE §6 adım 9 — "PC'de çalışıyor cihazda çalışmıyor" sınıfını
+   yakalayan tek şey).
+
+---
+
 ## 10. Depo düzeni ve git durumu
 
 ```
@@ -1996,7 +2120,7 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | `dba7a01` | **Panel hazır olma penceresi** — ekran başlatması açılıştan ≥250 ms sonra (§9h kök neden) |
 | `9ec1654` | lastsession.md: §9h çözüldü, §9i eğitim kümesi planı, §5.17 dersi |
 | `928e331` | lastsession.md: commit hash'i yazıldı |
-| *(HENÜZ COMMIT EDİLMEDİ)* | **M4 adım 4: eğitim kümesi** — `egitim_kumesi.py`, `esc50_indir.py`, `dsp_test --pencere`; üç katmanlı birebirlik sağlaması, sızıntı kontrolü, ESC-50 kuş sınıfları (§9j). Çalışma ağacında duruyor, kullanıcı onayı bekliyor. |
+| `3762dd4` | **M4 adım 4: eğitim kümesi** — `egitim_kumesi.py`, `esc50_indir.py`, `dsp_test --pencere`; üç katmanlı birebirlik sağlaması, sızıntı kontrolü, ESC-50 kuş sınıfları (§9j) |
 
 > HEAD sağlam: bss 127.084, ekran çalışıyor, ses hattı 63 kare/s kayıp 0.
 > Kartta HEAD duruyor.
