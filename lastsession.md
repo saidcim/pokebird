@@ -1759,6 +1759,7 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | `b69145e` | lastsession.md: commit hash'i yazıldı |
 | `7db6961` | lastsession.md: §9h ekran gerilemesi — üç koşuluk A/B, bellek haritası |
 | `dba7a01` | **Panel hazır olma penceresi** — ekran başlatması açılıştan ≥250 ms sonra (§9h kök neden) |
+| `9ec1654` | lastsession.md: §9h çözüldü, §9i eğitim kümesi planı, §5.17 dersi |
 
 > HEAD sağlam: bss 127.084, ekran çalışıyor, ses hattı 63 kare/s kayıp 0.
 > Kartta HEAD duruyor.
