@@ -1640,7 +1640,7 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | `ae9ae90` | **M4 adım 3: BirdNET segmentasyon boru hattı** — dört araç, üç ölçülmüş karar, bir sessiz hata (§9e, §5.13–5.16) |
 | `1ddf465` | **`s_capture` temizliği** — teşhis komutları akışa çevrildi, bss 218.988 → 127.084 (§9g) |
 | `b69145e` | lastsession.md: commit hash'i yazıldı |
-| *(bu tur)* | lastsession.md: **§9h ekran gerilemesi** — üç koşuluk A/B, bellek haritası, izlenecek yol |
+| `7db6961` | lastsession.md: **§9h ekran gerilemesi** — üç koşuluk A/B, bellek haritası, izlenecek yol |
 
 > ⚠ **HEAD derlenebiliyor ve ses tarafı sağlam, ama `a` demosunda ekran
 > bozuk (§9h).** Bu bilinerek commit'lendi: hata `s_capture` temizliğinin
