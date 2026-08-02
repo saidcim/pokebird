@@ -39,6 +39,7 @@ typedef struct {
     int16_t  ilk3[3];        /* sınıf indeksleri, en iyiden                  */
     float    ilk3_olasilik[3];
     bool     gecerli;        /* en az bir çıkarım yapıldı mı                 */
+    bool     kapi_su_an;     /* kapı EN SON karede açık mıydı — arayüz için  */
 
     /* Kapı ve gürültü tabanı — teşhis için, `m` komutundakilerin aynısı. */
     float    bant_db, taban_db, aki;
@@ -63,5 +64,22 @@ void pb_tanima_durdur(void);
 
 /** Son durumu kopyala. Core 0'dan güvenli. */
 void pb_tanima_oku(pb_tanima_durum_t *out);
+
+/**
+ * Spektrogram sütunu kuyruğu — core 1 üretir, core 0 tüketir.
+ *
+ * NEDEN GEREKLİ: motor çalışırken mel halkası CORE 1'İN MALI (yukarıdaki
+ * uyarı). Core 0'ın `pb_mel_last_frame()` çağırması yarış demek. Onun yerine
+ * core 1 her kareyi buraya bırakıyor, core 0 boşaltıyor.
+ *
+ * Kuyruk dolarsa core 1 YENİ kareyi atıyor ve hiç beklemiyor: gerçek zamanlı
+ * hattın arayüz yüzünden durması, spektrogramda bir sütun kaybetmekten çok
+ * daha pahalı. Kuyruk 64 kare ≈ 1 saniye; core 0 saniyede birkaç kez
+ * boşalttığı sürece hiç dolmuyor.
+ *
+ * @param out PB_MEL_BANDS adet int8
+ * @return    kuyruk boşsa false
+ */
+bool pb_tanima_mel_al(int8_t *out);
 
 #endif /* POKEBIRD_TANIMA_H */

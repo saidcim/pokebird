@@ -43,8 +43,10 @@
 #include "ui/lv_port.h"
 #include "ai/tur_agi.h"
 #include "ai/tanima.h"
+#include "ai/karar.h"
 #include "ai/siniflar.h"
 #include "ai/dogrulama_seti.h"
+#include "ui/sonuc_karti.h"
 #include "lvgl.h"
 
 void pb_display_dma_init(void);   /* hal/display/dev_config.c */
@@ -63,6 +65,13 @@ static_assert(PB_PIN_BAT_ADC < NUM_BANK0_GPIOS,
               "BAT_ADC pini GPIO araliginin disinda.");
 static_assert(PICO_FLASH_SIZE_BYTES == 16 * 1024 * 1024,
               "16 MB flash bekleniyor (PY25Q128HA).");
+
+/* Karar kuralı negatif sınıfın indeksini sabit olarak biliyor (ai/karar.h);
+ * sınıf tablosu yeniden üretilip sınıf sayısı değişirse burada durmalı, çünkü
+ * kayması "gürültüyü kuş sanmak" demek ve hiçbir yerde hata vermez. */
+static_assert(PB_KARAR_NEGATIF_SINIF == PB_SINIF_SAYISI - 1,
+              "Negatif sinif indeksi kaydi: ai/karar.h ile ai/siniflar.h "
+              "uyusmuyor (tools/sinif_tablosu.py yeniden mi calisti?).");
 
 #define BL_PWM_WRAP     2048
 #define ES8311_I2C_ADDR 0x18
@@ -2442,6 +2451,253 @@ static void cmd_recognize(bool kapi_yoksay) {
            (unsigned long)d.overrun);
 }
 
+/* ── c: SONUÇ EKRANI — M7'nin ilk teslimi ─────────────────────────────────
+ *
+ * `k` ne yapıyorsa aynısı, ama sonuç seri porta değil EKRANA gidiyor:
+ * solda tanıma kartı (tür adı + güven + ilk 3 + sayaçlar), sağda canlı
+ * spektrogram. Aradaki karar kuralı ai/karar.c'de; eşikleri ölçüldü
+ * (models/esik.txt, tools/esik_olc.py).
+ *
+ * İŞ BÖLÜMÜ:
+ *   core 1  ses -> mel -> kapı -> tür ağı -> birleştirme   (ai/tanima.c)
+ *   core 0  burası: kuyruğu boşalt, karar kuralı, LVGL, QSPI
+ *
+ * Mel halkası motor çalışırken core 1'in malı (ai/tanima.h uyarısı); core 0
+ * spektrogram sütunlarını `pb_tanima_mel_al()` kuyruğundan alıyor, mel'e
+ * doğrudan dokunmuyor.
+ *
+ * ⛔ AKUSTİK DOĞRULAMAYI PC'DEN SES ÇALARAK YAPMAYIN (§5.5): bilgisayarda
+ * kulaklık takılı. Bu ekranın kuş sesiyle sınanmasını kullanıcıdan isteyin.
+ */
+static void cmd_sonuc_ekrani(void) {
+    printf("\n=== SONUC EKRANI (M7) ===\n");
+    printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
+    printf("Solda tanima karti, sagda canli spektrogram.\n");
+    printf("Karar kurali: girme %.2f / cikma %.2f, en az %u pencere, "
+           "tutma %u ms\n", (double)PB_KARAR_GIRIS_ESIK,
+           (double)PB_KARAR_CIKIS_ESIK, (unsigned)PB_KARAR_MIN_PENCERE,
+           (unsigned)PB_KARAR_TUT_MS);
+    printf("Cikmak icin bir tusa basin.\n\n");
+
+    backlight_set(true);
+    /* `a` demosundaki gerekçe: fill, lcd_blit'in atlama şeridini bilinen bir
+     * hâle getiriyor — teşhis komutlarından sonra iz kalmasın. */
+    pb_lcd_fill(0x0000);
+    pb_lv_flush_sayaclari_sifirla();
+    pb_lv_init();
+
+    pb_sonuc_karti_olustur();
+    /* Kartı önce çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi
+     * kendi alanının tamamını boyuyor. */
+    for (int i = 0; i < 4; i++) { pb_lv_tick(); sleep_ms(5); }
+    pb_spec_init();
+
+    pb_mel_init();   /* filtre bankası core 1 başlamadan hazır olsun */
+
+    if (!pb_tanima_baslat(false)) {
+        printf("[!] tanima hatti baslatilamadi.\n");
+        return;
+    }
+
+    pb_karar_t karar;
+    pb_karar_sifirla(&karar, to_ms_since_boot(get_absolute_time()));
+
+    uint32_t gorulen = 0, kare0 = 0, son_hiz = 0;
+    uint32_t karar_surum = karar.surum;
+    absolute_time_t sonraki_hiz  = make_timeout_time_ms(1000);
+    absolute_time_t sonraki_kart = make_timeout_time_ms(250);
+    pb_tanima_durum_t d;
+    memset(&d, 0, sizeof(d));
+
+    drain_stdin();
+    while (getchar_timeout_us(0) < 0) {
+        /* 1) Spektrogram: core 1'in bıraktığı mel sütunlarını boşalt.
+         *    Tur başına en fazla 8 sütun — çıkarım sonrası birikmiş kuyruk
+         *    tek turda boşaltılmaya çalışılırsa arayüz o turda takılır. */
+        int8_t mel_q[PB_MEL_BANDS];
+        for (int i = 0; i < 8 && pb_tanima_mel_al(mel_q); i++) {
+            uint8_t bins[PB_MEL_BANDS];
+            for (int b = 0; b < PB_MEL_BANDS; b++) {
+                /* `a` demosuyla AYNI gösterim penceresi: -75..-15 dB. */
+                float v = (pb_mel_q_to_db(mel_q[b]) + 75.0f) * (255.0f / 60.0f);
+                if (v < 0.0f) v = 0.0f;
+                if (v > 255.0f) v = 255.0f;
+                bins[b] = (uint8_t)v;
+            }
+            pb_spec_push_column(bins, PB_MEL_BANDS);
+        }
+
+        /* 2) Tanıma durumu -> karar kuralı. */
+        pb_tanima_oku(&d);
+        pb_karar_girdi_t gi = {
+            .simdi_ms   = to_ms_since_boot(get_absolute_time()),
+            .kapi_acik  = d.kapi_su_an,
+            .yeni_sonuc = d.gecerli && d.surum != gorulen,
+            .sinif      = d.gecerli ? d.ilk3[0] : (int16_t)-1,
+            .olasilik   = d.gecerli ? d.ilk3_olasilik[0] : 0.0f,
+            .birlesen   = d.birlesen,
+        };
+        if (gi.yeni_sonuc) gorulen = d.surum;
+        pb_karar_guncelle(&karar, &gi);
+
+        /* Ekranda görünen her değişiklik seri porta da düşsün: bu komutun
+         * göz gerektirmeyen kaydı bu — kullanıcı ekrana bakarken ben aynı
+         * olayları terminalde okuyabiliyorum. */
+        if (karar.surum != karar_surum) {
+            karar_surum = karar.surum;
+            const int c = karar.sinif;
+            printf("  [%lu ms] %-14s %s %s  %%%.1f\n",
+                   (unsigned long)gi.simdi_ms, pb_karar_kip_ad(karar.kip),
+                   (c >= 0 && c < PB_SINIF_SAYISI) ? pb_sinif_kod[c] : "-",
+                   (c >= 0 && c < PB_SINIF_SAYISI) ? pb_sinif_ad[c] : "",
+                   (double)(karar.guven * 100.0f));
+        }
+
+        if (time_reached(sonraki_hiz)) {
+            son_hiz = d.kare - kare0;
+            kare0 = d.kare;
+            sonraki_hiz = make_timeout_time_ms(1000);
+        }
+
+        /* Kartı 4 Hz güncelle. Her güncelleme kartın QSPI'ye yeniden basılması
+         * (68,8 KB) demek; sonuç ekranında daha hızlısının bir karşılığı yok. */
+        if (time_reached(sonraki_kart)) {
+            pb_sonuc_gorunum_t gv;
+            memset(&gv, 0, sizeof(gv));
+            gv.kip = karar.kip;
+            gv.guven = karar.guven;
+            gv.tur_ad = (karar.sinif >= 0 && karar.sinif < PB_SINIF_SAYISI)
+                            ? pb_sinif_ad[karar.sinif] : NULL;
+            if (d.gecerli) {
+                for (int r = 0; r < 3; r++) {
+                    const int c = d.ilk3[r];
+                    if (c >= 0 && c < PB_SINIF_SAYISI) gv.ilk3_ad[r] = pb_sinif_ad[c];
+                    gv.ilk3_olasilik[r] = d.ilk3_olasilik[r];
+                }
+            }
+            gv.kare_hiz = son_hiz;
+            gv.cikarim = d.cikarim;
+            gv.birlesen = d.birlesen;
+            gv.overrun = d.overrun;
+            gv.bant_db = d.bant_db;
+            pb_sonuc_karti_guncelle(&gv);
+            sonraki_kart = make_timeout_time_ms(250);
+        }
+
+        pb_lv_tick();
+        sleep_ms(2);
+    }
+
+    pb_tanima_oku(&d);
+    pb_tanima_durdur();
+
+    printf("\n  kare %lu (kapi acik %%%lu), cikarim %lu, atlanan %lu, "
+           "overrun %lu\n",
+           (unsigned long)d.kare,
+           (unsigned long)(d.kare ? d.kapi_acik * 100 / d.kare : 0),
+           (unsigned long)d.cikarim, (unsigned long)d.atlanan,
+           (unsigned long)d.overrun);
+    printf("  LVGL flush %lu, satir adimi != alan_w: %lu, panel_w %lu..%lu\n\n",
+           (unsigned long)pb_lv_flush_say,
+           (unsigned long)pb_lv_flush_stride_farkli,
+           (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max);
+}
+
+/* ── C: SONUÇ KARTI GÖSTERİM TESTİ (mikrofonsuz) ──────────────────────────
+ *
+ * NEDEN AYRI BİR KOMUT: `c` ancak gerçek bir kuş sesi duyulursa tür adı
+ * yazıyor. Sessiz odada kart hep "dinliyor" gösterir, yani ASIL çizim yolu
+ * (uzun tür adı, sarma, güven, ilk 3, renkler) hiç sınanmaz. Bu komut aynı
+ * kartı sahte bir sonuç dizisiyle sürüyor: göz testi tek bakışta yapılabilsin.
+ *
+ * KARAR KURALI BİLEREK DEVREDE DEĞİL — burada sınanan şey ÇİZİM. Kuralın
+ * kendisi host testlerinde (test/dsp_test.c, `test_karar`) zaman ilerletilerek
+ * sınanıyor; ikisini karıştırmak, bir hata çıktığında hangisinde olduğunu
+ * belirsizleştirirdi.
+ *
+ * Desen düz renk DEĞİL (§9o uyarısı): en uzun tür adı, iki alternatif satırı
+ * ve sağda hareketli bir spektrogram deseni var — kayma olursa yazıda görünür.
+ */
+static void cmd_sonuc_karti_demo(void) {
+    /* En UZUN tür adını bul: sarmanın ve kenarların en kötü durumu bu.
+     * İndeks sabitlemek yerine aramak, sınıf tablosu yeniden üretilse de
+     * testin en kötü durumu göstermeye devam etmesini sağlıyor. */
+    int uzun = 0;
+    for (int i = 0; i < PB_SINIF_SAYISI; i++) {
+        if (strlen(pb_sinif_ad[i]) > strlen(pb_sinif_ad[uzun])) uzun = i;
+    }
+    const int ikinci = (uzun + 1) % PB_SINIF_SAYISI;
+    const int ucuncu = (uzun + 2) % PB_SINIF_SAYISI;
+
+    printf("\n=== SONUC KARTI GOSTERIM TESTI (mikrofon YOK) ===\n");
+    printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
+    printf("En uzun tur adi: \"%s\" (%d karakter)\n",
+           pb_sinif_ad[uzun], (int)strlen(pb_sinif_ad[uzun]));
+    printf("Kart dort asamadan gecip basa donuyor. Cikmak icin bir tusa basin.\n\n");
+
+    backlight_set(true);
+    pb_lcd_fill(0x0000);
+    pb_lv_init();
+    pb_sonuc_karti_olustur();
+    for (int i = 0; i < 4; i++) { pb_lv_tick(); sleep_ms(5); }
+    pb_spec_init();
+
+    const struct { pb_karar_kip_t kip; bool tur; float guven; const char *ne; }
+    asama[] = {
+        { PB_KARAR_DINLIYOR, false, 0.00f, "dinliyor (tur yok)"      },
+        { PB_KARAR_SES,      false, 0.00f, "ses algilandi"           },
+        { PB_KARAR_BELIRSIZ, true,  0.42f, "belirsiz, kehribar"      },
+        { PB_KARAR_TUR,      true,  0.91f, "tur adi, sari, en uzun"  },
+    };
+    const int adet = (int)(sizeof(asama) / sizeof(asama[0]));
+
+    int a = 0;
+    uint32_t sutun = 0;
+    absolute_time_t sonraki = make_timeout_time_ms(1);
+    drain_stdin();
+
+    while (getchar_timeout_us(0) < 0) {
+        if (time_reached(sonraki)) {
+            pb_sonuc_gorunum_t gv;
+            memset(&gv, 0, sizeof(gv));
+            gv.kip = asama[a].kip;
+            gv.guven = asama[a].guven;
+            gv.tur_ad = asama[a].tur ? pb_sinif_ad[uzun] : NULL;
+            gv.ilk3_ad[0] = pb_sinif_ad[uzun];
+            gv.ilk3_ad[1] = pb_sinif_ad[ikinci];
+            gv.ilk3_ad[2] = pb_sinif_ad[ucuncu];
+            gv.ilk3_olasilik[0] = asama[a].guven;
+            gv.ilk3_olasilik[1] = 0.21f;
+            gv.ilk3_olasilik[2] = 0.07f;
+            gv.kare_hiz = 62;
+            gv.cikarim = (uint32_t)a + 1;
+            gv.birlesen = 8;
+            gv.overrun = 0;
+            gv.bant_db = -38.0f;
+            pb_sonuc_karti_guncelle(&gv);
+
+            printf("  asama %d/%d: %s\n", a + 1, adet, asama[a].ne);
+            a = (a + 1) % adet;
+            sonraki = make_timeout_time_ms(2500);
+        }
+
+        /* Spektrogram şeridi: kayan bir tepe. Düz renk olmasın — düz blok
+         * satır kaymasını gizler, bir oturumu bu yüzden kaybettik (§9o). */
+        uint8_t bins[PB_MEL_BANDS];
+        for (int b = 0; b < PB_MEL_BANDS; b++) {
+            const int d = b - (int)(sutun % PB_MEL_BANDS);
+            const int uzaklik = d < 0 ? -d : d;
+            bins[b] = (uint8_t)(uzaklik < 8 ? 255 - uzaklik * 28 : 20);
+        }
+        pb_spec_push_column(bins, PB_MEL_BANDS);
+        sutun++;
+
+        pb_lv_tick();
+        sleep_ms(16);
+    }
+    printf("cikildi\n\n");
+}
+
 static void print_help(void) {
     printf("\nKomutlar:\n");
     printf("  i  cihaz ve ses yapilandirmasi\n");
@@ -2464,6 +2720,10 @@ static void print_help(void) {
     printf("  S  dar pencere kayma testi: cizgiler duz mu (goz gerekir)\n");
     printf("  s  canli spektrogram\n");
     printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
+    printf("  k  gercek zamanli tanima (core 1, seri porta yazar)\n");
+    printf("  K  aynisi ama kapi yoksayilir — olcum kipi\n");
+    printf("  c  SONUC EKRANI: tanima karti + spektrogram (goz gerekir)\n");
+    printf("  C  sonuc karti gosterim testi, mikrofonsuz (goz gerekir)\n");
     printf("  ?  bu yardim\n\n");
 }
 
@@ -2577,6 +2837,8 @@ int main(void) {
             case 'x': cmd_ai_verify(); break;
             case 'k': cmd_recognize(false); break;
             case 'K': cmd_recognize(true);  break;
+            case 'c': cmd_sonuc_ekrani();   break;
+            case 'C': cmd_sonuc_karti_demo(); break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;

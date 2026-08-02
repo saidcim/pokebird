@@ -62,6 +62,15 @@ static float s_olasilik[PB_BIRLESTIRME_PENCERE][PB_TUR_AGI_SINIF];
 static uint32_t s_olasilik_yaz = 0;
 static uint32_t s_olasilik_adet = 0;
 
+/* ── Spektrogram sütunu kuyruğu (core 1 -> core 0) ────────────────────────
+ * Tek yazar / tek okuyucu halka. Kilit yok: yazar yalnızca `yaz`ı, okuyucu
+ * yalnızca `oku`yu ilerletiyor; iki indeks arasındaki mesafe her zaman
+ * güvenli tarafta kalıyor (dolu sayılan bir yuva asla üzerine yazılmıyor).
+ * 64 x 64 = 4.096 bayt. */
+#define MEL_KUYRUK  64
+static int8_t s_mel_kuyruk[MEL_KUYRUK][PB_MEL_BANDS];
+static volatile uint32_t s_mel_yaz = 0, s_mel_oku = 0;
+
 /* Core 1'in yığını. Pico SDK'nın varsayılanı 4 KB; TFLM Invoke'un ne kadar
  * yığın kullandığını ölçmedik (scratch tamponlarını arena'dan alıyor ama
  * çekirdek içi geçici diziler yığında). 8 KB, ölçmeden alınmış güvenli bir
@@ -151,7 +160,19 @@ static void core1_dongu(void) {
         pb_gate_result_t g = pb_gate_update(power);
         pb_mel_push(kare);
 
+        /* Kareyi arayüz kuyruğuna bırak (spektrogram). Kuyruk doluysa ATLA —
+         * gerçek zamanlı hat arayüz için beklemez. */
+        {
+            const uint32_t yaz = s_mel_yaz;
+            const uint32_t sonraki = (yaz + 1u) % MEL_KUYRUK;
+            if (sonraki != s_mel_oku && pb_mel_last_frame(s_mel_kuyruk[yaz])) {
+                __dmb();               /* veri, indeksten ÖNCE görünür olsun */
+                s_mel_yaz = sonraki;
+            }
+        }
+
         s_durum.kare++;
+        s_durum.kapi_su_an = g.active;
         if (g.active) { s_durum.kapi_acik++; adim_kapi++; }
         s_durum.bant_db = g.band_db;
         s_durum.taban_db = g.floor_db;
@@ -217,6 +238,8 @@ bool pb_tanima_baslat(bool kapi_yoksay) {
     memset((void *)&s_durum, 0, sizeof(s_durum));
     s_olasilik_adet = 0;
     s_olasilik_yaz = 0;
+    s_mel_yaz = 0;
+    s_mel_oku = 0;
     s_calis = true;
 
     multicore_reset_core1();
@@ -233,6 +256,17 @@ void pb_tanima_durdur(void) {
      * o yüzden önce kısa bir pay veriliyor. */
     sleep_ms(400);
     multicore_reset_core1();
+}
+
+bool pb_tanima_mel_al(int8_t *out) {
+    if (!out) return false;
+    const uint32_t oku = s_mel_oku;
+    if (oku == s_mel_yaz) return false;
+    __dmb();
+    memcpy(out, s_mel_kuyruk[oku], PB_MEL_BANDS);
+    __dmb();
+    s_mel_oku = (oku + 1u) % MEL_KUYRUK;
+    return true;
 }
 
 void pb_tanima_oku(pb_tanima_durum_t *out) {

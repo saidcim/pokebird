@@ -39,8 +39,10 @@ add_executable(pokebird
     src/dsp/gate.c
     src/ui/spectrogram.c
     src/ui/lv_port.c
+    src/ui/sonuc_karti.c
     src/ai/tur_agi.cc
     src/ai/tanima.c
+    src/ai/karar.c
     src/ai/tflm_port.cc
 )
 

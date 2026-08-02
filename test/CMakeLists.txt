@@ -18,6 +18,9 @@ add_executable(dsp_test
     ../src/dsp/fft.c
     ../src/dsp/mel.c
     ../src/dsp/gate.c
+    # Karar kurali (ai/karar.c) donanimsiz: histerezis ve tutma sureleri
+    # ancak zaman ilerletilerek sinanabilir, kartta bunu yapmak pahali.
+    ../src/ai/karar.c
 )
 
 target_include_directories(dsp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../src)

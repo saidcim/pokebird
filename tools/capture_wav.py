@@ -189,7 +189,8 @@ def main():
     ap.add_argument("--out", default="kayit.wav")
     ap.add_argument("--cmd", default="r",
                     choices=["r", "n", "e", "i", "l", "d", "s", "b", "v", "o",
-                             "t", "u", "m", "a", "x", "k", "K", "w", "y", "z", "j", "L", "S"],
+                             "t", "u", "m", "a", "c", "C", "x", "k", "K", "w",
+                             "y", "z", "j", "L", "S"],
                     help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
                          "l=canli seviye, d=ekran testi, b=arka isik, "
                          "v=QSPI veri yolu teshisi, s=spektrogram (Ctrl+C ile cik), "
@@ -198,9 +199,10 @@ def main():
                          "y=melez yol testi (goz gerekir, etkilesimli), "
                          "z=satir adresleme testi (goz gerekir, etkilesimli), "
                          "j=imlec konumlandirma testi (goz gerekir, etkilesimli), "
-                         "x=tur agi cihaz ici dogrulama, k=gercek zamanli tanima")
+                         "x=tur agi cihaz ici dogrulama, k=gercek zamanli tanima, "
+                         "c=SONUC EKRANI: tanima karti + spektrogram (goz gerekir)")
     ap.add_argument("--sure", type=float, default=0.0,
-                    help="m/a icin: bu kadar saniye akit, sonra cihazdan cik")
+                    help="m/a/c/k icin: bu kadar saniye akit, sonra cihazdan cik")
     ap.add_argument("--spectrum", action="store_true",
                     help="bant enerjisi analizi (yavas, numpy'siz DFT)")
     args = ap.parse_args()
@@ -227,12 +229,12 @@ def main():
                 print("\n")
             return
 
-        if args.cmd in ("d", "b", "v", "t", "u", "y", "z", "j") or (args.cmd in ("m", "a", "k", "K") and args.sure <= 0):
+        if args.cmd in ("d", "b", "v", "t", "u", "y", "z", "j", "C") or (args.cmd in ("m", "a", "c", "k", "K") and args.sure <= 0):
             # Etkilesimli teshis: canli akis + klavyeyi cihaza ilet.
             run_interactive(ser, args.cmd)
             return
 
-        if args.cmd in ("m", "a", "k", "K"):
+        if args.cmd in ("m", "a", "c", "k", "K"):
             # Zamanli akis: --sure kadar canli bas, sonra cikis tusu gonder
             # ve ozeti al. Goz gerektirmeyen dogrulama icin.
             ser.write(args.cmd.encode())
