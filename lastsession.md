@@ -44,15 +44,12 @@ doğrulama testi boş odada bilgisayardan kuş sesi çalarak yapılacak; o
 senaryoda şehir gürültüsü yok. Odak tür tanımada. Ayrıntı ve *ama*'sı
 §9f-4'te — negatif **sınıfı** yine de bir şeyle doldurulmak zorunda.
 
-**SIRADAKİ İŞ — iki aday, ikisi de kritik yolda:**
+**SIRADAKİ İŞ — `s_capture` bellek temizliği. Adım adım tarifi §9g'de**
+(ölçülen bss, kullanan yerler, dört tuzak, kabul ölçütü).
 
-1. **Eğitim kümesini kurmak** (§9f-5, sonra M5) — `segmentler.csv`'den
-   dengeli eğitim/doğrulama bölmesi, veri artırma, damıtmayla eğitim.
-   Uzun iş.
-2. **`s_capture` (96 KB) temizliği** (§6) — M6'nın TFLM arena'sı (180 KB)
-   bunsuz sığmıyor, yani cihazda test etmenin önündeki engel bu. Bir
-   oturumluk iş. Sürekli yakalama halkası geldiğinden beri teşhis
-   komutları halkadan okuyabiliyor, yol açık.
+Kullanıcı bunu eğitim kümesinden önce yapmayı seçti: M5'te seçilecek model
+boyutu tensor arena bütçesine bağlı, o yüzden bütçeyi önce ölçmek gerekiyor.
+Ondan sonrası eğitim kümesi (§9f-5) → M5.
 
 ---
 
@@ -508,7 +505,7 @@ Eşleme artık **eBird kodu** üzerinden, BirdNET'in kendi
 | Konu | Durum |
 |---|---|
 | **EMI ölçümü geçersiz** | M1'deki tarama PWM ile yapıldı, ışık hep kapalıydı. `e` komutu aç/kapa olarak düzeltilip yeniden ölçülmeli (§4). |
-| **`s_capture` (96 KB) hâlâ duruyor** | Teşhis komutları (`n`, `r`, `e`...) kullanıyor. Sürekli yakalama halkası (16 KB) ayrı. TFLM arena'sı (180 KB, M6) eklenmeden `s_capture` küçültülmeli/kaldırılmalı — bss şu an 206 KB. |
+| **`s_capture` (96 KB) hâlâ duruyor** | **SIRADAKİ İŞ — tarifi §9g'de.** Teşhis komutları (`n`, `r`, `e`...) kullanıyor. Sürekli yakalama halkası (16 KB) ayrı. TFLM arena'sı (180 KB, M6) eklenmeden küçültülmeli. bss **ölçüldü: 218.988 bayt** (§7'deki "206 KB" eski). |
 | **Dokunmatik park edildi** | Kritik yolda değil. Kaldığı yer §9b. |
 | **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **GPIO34 (LCD_RST) aşağı çekilemiyor** | Ölçüldü, kök neden aranmadı. Bkz. §5.11. |
@@ -1163,17 +1160,22 @@ yani başka türlerle dolu. Bu türlerde ya eşik ayrıca düşürülmeli ya da
 | Tür başına ≥100 segment (3 sn) | ✅ **327/tür** (0.25 eşiğinde) — yukarıdaki sayılar |
 | Zayıf türler not edilmeli | ✅ `birdnet_ozet.py` 0.25 eşiğinde 100 altını listeliyor |
 | BirdNET güven skorları saklanmalı (öğretmen sinyali) | ✅ `segmentler.csv` + kayıt başına ham CSV |
-| **Rastgele segmentler DİNLENMELİ** | ⏳ **KULLANICIDA** — aşağıya bakın |
+| **Rastgele segmentler DİNLENMELİ** | ✅ **kullanıcı 10 örneği dinledi: onunda da kuş sesi duyuluyor** |
 
-**Son ölçüt hâlâ açık ve önemli.** Bu projede dolaylı ölçüme fazla güvenmek
-iki kez pahalıya patladı (§5.10). Segmentasyonda tek doğrudan gözlem
-dinlemektir.
+**Dinleme yapıldı ve geçti.** Bu projede dolaylı ölçüme fazla güvenmek iki
+kez pahalıya patladı (§5.10); segmentasyonda tek doğrudan gözlem dinlemekti,
+o yüzden atlanmadı.
 
-`data/segment_ornek/` altında **10 örnek kesilmiş, dinlenmeyi bekliyor.**
-Objektif sağlamalar yapıldı ve hepsi geçti — dilimler tam 3,00 sn, 24 kHz,
-RMS -25…-43 dBFS (yani sessizlik değil), ve on örneğin **onunda da hedef
-tür dilimin en yüksek skorlu türü**. Ama bunların hiçbiri "kesilen ses
-gerçekten o kuş mu" sorusunu cevaplamıyor; **dinlemenin yerini tutmaz.**
+`data/segment_ornek/` altındaki 10 örnek kullanıcıya gönderildi ve dinlendi:
+**onunda da kuş sesi duyuluyor.** Objektif sağlamalar da geçmişti — dilimler
+tam 3,00 sn, 24 kHz, RMS -25…-43 dBFS (sessizlik değil) ve onunda da hedef
+tür dilimin en yüksek skorlu türü.
+
+> Kapsamı olduğu gibi yazalım: doğrulanan **"dilimde kuş sesi var"**.
+> Türün doğruluğu tek tek teyit edilmedi (10 farklı tür, kulaktan ayırt
+> etmek uzmanlık ister). Segmentasyonun asıl işi olan *sessizlik ve boşluk
+> ayıklama* için bu yeterli; tür doğruluğu zaten M5 sonrası karışıklık
+> matrisinde ölçülecek.
 
 ```bash
 python tools/segment_kes.py --adet 10        # rastgele 10 dilim kes
@@ -1245,6 +1247,130 @@ dilimin en yüksek skorlu türü de basılıyor, dinlerken karşılaştırın.
 - Mel parametreleri değiştirilirse cihaz tarafı da değişmeli: HTK mel,
   alan normalizasyonu YOK, periyodik Hann (§9c). Bu iki ayrıntı tutmazsa
   model sessizce kötü çalışır.
+
+---
+
+## 9g. SIRADAKİ İŞ — `s_capture` temizliği (M6'nın önünü açar)
+
+> Bu bölüm yeni bir oturumun hiçbir şey sormadan başlayabilmesi için yazıldı.
+> **Kullanıcı kararı (2 Ağustos 2026):** eğitim kümesinden ÖNCE bu yapılacak.
+> Gerekçe: M5'te seçilecek model boyutu tensor arena bütçesine bağlı; bütçeyi
+> önce ölçersek M5'e gerçek rakamla gireriz. Sonraya bırakırsak modeli eğitip
+> "sığmıyor" deyip küçültmek gerekebilir.
+
+### Ölçülen başlangıç durumu
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
+~/.platformio/packages/toolchain-rp2040-earlephilhower/bin/arm-none-eabi-size.exe build/pokebird.elf
+```
+
+```
+   text     data      bss
+ 461952        0   218988      <- 2 Agustos 2026'da olculdu
+```
+
+> §7'de bss "206 KB" yazıyordu; **gerçek 218.988 bayt (213,9 KB)**. Kaymış.
+> Karar vermeden önce `size` çalıştırın, belgedeki sayıya güvenmeyin.
+
+bss'in içindekiler:
+
+| | bayt |
+|---|---|
+| **`s_capture`** (main.c:70, 2 s @ 24 kHz) | **96.000** |
+| sürekli yakalama halkası (16 KB, hizalı) | 16.384 |
+| LVGL çizim tamponu (640×20 px) | ~25.600 |
+| mel halkası (64×187 int8) | 11.968 |
+| kalanı | ~69.000 |
+
+TFLM arena'sı **180 KB**. 218.988 + 184.320 = 403.308 → 520 KB'a sığıyor
+gibi ama yığın/heap payı kalmıyor. `s_capture` gidince ~127 KB'a düşer,
+arena ile birlikte ~311 KB — rahat pay kalır.
+
+### Yapılacak: 96 KB'lık tamponu 4 KB'lık pencereye indirmek
+
+`s_capture` tek bir 2 saniyelik bitişik tampon. **Onu kullanan hiçbir teşhis
+komutunun aslında 2 saniyeyi bir arada görmesi gerekmiyor** — hepsi ya
+biriktirici (RMS, tepe, DC) ya da pencere pencere çalışıyor. Sürekli yakalama
+halkası (M3, §9c) geldiğinden beri veriyi parça parça okumak mümkün.
+
+```c
+/* main.c:70 — yerine */
+#define CHUNK_SAMPLES 2048          /* = PB_AUDIO_MAX_READ, 4 KB */
+static int16_t s_chunk[CHUNK_SAMPLES];
+```
+
+Beklenen kazanç: **96.000 → 4.096 bayt, ~89,7 KB.**
+
+Okuma kalıbı:
+
+```c
+pb_audio_stream_flush();                       /* bir KEZ, basta */
+for (kalan = toplam; kalan; kalan -= n) {
+    n = kalan > CHUNK_SAMPLES ? CHUNK_SAMPLES : kalan;
+    pb_capture_result_t cap = pb_audio_stream_read(s_chunk, n, timeout_ms);
+    /* ... parcayi isle ... */
+}
+```
+
+### Kullanan yerler ve her birinde ne değişecek
+
+| main.c | Komut | Ne istiyor | Değişiklik |
+|---|---|---|---|
+| 231 | `e` EMI | 0,5 s istatistik | biriktiriciye çevir |
+| 265–273 | `n` gürültü | 2 s istatistik + 64 pencere yüzdelik | pencere = parça yap |
+| 301 | `g` kazanç | `win` örnek istatistik | biriktiriciye çevir |
+| 371–385 | `r` kayıt | 2 s'yi PC'ye aktar | parça parça yazdır |
+| 401–405 | `s` spektrogram | 512 örnek | zaten küçük, tampon adı değişir |
+
+### ⚠ Dört tuzak — bunlara dikkat
+
+**1. `pb_audio_capture`'ı parça başına ÇAĞIRMAYIN.** O fonksiyon
+flush + read sarmalayıcısı (§9c); her çağrıda birikmişi atar. Parça parça
+çağrılırsa **parçalar arasındaki örnekler düşer** ve `r` komutu süreksiz
+bir kayıt üretir — üstelik sessizce, çünkü `fifo_overrun` bunu bildirmez.
+Doğrusu: `pb_audio_stream_flush()` bir kez, sonra `pb_audio_stream_read()`
+döngüsü.
+
+**2. `compute_stats` İKİ geçişli** (main.c:154): önce DC ortalamasını
+çıkarıyor, sonra o ortalamayla RMS hesaplıyor. Akışta ikinci geçiş yok —
+veri gitti. Varyans özdeşliğiyle tek geçişe çevirin:
+
+```
+rms² = sumsq/n − (sum/n)²
+```
+
+`double` ile sayısal olarak güvenli. Karşılaştırma testi yapın: aynı sesle
+eski ve yeni yol ±0,1 dB içinde olmalı.
+
+**3. `noise_floor_dbfs` 64 pencereye bölüyor** (48000/64 = 750 örnek).
+Parça sınırıyla hizalanmıyor. En temizi **parça boyutunu pencere boyutu
+yapmak**: 1024 örneklik 48 parça = 2,05 s, 48 pencere. Yüzdelik indeksi
+`count/10` olduğu için 64→48 geçişi 10. yüzdeliği biraz kaydırır — sonuç
+diagnostik, kabul edilebilir, **ama belgeleyin** (M1'in -36 dBFS tabanıyla
+karşılaştırma yapılıyor).
+
+**4. `r` komutunun çerçevesi bozulmamalı.** `tools/capture_wav.py`
+`#WAV-BEGIN rate=... samples=N` başlığını okuyup N örnek bekliyor
+(capture_wav.py:112). Sorun: **istatistikler şu an başlıktan ÖNCE
+yazdırılıyor** ve tüm tamponu istiyor. Akışta bu mümkün değil. Yeni sıra:
+başlığı yaz → parçaları akıt ve istatistiği biriktir → `#WAV-END` →
+istatistiği yaz. `samples=N` gerçekten gönderilen sayıyla tutmalı, yoksa
+PC tarafı *"eksik"* diyor.
+
+### Kabul ölçütü
+
+1. `arm-none-eabi-size` ile bss **≤ 130.000 bayt** (şimdi 218.988)
+2. `python tools/capture_wav.py --port COM13 --out test.wav` çalışıyor ve
+   üretilen WAV **süreksizlik içermiyor** (tık/kopukluk yok — dinleyin;
+   dolaylı ölçüm bu projede iki kez yanılttı, §5.10)
+3. `--cmd n` gürültü tabanı, temizlik öncesiyle **±1 dB** içinde
+4. `--cmd m` hâlâ 62–63 kare/s, kayıp 0 (§9c'deki değer)
+5. `--cmd a` tam demo ekranda çalışıyor
+
+### Bundan sonra
+
+Eğitim kümesi (§9f-5) → M5. `segmentler.csv` hazır bekliyor.
 
 ---
 
