@@ -9,7 +9,7 @@
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
-**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 ✅
+**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 ✅ · M4 ✅
 
 Çalışma ağacı temiz, her şey commit edildi (§10).
 
@@ -54,12 +54,20 @@ arena (180 KB) ile birlikte 311.404  ->  520 KB SRAM'de ~208 KB pay
 
 Beş kabul ölçütünün beşi de karşılandı. Kartta HEAD duruyor, çalışıyor.
 
-**M4 tamamen bitti.** Veri (178 tür · 7.111 WAV) ✅, segmentasyon
-(`data/segmentler.csv`, 79.932 satır) ✅, negatif toplama kullanıcı kararıyla
-M8'e ertelendi (§9f-4 — *ama negatif sınıfı yine de doldurulmalı*).
+**M4 ADIM 4 — EĞİTİM KÜMESİ ✅ BİTTİ (§9j).** Model girdisi üretildi ve
+cihazın gördüğü özniteliklerle **ölçülerek** eşleştiği doğrulandı:
 
-**SIRADAKİ İŞ — eğitim kümesi (§9f-5) → M5.** Bellek bütçesi artık ölçülmüş
-bir rakam, model boyutu ona göre seçilebilir. Ayrıntı §9i'de.
+```
+data/egitim/pencereler.npy   64x187 int8 pencereler
+tools/egitim_kumesi.py --saglama   Python penceresi == C penceresi
+                                   %99,49 hucre birebir, en buyuk fark 1 int8 adimi
+bolme KAYIT+KAYDEDEN bazinda · bulasik dilimler bayrakli, olcume girmiyor
+negatif sinif ESC-50'den dolduruldu (kus siniflari cikarildi)
+```
+
+**SIRADAKİ İŞ — M5: model eğitimi + damıtma + INT8.** Bellek bütçesi ölçülmüş
+bir rakam (bss 127.084, arena ile ~208 KB pay), model boyutu ona göre
+seçilebilir. Eğitim kümesinin tam envanteri ve M5'e taşınan kısıtlar §9j'de.
 
 ---
 
@@ -161,12 +169,19 @@ cmake --build build
 
 ```bash
 cmake -S test -B test/build -G Ninja && cmake --build test/build
-./test/build/dsp_test          # 13 test, 0 kaldi
-python tools/mel_reference.py  # 64 bandin tamaminda sapma 0.0000 dB
+./test/build/dsp_test               # 13 test, 0 kaldi
+python tools/mel_reference.py       # 64 bandin tamaminda sapma 0.0000 dB
+python tools/egitim_kumesi.py --saglama   # PC egitim hatti == cihaz hatti
 ```
 
 Saniyeler sürüyor ve şimdiden iki gerçek hata yakaladı (§9c). Mikrodenetleyicide
 DSP hatası ayıklamak çok pahalı; **DSP değişikliklerini önce burada doğrulayın.**
+
+`dsp_test`'in üçüncü kipi **`--pencere <ham.s16>`**: ham int16 dosyasından
+modelin gerçek girdisini (64×187 int8, `pb_mel_window()` çıktısı) döküyor.
+`--dump` yalnızca tek kareyi karşılaştırıyordu; kare dizilimi (hop 384) ve
+pencere normalizasyonu onun dışında kalıyordu. Eğitim kümesi betiği kendini
+buna karşı doğruluyor (§9j).
 
 ### Bağımlılıklar
 
@@ -550,6 +565,7 @@ değil" sonucunu verdi. Bunu bir kez daha kullanın — ucuz ve kesin.
 | Ekran teşhis iskelesi | `v` komutu, `d`'nin varyantları ve `main.c`'deki bit-bang yolu duruyor. **Korunmalı** — QSPI bir daha bozulursa en hızlı yol bunlar. |
 | **es8311.c lisansı** | "ESPRESSIF MIT License" standart MIT DEĞİL; kullanımı Espressif ürünleriyle sınırlı. Kişisel kullanımda pratik sorun yok. **Dağıtım öncesi** veri sayfasından kendi sürücümüz yazılmalı. |
 | **BirdNET lisansı** | CC BY-NC-SA 4.0. Damıtılan model türev sayılabilir → ticari kullanımı kısıtlar. Ticari yol için damıtmasız varyant gerekir. ARCHITECTURE §6. |
+| **ESC-50 lisansı** | CC BY-NC 3.0 (K. J. Piczak). Negatif sınıfın kaynağı (§9j). Kişisel kullanımla uyumlu, **ticari dağıtımla değil** — XC ve BirdNET ile aynı sınıftan kısıt. Atıf `data/negatif/esc50_kayitlar.csv`'de. Ticari yol açılacaksa negatifler M8'de cihazın kendi kayıtlarıyla değiştirilebilir. |
 | Mikrofon kazancı | Şu an 3 (varsayılan). Saha koşullarında kalibre edilmeli. |
 | CMSIS-DSP | `src/dsp/fft.c` hâlâ kendi radix-2 FFT'si. Doğru ama yavaş; hız gerekirse `arm_rfft_fast_f32` devralabilir. Host testleri değişikliği anında doğrular. |
 | LCD_TE yırtılma önleme | M2b'de planlanmıştı, yapılmadı. |
@@ -624,8 +640,8 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | M2a | Ekran sürücüsü + canlı spektrogram | ✅ (§9a) |
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
-| **M4** | **Veri boru hattı + tür listesi (PC tarafı)** | **✅ veri (178 tür, 7.111 WAV) · segmentasyon (§9e) · negatif toplama M8'e ertelendi (§9f-4) · eğitim kümesi §9i'de** |
-| M5 | Model eğitimi + damıtma + INT8 | |
+| M4 | Veri boru hattı + tür listesi (PC tarafı) | ✅ veri (178 tür, 7.111 WAV) · segmentasyon (§9e) · **eğitim kümesi (§9j)** · negatif saha turu M8'e ertelendi (§9f-4) |
+| **M5** | **Model eğitimi + damıtma + INT8** | **🔵 SIRADAKİ** |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
 | M8 | Saha kalibrasyonu | |
@@ -1236,7 +1252,9 @@ dilimin en yüksek skorlu türü de basılıyor, dinlerken karşılaştırın.
 1. ✅ Tür listesi — 178 tür
 2. ✅ Kayıt indirme + 24 kHz mono WAV dönüşümü — **7.111 dosya, doğrulandı**
 3. ✅ **BirdNET segmentasyonu** — §9e, `data/segmentler.csv`
-4. ⏸ **Negatif TOPLAMA — KULLANICI KARARIYLA ASKIYA ALINDI (2 Ağustos 2026)**
+4. ⏸/✅ **Negatif: SAHA TURU ertelendi, SINIF dolduruldu (§9j).** ESC-50
+   indirildi ve kuş sınıfları çıkarıldı; ayrıntı ve ölçülen tuzak §9j'de.
+   Aşağıdaki metin kararın gerekçesi olarak duruyor.
 
    Plan *"atlanırsa cihaz sahada kullanılamaz"* diyor. Kullanıcı yine de
    erteledi ve **gerekçesi sağlam**: ilk doğrulama testi *boş bir odada
@@ -1279,9 +1297,13 @@ dilimin en yüksek skorlu türü de basılıyor, dinlerken karşılaştırın.
    Aşama 2'nin "bilinmiyor" sınıfı.
 
 5. ⏳ **Veri artırma** — zaman kaydırma, pitch/tempo, negatiflerle çeşitli
-   SNR'lerde gürültü karıştırma, SpecAugment, oda/mesafe simülasyonu
-6. ⏳ **M5**: damıtma ile eğitim (BirdNET yumuşak çıktıları öğretmen),
-   focal loss (sınıf dengesizliği), INT8 niceleştirme, doğruluk raporu
+   SNR'lerde gürültü karıştırma, SpecAugment, oda/mesafe simülasyonu.
+   **Dikkat:** artırma mel'den SONRA (SpecAugment) ya da ham sesten önce
+   yapılmalı; ham seste yapılıyorsa pencere `tools/egitim_kumesi.py`'nin
+   `mel_penceresi()`'nden geçmeli, elle mel yazılmamalı (§9j).
+6. ⏳ **M5**: damıtma ile eğitim (BirdNET yumuşak çıktıları öğretmen —
+   `ogretmen.npy` hazır), focal loss (sınıf dengesizliği), INT8
+   niceleştirme, doğruluk raporu
 
 ### M5'e girerken hatırlanacak kısıtlar
 
@@ -1647,9 +1669,11 @@ bedeli sıfır. Ölçülen eşik ≤20 ms; 250 ms bilerek cömert.
 
 ---
 
-## 9i. 🔵 SIRADAKİ İŞ — eğitim kümesi (M4 adım 4) → M5
+## 9i. M4 adım 4 planı — eğitim kümesi (✅ yapıldı, sonuç §9j'de)
 
-> Firmware tarafı şimdilik bitti; bu iş tamamen **PC tarafı**. Karta gerek yok.
+> Bu bölüm işe başlamadan önce yazılmış **plandı**. Ne çıktığı, dört tuzağın
+> her birine ne olduğu ve planın hangi maddesinin ölçümle değiştiği §9j'de.
+> Firmware tarafı bitti; bu iş tamamen **PC tarafı**, karta gerek yok.
 
 ### Elde ne var
 
@@ -1710,6 +1734,210 @@ artık ölçülü (§7: bss 127.084, arena ile ~208 KB pay).
 
 ---
 
+## 9j. M4 adım 4 — eğitim kümesi ✅ TAMAMLANDI
+
+### Araçlar
+
+| Dosya | Ne | Hangi python |
+|---|---|---|
+| [`tools/egitim_kumesi.py`](tools/egitim_kumesi.py) | `segmentler.csv` + WAV → 64×187 int8 pencereler, bölme, öğretmen sinyali | 3.14 (numpy) |
+| [`tools/esc50_indir.py`](tools/esc50_indir.py) | ESC-50 indir, kuş sınıflarını çıkar, 24 kHz mono WAV'a çevir | 3.14 (stdlib) |
+| `test/dsp_test.c --pencere` | **C tarafının tam pencere dökümü** — Python'un karşılaştırıldığı referans | — |
+
+```bash
+python tools/egitim_kumesi.py --saglama          # ONCE BU (cihazla birebirlik)
+python tools/esc50_indir.py                      # negatif ses kaynagi
+.venv-birdnet\Scripts\python tools/birdnet_run.py \
+    --girdi data/negatif/wav --out data/negatif/birdnet_sonuc
+python tools/egitim_kumesi.py                    # kumeyi uret
+python tools/egitim_kumesi.py --dogrula-cikti 40 # sizinti + satir hizasi
+python tools/egitim_kumesi.py --dinle 8          # kulakla dogrulama
+```
+
+### Sonuç — ölçüldü (2 Ağustos 2026)
+
+```
+61.111 pencere · 178 tur + negatif sinif · 738 MB
+  egitim     45.764  %74,9
+  dogrulama   9.080  %14,9
+  test        6.267  %10,3
+negatif (sinif 178)  3.489   (ESC-50, egitim 2.088 / dog 708 / test 693)
+tur basina pencere: en az 22 · ortanca 317 · en cok 675
+178 turun 178'inde dogrulama kumesi DOLU
+```
+
+`data/egitim/` içeriği:
+
+| Dosya | Ne |
+|---|---|
+| `pencereler.npy` | **(61111, 187, 64) int8** — modelin girdisi, cihazdakiyle aynı |
+| `etiket.npy` | (N,) int16 sınıf indeksi; **178 = negatif** |
+| `ogretmen.npy` | (N, 178) float16 — BirdNET yumuşak skorları, **damıtma için** |
+| `ornekler.csv` | satır başına kaynak, `bolum`, `bulasik`, güven, kaydeden |
+| `siniflar.csv` | indeks → eBird kodu / Türkçe ad |
+| `ozet.txt` | koşunun raporu (zayıf türler dahil) |
+
+Öğretmen vektörü ölçüldü: kuş satırlarında hedef sınıfın ortalama skoru
+**0,838**, medyan 0,966; satır başına sıfırdan büyük sınıf sayısı 1,11.
+Negatif satırlarda tamamen sıfır (BirdNET orada kuş duymuyor — zaten şartı bu).
+
+### ✅ Cihazla birebirlik — bu işin tek gerçek riski, ölçüldü
+
+Plan §9i *"bu dört ayrıntıdan biri tutmazsa model PC'de iyi cihazda kötü
+çalışır ve sebebi hiçbir yerde hata olarak görünmez"* diyordu. Üç katmanlı
+sağlama kuruldu, üçü de geçiyor:
+
+```
+1) Sabitler mel.h/fft.h'den okunup karsilastiriliyor   (biri kayarsa betik CALISMIYOR)
+2) Yiginlanmis guc spektrumu == mel_reference.power_spectrum   fark 0.000e+00
+3) Python penceresi == C penceresi (dsp_test --pencere)
+     birebir ayni hucre  %99,49
+     en buyuk fark       1 int8 adimi
+     ortalama mutlak     0,0051
+```
+
+Mel parametreleri **yeniden yazılmadı**: `mel_reference.py`'nin filtre
+bankası ve güç spektrumu doğrudan import ediliyor, hızlandırılmış (yığınlanmış)
+yol ona karşı sıfır farkla doğrulanıyor.
+
+> **`--dump` yetmiyordu.** Var olan tek karşılaştırma tek bir mel karesiydi;
+> kare dizilimi (hop 384) ve pencere içi normalizasyon onun dışında kalıyordu
+> — yani modelin gerçek girdisinin yarısı hiç doğrulanmamıştı.
+> `dsp_test --pencere` bu yüzden eklendi.
+
+**Neden %100 değil:** C, pencere ortalama/varyansını `float` (32 bit) ile tek
+geçişte biriktiriyor ([`mel.c:144`](src/dsp/mel.c)). 11.968 değerin kare
+toplamı float32'nin kesin tamsayı aralığını aşıyor ve `E[x²]−E[x]²` farkında
+sadeleşme var; ölçek ~1e-4 göreli kayıyor, yuvarlama sınırındaki hücreler bir
+adım oynuyor. **Python tarafı float64 ile daha doğru olan.** 1 adım, int8'in
+±4σ'lık aralığında 0,03σ — önemsiz. Firmware'i bunun için değiştirmeye gerek
+yok, ama bilinsin.
+
+### ⚠ Dört tuzağa ne oldu
+
+**1. Bölme KAYIT bazında — ve bu tuzağa RAĞMEN sızıntı üretildi, ölçümle yakalandı.**
+
+Bölme `dosya` + `kaydeden` bazında yapıldı. Ama *bulaşık dilimleri doğrulamadan
+eğitime taşıyan* kural, aynı kaydın bir kısmını eğitime bir kısmını doğrulamaya
+koydu: **290 kayıt iki bölümde birden.** Yani §9i tuzak 1'in ta kendisi, hem de
+onu önlemek için yazılmış kod yüzünden.
+
+Doğrusu: ölçüm kümesine düşen bulaşık dilimler **taşınmaz, düşürülür** (bu
+koşuda 522 dilim). Kontrol `--dogrula-cikti` içine **kalıcı** olarak konuldu:
+
+```
+sizinti · birden fazla bolumde olan kayit : 0   (0 olmali)
+sizinti · birden fazla bolumde olan kisi  : 1   (hoocro1, asagida)
+```
+
+> **Ders:** bir tuzağı bildiğinizi ve önlem aldığınızı sanmak, önlemin
+> çalıştığını ölçmenin yerine geçmiyor. Bu kontrol yazılmasaydı sızıntı
+> M5'te doğruluğu sahte yükseltecek ve kimse fark etmeyecekti.
+
+**Bölme algoritması da ölçümle değişti.** İlk sürüm grupları karıştırıp önce
+test kotasını dolduruyordu. Ölçüldü: Karatavuk'un 573 diliminin **399'u tek bir
+kaydedene** ait; o grup teste düşünce bölme **%11 / %21 / %68** oldu. Doğrusu
+büyükten küçüğe gidip her grubu *hedefinden en çok geride olan* bölüme vermek —
+kaydeden bazında gruplamayı bozmadan oranları tutturuyor ve **belirlenimci**
+(tohum gerekmiyor).
+
+**`hoocro1` (Leş Kargası) istisnası:** kayıtlarının neredeyse tamamı tek kişiye
+ait; kaydeden bazında bölününce doğrulama boş kalıyordu, o tür için **kayıt**
+bazına düşüldü. Kayıt bazlı garanti (aynı kaydın tüm dilimleri aynı bölümde)
+orada da korunuyor. Raporda adıyla yazıyor.
+
+**2. Bulaşık dilimler.** `en_iyi_tur != hedef` olan dilim `bulasik=1` ile
+işaretli. Doğrulama/teste **hiç girmiyor** (522'si bu yüzden düşürüldü),
+eğitimde 1.363 tanesi bayrağıyla ve tam öğretmen vektörüyle duruyor — yani
+"yumuşak etiketle eğit" seçeneği açık, "sessizce hedef etiketiyle eğit"
+seçeneği için ekstra emek gerekiyor. `--bulasik at` ile tamamen düşürülür.
+
+**3. Negatif sınıf — `chirping_birds` çıkarmak YETMİYOR.**
+
+ESC-50 indirildi (2.000 klip, 44.1 kHz → 24 kHz mono, kuş WAV'larıyla aynı
+ffmpeg zinciri). Sonra 1.960 klip **BirdNET'ten geçirildi** ve ölçüldü:
+
+```
+51 klipte kendi 178 turumuzden biri >=0.25 guvenle duyuluyor
+  crow            26     <- en yuksekleri Corvus frugilegus 1.00, Pica pica 0.98
+  brushing_teeth   4
+  hen              3
+  sheep            3
+  rooster          2 ...
+```
+
+ESC-50'nin **`crow` sınıfı bizim hedef türlerimiz.** Negatife konsaydı model
+kargayı reddetmeyi öğrenirdi — ve bu, hiçbir testte hata olarak görünmezdi.
+Plan yalnızca `chirping_birds`i söylüyordu; **yetmiyor.**
+
+İki katmanlı çözüm, ikisi de ölçülmüş:
+- **Sınıf bazında:** `chirping_birds`, `crow`, `hen`, `rooster` çıkarıldı
+  (2.000 → 1.840 klip, 46 kategori).
+- **Klip bazında:** kalanlardan BirdNET'in ≥0.25 güvenle kuş duyduğu **20 klip**
+  daha elendi.
+
+Negatif bölmesi ESC-50'nin **kendi 5 katmanına** göre (fold 5 test, 4 doğrulama,
+1–3 eğitim) — o katmanlar zaten aynı Freesound kaydından kesilmiş klipler aynı
+katmanda kalsın diye ayrılmış. Tek istisna ölçüldü: `209698` numaralı kaynak
+`clock_alarm` ve `clock_tick` olarak iki katmana bölünmüş (1.406 kaynağın 1'i,
+doğrulama/test arasında — eğitimi etkilemiyor).
+
+> **Saha turu hâlâ M8'de.** Ezan, vapur, simitçi, İstanbul trafiği yok; onlar
+> cihazın kendi mikrofonuyla kaydedilecek (§9f-4). Yapılan şey sınıfı
+> doldurmaktı, saha kalibrasyonu değil.
+
+**4. Sınıf dengesizliği.** En zayıf tür Alaca Balıkçıl **22 pencere** (18/2/2),
+en güçlüsü 675. Oran 1:31. `ozet.txt`'te en zayıf 12 tür listeleniyor.
+Erguvani Balıkçıl'a dikkat: 100 pencerenin **27'si bulaşık** — o türde
+kayıtların çoğunda baskın ses başka bir kuş.
+
+### Diğer ölçülmüş kararlar
+
+- **Dilim sonu dosyayı aşınca pencere SOLA kaydırılıyor**, sıfırla
+  doldurulmuyor. Sıfır bandı mel'de -90 dB'lik yapay bir blok yapar ve pencere
+  normalizasyonunu bozardı. Dilimin sesi yine pencerenin içinde kalıyor.
+- **Sessiz pencereler düşürülüyor** (dB standart sapması < 0,5): 156 tane.
+  Dijital sessizlikte cihazın normalizasyonu ölçeği patlatıyor ve modele
+  ±127'lik gürültü olarak giriyor.
+- **Ara int8 yuvarlaması atlanmadı.** Cihaz her kareyi önce -90…0 dB
+  aralığında int8'e sıkıştırıyor, normalizasyonu *o* değerlerden yapıyor.
+  Bu ara adım atlansa çıktı sessizce kayardı.
+- Ses kesilmiyor, orijinal WAV'dan istenen ofsetten okunuyor (§9e'deki
+  kararın devamı) — 10 GB'lık dilim dosyası üretilmedi.
+
+### Kabul ölçütü — durum
+
+| Ölçüt | Sonuç |
+|---|---|
+| Çıktı cihazdaki `pb_mel_window()` ile aynı | ✅ %99,49 birebir, en büyük fark 1 int8 adımı |
+| Bölme kayıt bazında, sızıntı yok | ✅ **0 kayıt** iki bölümde (ölçüldü, bir kez de yakaladı) |
+| Bulaşık dilimler sessizce hedefle eğitilmiyor | ✅ bayraklı; ölçüm kümesine hiç girmiyor |
+| Negatif sınıf dolu | ✅ 3.489 pencere, kuş içerenler iki katmanda elendi |
+| Zayıf türler bildiriliyor | ✅ `ozet.txt` |
+| Satır hizası (dizi ↔ csv) | ✅ 40 satır kaynaktan yeniden üretildi, 40'ı birebir |
+| **Rastgele pencereler DİNLENMELİ** | ✅ **kullanıcı 8 örneği dinledi ve onayladı** |
+
+Dinleme yapıldı ve geçti. 8 örnek (6 kuş + 2 negatif) kullanıcıya gönderildi;
+kuş örneklerinde ses duyuluyor, **iki negatif örnekte kuş duyulmuyor** —
+kullanıcı ikisini de teyit etti. Bu projede dolaylı ölçüm iki kez pahalıya
+patladı (§5.10), o yüzden atlanmadı: negatife kuş karışması Aşama-1'i bozan
+sessiz hatadır ve objektif sağlamalar (BirdNET taraması) onu ancak BirdNET'in
+duyduğu kadar yakalar.
+
+### M5'e taşınan kısıtlar
+
+- Girdi hazır: `pencereler.npy` (61111, 187, 64) int8, `etiket.npy`,
+  `ogretmen.npy` (damıtma öğretmeni), bölümler `ornekler.csv`'de.
+- **Veri artırma ham seste yapılacaksa** pencere `egitim_kumesi.py`'nin
+  `mel_penceresi()`'nden geçmeli — elle mel yazmayın, cihazla birebirlik
+  oradan geliyor. SpecAugment mel'den sonra, sorun değil.
+- Focal loss + artırma en zayıf 12 türü hedeflesin (`ozet.txt`).
+- Model boyutu: **≤30 MMAC/pencere**, tensor arena **≤180 KB** (§7).
+- Sınıf 178 = negatif; Aşama-1'in "kuş değil"i ve Aşama-2'nin "bilinmiyor"u
+  aynı havuzdan besleniyor.
+
+---
+
 ## 10. Depo düzeni ve git durumu
 
 ```
@@ -1732,6 +1960,7 @@ tools/      capture_wav.py, mel_reference.py,
             xc_convert.py, m4_run.py        ← M4 veri boru hattı
             birdnet_slist.py, birdnet_run.py,
             birdnet_ozet.py, segment_kes.py ← M4 adım 3: segmentasyon
+            esc50_indir.py, egitim_kumesi.py ← M4 adım 4: eğitim kümesi
 data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
             birdnet_ad_haritasi.csv         ← kod→BirdNET adı (GİRİYOR, §5.16)
             .xc_key                         ← XC API anahtarı (GİRMİYOR)
@@ -1741,6 +1970,12 @@ data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
             birdnet_sonuc/                  ← kayıt başına sonuç CSV (girmiyor)
             birdnet_log/                    ← işçi günlükleri (girmiyor)
             segmentler.csv                  ← dilim dizini (girmiyor, üretilebilir)
+            egitim/                         ← EĞİTİM KÜMESİ (girmiyor, 739 MB)
+                pencereler.npy · etiket.npy · ogretmen.npy
+                ornekler.csv · siniflar.csv · ozet.txt
+            negatif/                        ← ESC-50 (girmiyor)
+                wav/<kategori>/*.wav · esc50_kayitlar.csv
+                birdnet_sonuc/              ← negatiflerin kuş taraması
 .venv-birdnet/  BirdNET 3.11 ortamı + model (girmiyor, ~1 GB)
 third_party/  pico-sdk/, lvgl/              (ikisi de git'e girmiyor)
 rsvpnano/     kullanıcının kopyası           (git'e girmiyor)
@@ -1760,6 +1995,8 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | `7db6961` | lastsession.md: §9h ekran gerilemesi — üç koşuluk A/B, bellek haritası |
 | `dba7a01` | **Panel hazır olma penceresi** — ekran başlatması açılıştan ≥250 ms sonra (§9h kök neden) |
 | `9ec1654` | lastsession.md: §9h çözüldü, §9i eğitim kümesi planı, §5.17 dersi |
+| `928e331` | lastsession.md: commit hash'i yazıldı |
+| *(HENÜZ COMMIT EDİLMEDİ)* | **M4 adım 4: eğitim kümesi** — `egitim_kumesi.py`, `esc50_indir.py`, `dsp_test --pencere`; üç katmanlı birebirlik sağlaması, sızıntı kontrolü, ESC-50 kuş sınıfları (§9j). Çalışma ağacında duruyor, kullanıcı onayı bekliyor. |
 
 > HEAD sağlam: bss 127.084, ekran çalışıyor, ses hattı 63 kare/s kayıp 0.
 > Kartta HEAD duruyor.

@@ -221,10 +221,65 @@ static void dump_frame(void) {
     }
 }
 
+/**
+ * Ham int16 dosyasından TAM bir model penceresi (64×187 int8) dök.
+ *
+ * Neden gerekli: `--dump` yalnızca tek kareyi karşılaştırıyor, yani filtre
+ * bankasını ve dB→int8 eşlemesini doğruluyor. Modelin gerçek girdisi ise
+ * `pb_mel_window()`'un çıktısı — kare dizilimi (hop 384) ve pencere içi
+ * ortalama/varyans normalizasyonu buna ek olarak devreye giriyor. Eğitim
+ * kümesini üreten Python bunları da birebir tutturmak zorunda; tutmazsa
+ * model PC'de iyi cihazda kötü çalışır ve hiçbir yerde hata görünmez
+ * (lastsession.md §9i).
+ *
+ * Girdi: 24 kHz mono, ham little-endian int16, en az 187*384+128 = 71.936
+ * örnek. Kare r = örnek[r*384 .. r*384+512).
+ */
+static int dump_window(const char *yol) {
+    enum { GEREKEN = (PB_MEL_FRAMES - 1) * PB_MEL_HOP + PB_FFT_SIZE };
+
+    FILE *f = fopen(yol, "rb");
+    if (!f) { fprintf(stderr, "acilamadi: %s\n", yol); return 2; }
+
+    int16_t *s = (int16_t *)malloc(sizeof(int16_t) * GEREKEN);
+    if (!s) { fclose(f); fprintf(stderr, "bellek yok\n"); return 2; }
+
+    size_t okunan = fread(s, sizeof(int16_t), GEREKEN, f);
+    fclose(f);
+    if (okunan < GEREKEN) {
+        fprintf(stderr, "kisa dosya: %zu ornek, gereken %d\n", okunan, GEREKEN);
+        free(s);
+        return 2;
+    }
+
+    pb_mel_reset();
+    for (int r = 0; r < PB_MEL_FRAMES; r++) pb_mel_push(s + (size_t)r * PB_MEL_HOP);
+
+    int8_t *pencere = (int8_t *)malloc((size_t)PB_MEL_FRAMES * PB_MEL_BANDS);
+    if (!pencere || !pb_mel_window(pencere)) {
+        fprintf(stderr, "pencere olusmadi\n");
+        free(pencere); free(s);
+        return 2;
+    }
+
+    printf("kare,bant,q\n");
+    for (int r = 0; r < PB_MEL_FRAMES; r++) {
+        for (int b = 0; b < PB_MEL_BANDS; b++) {
+            printf("%d,%d,%d\n", r, b, pencere[(size_t)r * PB_MEL_BANDS + b]);
+        }
+    }
+    free(pencere);
+    free(s);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--dump") == 0) {
         dump_frame();
         return 0;
+    }
+    if (argc > 2 && strcmp(argv[1], "--pencere") == 0) {
+        return dump_window(argv[2]);
     }
 
     printf("PokeBird DSP testleri\n=====================\n\n");

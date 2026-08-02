@@ -51,3 +51,9 @@ data/birdnet_log/
 data/segmentler.csv
 data/birdnet_slist.txt
 data/segment_ornek/
+
+# Egitim kumesi (M4 adim 4) — hepsi uretilebilir cikti
+# egitim/: 62 bin pencere, 739 MB (pencereler.npy)
+# negatif/: ESC-50 (879 MB zip + 1.840 cevrilmis klip)
+data/egitim/
+data/negatif/
