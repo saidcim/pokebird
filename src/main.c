@@ -905,6 +905,12 @@ static void cmd_full_demo(void) {
     printf("Cikmak icin bir tusa basin.\n\n");
     backlight_set(true);
 
+    /* Ekranı temizlemek yalnızca kozmetik değil: `pb_lcd_fill` atlama
+     * şeridini (lcd_blit.c) bilinen bir hâle getiriyor. Şerit geçersizken
+     * konumlandırma 0/1. sütunlara siyah yazar ve iz bırakır — teşhis
+     * komutlarından (`z`, `j`, `v`) sonra tam olarak bu olur. */
+    pb_lcd_fill(0x0000);
+
     bool dokunmatik = pb_lv_init();
     printf("  dokunmatik: %s\n", dokunmatik ? "hazir" : "yok (demoya engel degil)");
 
@@ -1038,6 +1044,7 @@ static void cmd_full_demo(void) {
 static void cmd_ui_demo(void) {
     printf("\nLVGL demo. Cikmak icin bir tusa basin.\n");
     backlight_set(true);
+    pb_lcd_fill(0x0000);   /* atlama seridini bilinen hale getirir (lcd_blit.c) */
 
     bool dokunmatik = pb_lv_init();
     printf("  dokunmatik: %s\n", dokunmatik ? "hazir" : "YOK (sadece ekran)");

@@ -106,7 +106,19 @@ static void indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 static void alan_yuvarla(lv_event_t *e)
 {
     lv_area_t *alan = (lv_area_t *)lv_event_get_param(e);
-    if (alan) alan->x1 = 0;
+    if (!alan) return;
+
+    alan->x1 = 0;
+
+    /* Panel sütun aralığını 2 piksele hizala. Panel CASET'i 2'ye yuvarlıyor
+     * (`j` ile ölçüldü); hizasız pencere veriyi bir piksel kaydırıp dişli
+     * görüntü veriyor. flush_cb'de
+     *     panel_x            = 171 - y2
+     *     panel_x + panel_w-1 = 171 - y1
+     * olduğu için `y2`nin TEK, `y1`in ÇİFT olması hizayı garantiliyor. */
+    alan->y1 &= ~1;
+    alan->y2 |= 1;
+    if (alan->y2 > PB_LCD_H - 1) alan->y2 = PB_LCD_H - 1;
 }
 
 /* LVGL'in zaman tabanı. v9'da makro değil, çalışma anında veriliyor. */

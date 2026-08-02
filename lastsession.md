@@ -2709,7 +2709,7 @@ devam ediyor, değilse `0x2C` + atlama.
 > yenilemede panelin tamamını çizdirir ve `a` demosunda spektrogram şeridini
 > siler. Kirli alan yalnızca **sola** büyütülüyor.
 
-### ⚠ AÇIK KALAN — `a` demosunun spektrogramı
+### (çözüldü) ⚠ AÇIK KALMIŞTI — `a` demosunun spektrogramı
 
 `ui/spectrogram.c` panel satırı `200+k`'ya yazıyor ve her karede LVGL flush'ı
 ile sıra alıyor. LVGL yazınca imleç kayıyor, sonraki spektrogram yazımı imleci
@@ -2718,8 +2718,9 @@ Ardışık kalması da mümkün değil: her itme 2 satır yazıp 1 satır ilerli
 (veri + "şimdi" imleci), yani her karede **1 satır geri** gitmek gerekiyor —
 panel geri gitmeye izin vermiyor.
 
-Bunu `j` testinin sonucu belirliyor (aşağıda). `o`, `d`, `u` ve `pb_lcd_fill`
-şu anki hâliyle doğru; **`a` hâlâ bozuk** ve öyle olduğu biliniyor.
+**ÇÖZÜLDÜ:** `j` ucuz ve görünmez konumlandırmayı doğruladı (aşağıda).
+Spektrogram artık her itmede kendi satırına atlama şeridiyle konumlanıyor;
+2*y piksel, görünür iz yok. Yeniden yapılandırma gerekmedi.
 
 ### ✅ `o` ONAYLANDI — baş belirti KAPANDI (kullanıcı gözle)
 
@@ -2747,32 +2748,67 @@ yuvarlıyor.** `CASET(66,66)` fiilen `66..67` oluyor → 300 piksel 300 değil
 için beyaz kare zeminle dişleşip **noktalı** çıkıyor. Bu, QSPI AXS15231B/SH8601
 panellerinde bilinen bir kısıt.
 
-### 🔵 SIRADAKİ ADIM — `j` (yenilendi): 2 piksel hizalı atlama (GÖZ GEREKİR)
+### ✅ `j` SONUÇLANDI — 2 piksel hizalama doğrulandı, UCUZ KONUMLANDIRMA VAR
 
-`python tools/capture_wav.py --port COM13 --cmd j` — üç adım, mimariyi
-belirleyen tek soru: **sütun penceresi daraltılırsa satır daha ucuza
-ilerletilebilir mi, ve pencere yeniden genişleyince satır korunur mu?**
+> **"1 ve 2 ortada ve düz, 3 de ortada değil tam sola yakın ve çizgili,
+> 4 de ortada ve düz, ayrıca kırmızı blok var sol taraftan ortadaki beyaz
+> kareye kadar geniş."**
 
-Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor. Pencere 1 piksel
-genişse `y` satır ilerletmek `172*y` yerine **`y`** piksele mal olur.
+| Adım | Atlama penceresi | Sonuç |
+|---|---|---|
+| 1 | `66..67` (2 px, x1 çift / x2 tek) | ✅ ortada + düz |
+| 2 | `0..1` (2 px, başka sütun) | ✅ ortada + düz |
+| 3 | `66..66` (1 px) | ❌ yarı yolda + çizgili |
+| 4 | kontrol: geniş atlama | ✅ ortada + düz, geniş kırmızı blok |
 
-| Adım | Atlama penceresi | Yazılan | Beklenen (hipotez doğruysa) |
-|---|---|---|---|
-| 1 | `66..67` (2 px, x1 çift / x2 tek) | 600 px | ortada + **düz** kare, ince kırmızı çizgi |
-| 2 | `0..1` (2 px, başka sütun) | 600 px | ortada + düz kare, çizgi kenarda |
-| 3 | `66..66` (1 px — ilk turdaki hâl) | 300 px | yarı yolda + noktalı (karşılaştırma) |
-| 4 | kontrol: geniş atlama (`z[4]`) | 300×40 px | ortada + geniş kırmızı blok |
+Hipotez birebir tuttu: **panel sütun aralığını 2 piksele yuvarlıyor.**
+1 piksellik pencere fiilen 2 piksele genişliyor, dolayısıyla hem satır yarı
+yolda kalıyor (300 yerine 150) hem de sonraki yazma bir piksel kaymış hizadan
+devam edip dişli görüntü veriyor.
 
-Her adım için üç şey soruluyor: kare **ortada mı**, **düz mü noktalı mı**,
-kırmızı **ince mi geniş mi**.
+**Sürücünün dayandığı sözleşme — üç kural:**
 
-- **[1] ortada ve DÜZ** → panel sütunu 2'ye yuvarlıyor, ucuz konumlandırma
-  var: `y` satır ilerletmek `2*y` piksel. `pb_lcd_blit` genel amaçlı kalır,
-  spektrogram ile LVGL aynı ekranda yaşar, `a` demosu düzelir.
-- **[1] hâlâ noktalı/kayık** → dar pencere yolu ölü. Panel yalnızca yukarıdan
-  aşağı **tek geçiş** çizime izin veriyor; `a`'nın kart + şerit düzeni buna
-  göre yeniden kurulacak (LVGL'e dar bir ekran verip spektrogramı ayrı sütun
-  bandına almak gibi).
+1. Sütun penceresi HER ZAMAN `x1` çift, `x2` tek olmalı.
+2. `CASET` satırı sıfırlamıyor; `RAMWRC` pencere değişse bile satırı koruyor.
+3. Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor → **2 piksellik
+   pencerede `y` satır ilerletmek `2*y` piksel** (tam genişlikte `172*y`).
+
+### ✅ SÜRÜCÜ TAMAMLANDI — konumlandırma genel amaçlı VE görünmez
+
+`pb_lcd_blit` yeniden rastgele erişimli: imleç hedef satırdaysa `0x3C` ile
+bedava, değilse **atlama şeridi** üzerinden konumlanıyor.
+
+**Atlama şeridi ([lcd_blit.c](src/hal/display/lcd_blit.c)):** konumlandırma
+panelin 0. ve 1. sütununu kullanıyor. Ham hâliyle bu o iki sütunu silerdi;
+onun yerine iki sütunun **gerçek içeriği** RAM'de tutuluyor (`s_serit`,
+640×2×2 = **2.560 bayt**) ve atlarken aynısı geri yazılıyor. Atlama böylece
+**tamamen görünmez** ve ekrandan tek piksel bile feda edilmiyor.
+
+> Alternatifi iki sütunu arayüzden düşürmekti (172 → 170). O da ölçülmüş yön
+> eşlemesini (§9b), spektrogram bant sayısını ve dokunmatik eşlemesini baştan
+> kurmayı gerektirirdi. 2,5 KB daha ucuz.
+
+| Bedel | Değer |
+|---|---|
+| konumlandırma | `2*y` piksel — en kötü 1.280 px = 2,5 KB ≈ **137 µs** |
+| ardışık çizim | **0** (imleç tutuyorsa `0x3C`) |
+| RAM | 2.560 bayt |
+| görünür iz | **yok** |
+
+Hizalama iki yerde garanti altına alındı: `pb_lcd_blit`/`_strided` pencereyi
+kendisi hizalıyor (kenar pikselini kopyalayarak), LVGL tarafında ise
+`alan_yuvarla` kirli alanın `y1`ini çifte, `y2`sini teke yuvarlıyor — böylece
+`panel_x` çift, `panel_x+panel_w-1` tek çıkıyor ve dolgu hiç devreye girmiyor.
+
+`a` ve `u` demoları artık `pb_lcd_fill` ile başlıyor: şeridi bilinen hâle
+getiriyor. Teşhis komutları (`z`, `j`, `v`, `y`) şeridi geçersiz kılıyor;
+geçersizken atlama siyah yazar, o yüzden demolar kendi zeminini kuruyor.
+
+**Ölçüldü:** `--cmd m` 63 kare/s, kayıp 0 — ses hattı etkilenmedi.
+bss 295.892 (şerit dahil).
+
+**Kalan tek doğrulama:** `a` ve `u` demolarına gözle bakmak (§9n'in kapanış
+ölçütü). `o` zaten onaylandı.
 
 ### Çözüm tasarımı — `z` doğrularsa (yapıldı, yukarıda)
 

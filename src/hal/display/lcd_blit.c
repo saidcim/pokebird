@@ -11,24 +11,47 @@ static uint16_t s_row[PB_PANEL_W];
 
 /* ── Panelin yazma imleci ─────────────────────────────────────────────────
  *
- * Bu panel RASET'i (0x2B) YOK SAYIYOR — kartta ölçüldü, `z` komutu,
- * lastsession.md §9n. Satır konumunu yalnızca iki şey belirliyor:
+ * Bu panelde RASET (0x2B) YOK SAYILIYOR — kartta ölçüldü (`z`), §9n.
+ * Satır konumunu yalnızca iki komut belirliyor:
  *   0x2C RAMWR   -> imleç sütun penceresinin EN ÜST satırına döner
  *   0x3C RAMWRC  -> imleç bir önceki yazmanın bittiği yerden DEVAM eder
+ * Sütun aralığı CASET (0x2A) ile ayarlanıyor ve o çalışıyor.
  *
- * Dolayısıyla y>0 olan bir dikdörtgene yazmanın tek yolu ya imlecin zaten
- * orada olması (RAMWRC, bedava) ya da yukarısını atlama verisiyle geçmek
- * (RAMWR + atlama, ÜZERİNE YAZAR). İmleci burada takip ediyoruz ki ardışık
- * yazımlar — LVGL'in yukarıdan aşağı flush'ı, spektrogramın kayan sütunu —
- * atlama bedeli ödemesin.
+ * Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor. Pencere
+ * DARALTILIRSA satır daha ucuza ilerletilebiliyor ve pencere yeniden
+ * genişletilip RAMWRC ile devam edildiğinde satır KORUNUYOR (`j` ile
+ * ölçüldü). Konumlandırma bu yüzden ucuz: y satır ilerletmek 2*y piksel.
  *
- * İmleç yalnızca bu dosyadan yapılan yazımları biliyor. Panele başka bir
- * yerden komut yollayan her kod (teşhis komutları) `pb_lcd_imlec_gecersiz()`
- * çağırmak zorunda. */
+ * ⚠ 2 PİKSEL HİZALAMA: panel sütun aralığını 2 piksele yuvarlıyor. `j`
+ * ölçtü — 1 piksellik pencere (66..66) fiilen 66..67 oluyor, 300 piksel
+ * 300 değil 150 satır ilerletiyor ve sonraki yazma bir piksel kaymış hizadan
+ * devam ederek dişli/noktalı çıkıyor. Bu yüzden HER pencere x1 çift, x2 tek
+ * olacak şekilde genişletiliyor. */
 static bool     s_imlec_gecerli = false;
 static uint32_t s_imlec_x1, s_imlec_x2, s_imlec_satir;
 
-void pb_lcd_imlec_gecersiz(void) { s_imlec_gecerli = false; }
+/* ── Atlama şeridi ────────────────────────────────────────────────────────
+ *
+ * Konumlandırma panelin 0. ve 1. sütununu kullanıyor: oraya y satır kadar
+ * veri yazılıyor ki imleç y'ye gelsin. Ham hâliyle bu, o iki sütunu
+ * SİLERDİ. Onun yerine iki sütunun GERÇEK içeriğini burada tutuyoruz ve
+ * atlarken aynısını geri yazıyoruz — atlama böylece tamamen GÖRÜNMEZ oluyor
+ * ve ekrandan tek piksel bile feda edilmiyor.
+ *
+ * Bedeli 640*2*2 = 2.560 bayt. Alternatifi iki sütunu arayüzden düşürmekti
+ * (172 -> 170), o da ölçülmüş yön eşlemesini ve spektrogram bantlarını
+ * baştan kurmayı gerektirirdi.
+ *
+ * Panele bu dosyanın dışından yazan her kod şeridi geçersiz kılıyor; şerit
+ * geçersizken atlama siyah yazar (yalnızca teşhis komutlarından sonra olur,
+ * uygulama zaten ardından yeniden çiziyor). */
+static uint16_t s_serit[PB_PANEL_H][2];      /* big-endian, panele gittiği hâliyle */
+static bool     s_serit_gecerli = false;
+
+void pb_lcd_imlec_gecersiz(void) {
+    s_imlec_gecerli = false;
+    s_serit_gecerli = false;
+}
 
 static void caset_ic(uint32_t x1, uint32_t x2) {
     QSPI_Select(qspi);
@@ -46,18 +69,18 @@ static void akis_basla_ic(uint8_t ramwr) {
     channel_config_set_dreq(&c, pio_get_dreq(qspi.pio, qspi.sm, true));
 }
 
-/* Dışarıya açık hâlleri imleci KENDİLİĞİNDEN geçersiz kılıyor. Teşhis
- * komutları paneli elle sürüyor; her çağrı yerinde geçersiz kılmayı
+/* Dışarıya açık hâlleri imleci ve şeridi KENDİLİĞİNDEN geçersiz kılıyor.
+ * Teşhis komutları paneli elle sürüyor; her çağrı yerinde geçersiz kılmayı
  * hatırlamak zorunda kalmak sessiz hataya davetiyeydi (bir sonraki blit
  * imlecin yanlış yerde olduğunu bilmeden RAMWRC ile devam ederdi). */
 void pb_lcd_sutun_penceresi(uint32_t x1, uint32_t x2) {
     caset_ic(x1, x2);
-    s_imlec_gecerli = false;
+    pb_lcd_imlec_gecersiz();
 }
 
 void pb_lcd_akis_basla(uint8_t ramwr) {
     akis_basla_ic(ramwr);
-    s_imlec_gecerli = false;
+    pb_lcd_imlec_gecersiz();
 }
 
 /** s_row'daki n pikseli (zaten bayt sırası çevrilmiş) panele DMA ile yaz. */
@@ -95,29 +118,78 @@ void pb_lcd_akis_bitir(void) {
 }
 
 /**
- * İmleci (x, y) satırına getir ve akışı başlat (CS aşağıda döner).
+ * İmleci `y` satırına getir — 0. ve 1. sütunu kullanarak, GÖRÜNMEZ biçimde.
  *
- * İmleç zaten oradaysa RAMWRC ile bedava devam eder. Değilse RAMWR'den
- * başlayıp aradaki y satırı `atlama_renk` ile geçer — **bu, o sütun
- * aralığında y satırın ÜZERİNE YAZAR.** Bilinçli bir bedel: panel başka
- * türlü konumlandırmayı desteklemiyor.
+ * Pencere 2 piksel olduğu için y satır ilerletmek 2*y piksele mal oluyor
+ * (tam genişlikte 172*y olurdu). Yazılan veri şeridin gerçek içeriği,
+ * dolayısıyla ekranda hiçbir şey değişmiyor.
  */
-static void imleci_konumla(uint32_t x, uint32_t y, uint32_t w, uint16_t atlama_renk) {
-    if (s_imlec_gecerli && s_imlec_x1 == x && s_imlec_x2 == x + w - 1 &&
-        s_imlec_satir == y) {
-        akis_basla_ic(0x3C);                     /* RAMWRC — atlama yok */
-        return;
+static void serit_ile_atla(uint32_t y) {
+    caset_ic(0, 1);
+    akis_basla_ic(0x2C);                        /* satır 0 */
+
+    const uint32_t satir_basi = PB_PANEL_W / 2; /* s_row'a sığan satır sayısı */
+    uint32_t yazilan = 0;
+    while (yazilan < y) {
+        uint32_t n = y - yazilan;
+        if (n > satir_basi) n = satir_basi;
+        for (uint32_t r = 0; r < n; r++) {
+            s_row[2 * r]     = s_serit_gecerli ? s_serit[yazilan + r][0] : 0;
+            s_row[2 * r + 1] = s_serit_gecerli ? s_serit[yazilan + r][1] : 0;
+        }
+        satiri_gonder(n * 2);
+        yazilan += n;
     }
-    caset_ic(x, x + w - 1);
-    akis_basla_ic(0x2C);                         /* RAMWR — satır 0 */
-    if (y) pb_lcd_akis_renk(atlama_renk, y * w);
+    pb_lcd_akis_bitir();
 }
 
-static void imleci_isaretle(uint32_t x, uint32_t w, uint32_t satir) {
+/**
+ * İmleci (hizalanmış pencere x1..x2, satır y) konumuna getir ve akışı
+ * başlat (CS aşağıda döner).
+ */
+static void imleci_konumla(uint32_t x1, uint32_t x2, uint32_t y) {
+    if (s_imlec_gecerli && s_imlec_x1 == x1 && s_imlec_x2 == x2 &&
+        s_imlec_satir == y) {
+        akis_basla_ic(0x3C);                    /* RAMWRC — hiç bedeli yok */
+        return;
+    }
+    if (y == 0) {
+        caset_ic(x1, x2);
+        akis_basla_ic(0x2C);
+        return;
+    }
+    serit_ile_atla(y);                          /* imleç -> satır y */
+    caset_ic(x1, x2);
+    akis_basla_ic(0x3C);                        /* satırı koruyarak devam */
+}
+
+static void imleci_isaretle(uint32_t x1, uint32_t x2, uint32_t satir) {
     s_imlec_gecerli = true;
-    s_imlec_x1 = x;
-    s_imlec_x2 = x + w - 1;
+    s_imlec_x1 = x1;
+    s_imlec_x2 = x2;
     s_imlec_satir = satir;
+}
+
+/** s_row'un ilk iki pikseli panelin 0/1 sütunuysa şeridi güncelle. */
+static inline void seridi_guncelle(uint32_t x1, uint32_t satir) {
+    if (x1 == 0 && satir < PB_PANEL_H) {
+        s_serit[satir][0] = s_row[0];
+        s_serit[satir][1] = s_row[1];
+    }
+}
+
+/**
+ * Pencereyi 2 piksele hizala. Dönen aralık x1 çift, x2 tek.
+ * `sol` ve `sag`: kaç piksellik kenar dolgusu gerektiği (0 veya 1).
+ */
+static void pencereyi_hizala(uint32_t x, uint32_t w,
+                             uint32_t *x1, uint32_t *x2,
+                             uint32_t *sol, uint32_t *sag) {
+    *x1 = x & ~1u;
+    *x2 = (x + w - 1) | 1u;
+    if (*x2 >= PB_PANEL_W) *x2 = PB_PANEL_W - 1;   /* 171 zaten tek */
+    *sol = x - *x1;
+    *sag = *x2 - (x + w - 1);
 }
 
 void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
@@ -127,14 +199,28 @@ void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
     if (x + w > PB_PANEL_W) w = PB_PANEL_W - x;
     if (y + h > PB_PANEL_H) h = PB_PANEL_H - y;
 
-    imleci_konumla(x, y, w, 0x0000);
+    uint32_t x1, x2, sol, sag;
+    pencereyi_hizala(x, w, &x1, &x2, &sol, &sag);
+    const uint32_t pw = x2 - x1 + 1;
+
+    imleci_konumla(x1, x2, y);
 
     for (uint32_t row = 0; row < h; row++) {
-        pb_lcd_akis_satir(buf + (size_t)row * w, w);
+        const uint16_t *src = buf + (size_t)row * w;
+        for (uint32_t i = 0; i < w; i++) {
+            s_row[sol + i] = (uint16_t)((src[i] >> 8) | (src[i] << 8));
+        }
+        /* Hizalama dolgusu: kenar pikseli kopyalanıyor. Hizalı çağrılarda
+         * (LVGL dahil, bkz. lv_port.c'deki alan_yuvarla) hiç çalışmaz. */
+        if (sol) s_row[0] = s_row[1];
+        if (sag) s_row[pw - 1] = s_row[pw - 2];
+
+        seridi_guncelle(x1, y + row);
+        satiri_gonder(pw);
     }
 
     pb_lcd_akis_bitir();
-    imleci_isaretle(x, w, y + h);
+    imleci_isaretle(x1, x2, y + h);
 }
 
 void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
@@ -146,19 +232,27 @@ void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
      * bilmeden yapmak sessiz hataya davetiye. Sınır dışı istek reddedilir. */
     if (x + w > PB_PANEL_W || y + h > PB_PANEL_H) return;
 
-    imleci_konumla(x, y, w, 0x0000);
+    uint32_t x1, x2, sol, sag;
+    pencereyi_hizala(x, w, &x1, &x2, &sol, &sag);
+    const uint32_t pw = x2 - x1 + 1;
+
+    imleci_konumla(x1, x2, y);
 
     for (uint32_t row = 0; row < h; row++) {
         const uint16_t *src = buf + (int32_t)row * row_step;
         for (uint32_t i = 0; i < w; i++) {
             uint16_t px = src[(int32_t)i * col_step];
-            s_row[i] = (uint16_t)((px >> 8) | (px << 8));
+            s_row[sol + i] = (uint16_t)((px >> 8) | (px << 8));
         }
-        satiri_gonder(w);
+        if (sol) s_row[0] = s_row[1];
+        if (sag) s_row[pw - 1] = s_row[pw - 2];
+
+        seridi_guncelle(x1, y + row);
+        satiri_gonder(pw);
     }
 
     pb_lcd_akis_bitir();
-    imleci_isaretle(x, w, y + h);
+    imleci_isaretle(x1, x2, y + h);
 }
 
 void pb_lcd_fill(uint16_t color) {
@@ -169,7 +263,11 @@ void pb_lcd_fill(uint16_t color) {
     akis_basla_ic(0x2C);
     pb_lcd_akis_renk(color, (uint32_t)PB_PANEL_W * PB_PANEL_H);
     pb_lcd_akis_bitir();
-    imleci_isaretle(0, PB_PANEL_W, PB_PANEL_H);
+
+    const uint16_t be = (uint16_t)((color >> 8) | (color << 8));
+    for (uint32_t r = 0; r < PB_PANEL_H; r++) { s_serit[r][0] = be; s_serit[r][1] = be; }
+    s_serit_gecerli = true;
+    imleci_isaretle(0, PB_PANEL_W - 1, PB_PANEL_H);
 }
 
 void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel) {
