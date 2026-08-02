@@ -2810,6 +2810,47 @@ bss 295.892 (şerit dahil).
 **Kalan tek doğrulama:** `a` ve `u` demolarına gözle bakmak (§9n'in kapanış
 ölçütü). `o` zaten onaylandı.
 
+### ⛔ KALAN: LVGL yazısı — rsvp NEDEN bozulmuyor (kaynağa bakıldı)
+
+Sürücü rsvpnano'nun tekniğine çevrildi (dikdörtgen satır satır değil, bitişik
+yığında **tek DMA** — `pushColors` ile birebir). **Yazı yine bozuk.** Yani
+fark DMA'nın parçalanmasında değildi.
+
+Kaynağa bakınca gerçek sebep çıktı ve bu bir sürücü ayrıntısı değil:
+
+```cpp
+// rsvpnano DisplayManager::flushScaledFrame — ~20 ekranin HEPSI bunu kullaniyor
+drawBitmap(0, nativeYStart, kPanelNativeWidth, nativeYStart + nativeRows, txBuffer_);
+//         ^x=0             ^genislik = 172 = TAM GENISLIK
+```
+
+**rsvpnano yazı için dar sütun bandı HİÇ yazmıyor.** Her ekran, RAM'deki
+framebuffer'dan (`virtualFrame_`) **tam genişlikte satır bantları** hâlinde
+yeniden basılıyor. Dar bantlı varyant (`flushFullWidthLogicalBand`) var ama
+yalnızca 2 çağrı yerinde (ticker hızlı yolu).
+
+İkisi de aynı panel, aynı PIO programı, aynı `clkdiv 2.0`, aynı MADCTL `0x00`
+/ COLMOD `0x55`, aynı CASET + RAMWR/RAMWRC. Ayrılan tek şey:
+
+| | rsvpnano | bizde |
+|---|---|---|
+| kaynak | tam framebuffer | yok (bilerek, 220 KB — plan §5) |
+| flush geometrisi | **her zaman tam genişlik (172)** | LVGL'in kirli dikdörtgeni → **dar sütun bandı** |
+| sonuç | yazı temiz | dar bantta satır başına kayma |
+
+**Ölçülmüş kısıt (§9n'in özeti):** bu panelde tam genişlikte (172 sütun)
+yazma DÜZ; dar sütun bandına ÇOK SATIRLI yazma KAYIYOR; tek satırlık yazma
+düz (spektrogram bu yüzden çalışıyor). Düz renk her durumda düz görünür —
+eski testlerin hepsi bu yüzden kördü.
+
+### 🔵 SIRADAKİ — üç seçenek
+
+| | Ne | RAM | Risk |
+|---|---|---|---|
+| A | LVGL'e paneli dikey (172x640) tanıtıp `lv_display_set_rotation(90)`: LVGL'in parçaları yapısı gereği tam genişlik olur | ~0 | orta (LVGL 9.3 SW döndürme + partial doğrulanmalı; geometri sayaçlarla GÖZSÜZ doğrulanabilir — her flush'ta `panel_w` 172 olmalı) |
+| B | rsvp'nin birebir yolu: kart bölgesi (ui x 0..199) için 200x172 framebuffer, tam genişlik bantlarla bas | +68,8 KB (bss 305 → ~374) | düşük (ölçülmüş düz geometri) |
+| C | Kartı LVGL'siz, kendi bitmap fontumuzla tam genişlik satırlarla çiz | 0 | düşük, ama yazı tipi işi bize kalır |
+
 ### Çözüm tasarımı — `z` doğrularsa (yapıldı, yukarıda)
 
 `pb_lcd_blit(x, y, w, h)` artık RASET'e güvenemez. İki seçenek:
