@@ -2843,7 +2843,41 @@ yazma DÜZ; dar sütun bandına ÇOK SATIRLI yazma KAYIYOR; tek satırlık yazma
 düz (spektrogram bu yüzden çalışıyor). Düz renk her durumda düz görünür —
 eski testlerin hepsi bu yüzden kördü.
 
-### 🔵 SIRADAKİ — üç seçenek
+### ✅ SEÇİLEN: B — kart framebuffer'ı, panele HER ZAMAN tam genişlik
+
+`lv_port.c` rsvpnano'nun geometrisine geçirildi:
+
+```
+LVGL (200x172 kart ekrani)
+   -> flush_cb: kirli dikdortgeni PANEL yonundeki framebuffer'a isle (devrik, CPU)
+   -> panele TAM GENISLIKTE (0..171) satir bandi bas   <- kaymayan geometri
+```
+
+- `s_kart_fb[200][172]` = **68.800 bayt**. Tam ekran framebuffer'ı (640x172 =
+  220 KB, plan §5'te reddedilen) DEĞİL; yalnızca kart. Yerleşim panel
+  yöneliminde tutuluyor, o yüzden basarken devrik alma/adımlı okuma yok —
+  bir satır bandı doğrudan bitişik.
+- LVGL ekranı 640x172 → **200x172**'ye daraldı (kart zaten arayüzün ilk 200
+  sütunuydu; spektrogram panel satırı 200..639'da ve LVGL oraya hiç
+  dokunmuyor). Çizim tamponu da kendiliğinden küçüldü: 25,6 KB → **8 KB**.
+- `alan_yuvarla` **kaldırıldı** — gerekmiyor: tam genişlik tanımı gereği
+  hizalı ve kaymayan geometri. LVGL'in kirli dikdörtgeni serbest, gereksiz
+  yeniden çizim de yok.
+- `pb_lcd_blit_strided` artık LVGL yolunda kullanılmıyor (devrik işleme
+  flush_cb'de yapılıyor); fonksiyon duruyor.
+
+**Bellek:** bss 304.820 → **356.020** (520 KB SRAM'de ~164 KB pay).
+
+**Ölçüldü (göz gerekmedi):** `--cmd a` 63 kare/s kayıp 0 · `--cmd x` 8/8
+pencere BİREBİR aynı, logit farkı 0, çıkarım 189 ms — ekran değişikliği ne
+ses hattına ne modele dokundu.
+
+> ⚠ `a`/`u` çıkışındaki **`HIZASIZ` sayacı artık anlamsız**: eski dar-pencere
+> hizalamasını ölçüyordu, o yol artık kullanılmıyor. Panele giden pencere her
+> zaman 0..171. Sayaç kafa karıştırmasın diye ya kaldırılmalı ya da
+> "tam genişlik dışına çıkan flush" sayacına çevrilmeli.
+
+### (geçersiz kaldı) üç seçenek
 
 | | Ne | RAM | Risk |
 |---|---|---|---|

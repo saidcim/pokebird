@@ -9,19 +9,42 @@
 #include "hal/display/lcd_blit.h"
 #include "hal/touch.h"
 
-/* ── Çizim tamponu ────────────────────────────────────────────────────────
- * Kısmi (partial) render: LVGL ekranı yatay şeritler hâlinde çiziyor ve her
- * şeridi flush_cb'ye veriyor. TAM FRAMEBUFFER YOK — 640x172 RGB565 220 KB
- * ederdi, 520 KB SRAM'in %42'si (plan §5).
+/* ── Kart bölgesi ve framebuffer'ı — rsvpnano'nun geometrisi ──────────────
  *
- * Plan §M2b iki tampon öngörüyordu (2 x 640x10 = 25.6 KB). TEK tampon
- * kullanıyoruz, aynı bütçeyle iki katı yükseklikte: flush'ımız bloklayan
- * DMA ile çalışıp hemen `flush_ready` diyor, dolayısıyla ikinci tampon
- * hiçbir zaman paralel çizim sağlamaz — sadece şerit sayısını iki katına
- * çıkarırdı. Aynı 25 KB'ı tek parça kullanmak flush çağrısını yarıya
- * indiriyor.                                                              */
+ * ÖLÇÜLMÜŞ KISIT (§9n): bu panelde panele **tam genişlikte** (172 sütun)
+ * yazmak DÜZ çalışıyor; **dar sütun bandına çok satırlı** yazmak satır başına
+ * KAYIYOR. LVGL ise kirli dikdörtgen veriyor ve yatay arayüzde kirli bir
+ * dikdörtgen tam olarak dar sütun bandına düşüyor — yazının bozuk
+ * görünmesinin sebebi buydu.
+ *
+ * Çalışan referans (rsvpnano) bu tuzağa hiç düşmüyor çünkü panele HER ZAMAN
+ * tam genişlikte satır bantları basıyor:
+ *
+ *     // DisplayManager::flushScaledFrame — orada ~20 ekranin hepsi boyle
+ *     drawBitmap(0, nativeYStart, kPanelNativeWidth, nativeYStart + rows, txBuffer_);
+ *
+ * Bunu yapabilmesinin bedeli bir framebuffer. Aynısını burada YALNIZCA KART
+ * BÖLGESİ için ödüyoruz: kart arayüzün ilk 200 sütunu (= panel satırı
+ * 0..199), spektrogram panel satırı 200..639'da ve LVGL oraya hiç dokunmuyor.
+ *
+ *     200 x 172 x 2 = 68.800 bayt
+ *
+ * Tam ekran framebuffer'ı (640x172 = 220 KB, plan §5'te reddedilen) DEĞİL;
+ * yalnızca kartın kendisi. Yerleşim PANEL yöneliminde tutuluyor
+ * (`[panel satırı][panel sütunu]`), böylece panele basarken devrik alma ya da
+ * adımlı okuma gerekmiyor: bir satır bandı doğrudan bitişik. */
+#define PB_LV_W  200                    /* arayüz genişliği = panel satırı 0..199 */
+#define PB_LV_H  PB_LCD_H               /* arayüz yüksekliği = panel sütunu, 172 */
+
+static uint16_t s_kart_fb[PB_LV_W][PB_PANEL_W];
+
+/* ── Çizim tamponu ────────────────────────────────────────────────────────
+ * Kısmi (partial) render: LVGL kartı şeritler hâlinde çiziyor ve her şeridi
+ * flush_cb'ye veriyor. Ekran 200 sütuna daraldığı için tampon da küçüldü
+ * (640x20 = 25,6 KB → 200x20 = 8 KB); framebuffer'ın maliyetinin bir kısmını
+ * bu geri kazandırıyor. */
 #define LV_STRIP_H  20
-static uint16_t s_draw_buf[PB_LCD_W * LV_STRIP_H];
+static uint16_t s_draw_buf[PB_LV_W * LV_STRIP_H];
 
 /* ── Yön çevrimi ──────────────────────────────────────────────────────────
  * Kartta ölçüldü (`o` komutu). Cihaz USB soketi SAĞDA, yatay tutuluyor:
@@ -118,10 +141,19 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
         printf("#DOKUM-SON\n");
     }
 
-    pb_lcd_blit_strided(panel_x, panel_y, panel_w, panel_h,
-                        src + (size_t)(y2 - y1) * satir_adimi,
-                        -satir_adimi,   /* sütun adımı: bir ui satırı geri */
-                        1);             /* satır adımı: bir ui sütunu ileri */
+    /* 1) Kirli dikdörtgeni framebuffer'a işle (devrik, CPU ile).
+     *    piksel(panel satırı r, panel sütunu c) = src[(y2-y1-c)*adım + r] */
+    for (uint32_t r = 0; r < panel_h; r++) {
+        uint16_t *dst = &s_kart_fb[panel_y + r][0];
+        for (uint32_t c = 0; c < panel_w; c++) {
+            dst[panel_x + c] = src[(size_t)(y2 - y1 - c) * satir_adimi + r];
+        }
+    }
+
+    /* 2) Panele HER ZAMAN TAM GENİŞLİKTE bas — kayma yalnızca dar sütun
+     *    bandında oluyor (§9n, `S` ile ölçüldü). Framebuffer satırları
+     *    zaten 172 piksel ve bitişik, o yüzden bu düz bir blit. */
+    pb_lcd_blit(0, panel_y, PB_PANEL_W, panel_h, &s_kart_fb[panel_y][0]);
 
     lv_display_flush_ready(disp);
 }
@@ -147,12 +179,12 @@ static void indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     int32_t ux = (int32_t)st.p.raw_x;
     int32_t uy = (int32_t)st.p.raw_y;
 
-    if (ux > PB_LCD_W - 1) ux = PB_LCD_W - 1;
-    if (uy > PB_LCD_H - 1) uy = PB_LCD_H - 1;
+    if (ux > PB_LV_W - 1) ux = PB_LV_W - 1;
+    if (uy > PB_LV_H - 1) uy = PB_LV_H - 1;
 
 #if PB_TOUCH_AYNALA
-    ux = (PB_LCD_W - 1) - ux;
-    uy = (PB_LCD_H - 1) - uy;
+    ux = (PB_LV_W - 1) - ux;
+    uy = (PB_LV_H - 1) - uy;
 #endif
 
     data->point.x = ux;
@@ -160,36 +192,11 @@ static void indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     data->state = LV_INDEV_STATE_PRESSED;
 }
 
-/* ── Kirli alanı arayüzün SOL KENARINA yay ────────────────────────────────
- *
- * Panel RASET'i (0x2B) yok sayıyor (§9n): bir yazma ancak sütun penceresinin
- * EN ÜST satırından (RAMWR) ya da imlecin durduğu yerden (RAMWRC)
- * başlayabiliyor. Ara satırlara gitmenin tek yolu üzerini yazmak.
- *
- * `flush_cb`'de panel_y = area->x1. `x1`i 0'a sabitlemek panel_y'yi HER
- * ZAMAN 0 yapıyor: her flush RAMWR ile sütun penceresinin tepesinden başlar,
- * atlama bedeli de üzerine yazma da olmaz.
- *
- * `x2`ye DOKUNMUYORUZ — bilerek. Onu da tam genişliğe çekmek LVGL'e her
- * yenilemede panelin tamamını çizdirir ve `a` demosunda spektrogram şeridini
- * (arayüz x 200..639) siler. Kirli alan yalnızca sola doğru büyütülüyor. */
-static void alan_yuvarla(lv_event_t *e)
-{
-    lv_area_t *alan = (lv_area_t *)lv_event_get_param(e);
-    if (!alan) return;
-
-    alan->x1 = 0;
-
-    /* Panel sütun aralığını 2 piksele hizala. Panel CASET'i 2'ye yuvarlıyor
-     * (`j` ile ölçüldü); hizasız pencere veriyi bir piksel kaydırıp dişli
-     * görüntü veriyor. flush_cb'de
-     *     panel_x            = 171 - y2
-     *     panel_x + panel_w-1 = 171 - y1
-     * olduğu için `y2`nin TEK, `y1`in ÇİFT olması hizayı garantiliyor. */
-    alan->y1 &= ~1;
-    alan->y2 |= 1;
-    if (alan->y2 > PB_LCD_H - 1) alan->y2 = PB_LCD_H - 1;
-}
+/* NOT: eskiden burada bir `alan_yuvarla` vardı — kirli alanı sola yayıp
+ * panel sütun aralığını 2 piksele hizalıyordu. Artık GEREKMİYOR: panele her
+ * zaman tam genişlikte (0..171) basıyoruz, o da tanımı gereği hizalı ve
+ * kaymayan geometri. LVGL'in kirli dikdörtgeni serbest bırakıldı, böylece
+ * gereksiz yeniden çizim de yok. */
 
 /* LVGL'in zaman tabanı. v9'da makro değil, çalışma anında veriliyor. */
 static uint32_t tick_cb(void)
@@ -209,9 +216,8 @@ bool pb_lv_init(void)
     lv_init();
     lv_tick_set_cb(tick_cb);
 
-    lv_display_t *disp = lv_display_create(PB_LCD_W, PB_LCD_H);
+    lv_display_t *disp = lv_display_create(PB_LV_W, PB_LV_H);
     lv_display_set_flush_cb(disp, flush_cb);
-    lv_display_add_event_cb(disp, alan_yuvarla, LV_EVENT_INVALIDATE_AREA, NULL);
     lv_display_set_buffers(disp, s_draw_buf, NULL, sizeof(s_draw_buf),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
