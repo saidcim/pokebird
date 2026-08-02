@@ -28,6 +28,41 @@
 ******************************************************************************/
 #include "qspi_pio.h"
 #include "pico/stdlib.h"
+#include "hardware/timer.h"
+
+/* POKEBIRD teshis sayaclari — bkz. lastsession.md §9n.
+ *
+ * QSPI_WaitIdle'in 50 ms'lik zaman asimi SESSIZ: zaman asimina girerse
+ * hicbir sey beklemeden doner ve §5.9'un hatasi geri gelir (CS, veri hatta
+ * cikmadan yukselir). "Bekleme gercekten calisiyor mu" sorusunu ekrana
+ * bakmadan yanitlayabilmek icin sayiliyor.
+ *
+ * Bedeli: cagri basina bir 32 bit timer okumasi + birkac sayac. `w` komutu
+ * bunlari okuyor; `o`/`a` sonrasi da bakilabilir. */
+volatile uint32_t pb_qspi_wait_cagri;       /* toplam QSPI_WaitIdle cagrisi   */
+volatile uint32_t pb_qspi_wait_asim;        /* zaman asimina giren cagri      */
+volatile uint32_t pb_qspi_wait_sm_kapali;   /* girerken SM etkin degildi      */
+volatile uint32_t pb_qspi_wait_fifo_dolu;   /* girerken TX FIFO bos DEGILDI   */
+volatile uint32_t pb_qspi_wait_kalinti;     /* CIKARKEN FIFO hala bos degil   */
+volatile uint32_t pb_qspi_wait_bekledi;     /* dongu en az bir kez dondu      */
+volatile uint32_t pb_qspi_wait_fifo_azami;  /* girerkenki en yuksek FIFO      */
+volatile uint32_t pb_qspi_wait_donme_azami; /* en cok dongu sayisi (tek cagri)*/
+volatile uint32_t pb_qspi_wait_us_azami;    /* en uzun tek bekleme (us)       */
+volatile uint32_t pb_qspi_wait_us_top;      /* toplam bekleme (us)            */
+
+void pb_qspi_sayaclari_sifirla(void) {
+    pb_qspi_wait_cagri = 0;
+    pb_qspi_wait_asim = 0;
+    pb_qspi_wait_sm_kapali = 0;
+    pb_qspi_wait_fifo_dolu = 0;
+    pb_qspi_wait_kalinti = 0;
+    pb_qspi_wait_bekledi = 0;
+    pb_qspi_wait_fifo_azami = 0;
+    pb_qspi_wait_donme_azami = 0;
+    pb_qspi_wait_us_azami = 0;
+    pb_qspi_wait_us_top = 0;
+}
+
 pio_qspi_t qspi = {
     .pio = pio0,
     .sm = 0,
@@ -92,12 +127,36 @@ Zaman asimi var: SM kapaliysa TXSTALL hic kurulmaz, sonsuz donguye girmeyelim.
 ******************************************************************************/
 void QSPI_WaitIdle(pio_qspi_t qspi){
     const uint32_t stall = 1u << (PIO_FDEBUG_TXSTALL_LSB + qspi.sm);
+
+    /* --- TESHIS (§9n) — fonksiyon gercekten bekliyor mu? -------------------
+     * Girerken FIFO'da bayt varsa bekleme GEREKLI demektir; cikarken hala
+     * varsa bekleme ISE YARAMAMIS demektir. Ikisi de sayiliyor. */
+    pb_qspi_wait_cagri++;
+    if (!((qspi.pio->ctrl >> qspi.sm) & 1u)) pb_qspi_wait_sm_kapali++;
+    uint32_t giris_fifo = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
+    if (giris_fifo) {
+        pb_qspi_wait_fifo_dolu++;
+        if (giris_fifo > pb_qspi_wait_fifo_azami) pb_qspi_wait_fifo_azami = giris_fifo;
+    }
+    uint32_t t0 = timer_hw->timerawl;
+    uint32_t donme = 0;
+
     qspi.pio->fdebug = stall;                       /* bayragi temizle */
     absolute_time_t bitis = make_timeout_time_ms(50);
     while (!(qspi.pio->fdebug & stall)) {
-        if (time_reached(bitis)) return;            /* SM kapali/tikali */
+        if (time_reached(bitis)) { pb_qspi_wait_asim++; break; }  /* SM kapali/tikali */
+        donme++;
         tight_loop_contents();
     }
+
+    uint32_t us = timer_hw->timerawl - t0;
+    pb_qspi_wait_us_top += us;
+    if (us > pb_qspi_wait_us_azami) pb_qspi_wait_us_azami = us;
+    if (donme) {
+        pb_qspi_wait_bekledi++;
+        if (donme > pb_qspi_wait_donme_azami) pb_qspi_wait_donme_azami = donme;
+    }
+    if (!pio_sm_is_tx_fifo_empty(qspi.pio, qspi.sm)) pb_qspi_wait_kalinti++;
 }
 
 /******************************************************************************
@@ -118,8 +177,16 @@ function : QSPI PIO initialization
 parameter:
     qspi : QSPI structure
 ******************************************************************************/	
+/* POKEBIRD: 4 telli programin PIO komut bellegindeki yeri. QSPI_PIO_Restore
+ * bunu kullaniyor — pio_add_program'i TEKRAR cagirmak komut bellegini
+ * tuketir (32 komutluk yer var, her cagri 2 komut daha yakiyor). */
+static uint s_qspi_offset;
+static bool s_qspi_program_yuklu = false;
+
 void QSPI_PIO_Init(pio_qspi_t qspi){
     uint offset = pio_add_program(qspi.pio, &qspi_4wire_data_program);
+    s_qspi_offset = offset;
+    s_qspi_program_yuklu = true;
     qspi_4wire_data_program_init(qspi.pio, qspi.sm_4wire, offset, PIN_SCLK, PIN_DIO0, 4);
 
     // offset = pio_add_program(qspi.pio, &qspi_1write_cmd_program);
@@ -128,6 +195,30 @@ void QSPI_PIO_Init(pio_qspi_t qspi){
 
     pio_sm_set_enabled(qspi.pio, qspi.sm_4wire, false);  
     pio_sm_set_enabled(qspi.pio, qspi.sm_1wire, false);  
+}
+
+/******************************************************************************
+function : QSPI PIO'yu bit-bang testinden sonra geri al  (POKEBIRD eklemesi)
+
+Bit-bang teshisi (cmd_display_test'in 4. varyanti, `v`'nin 6. adimi) SCLK ve
+D0..D3'u gpio_set_function(SIO) ile PIO'nun elinden aliyor ve SM'i kapatiyor.
+Geri vermeyi kimse yapmiyordu: bit-bang'den SONRA calistirilan her ekran testi
+sahte bicimde "bozuk" gorunuyordu (lastsession.md §9n'deki uyari).
+
+pio_add_program'i TEKRAR CAGIRMIYORUZ; yalnizca pin islevleri, SM
+yapilandirmasi ve FIFO'lar sifirlaniyor.
+******************************************************************************/
+void QSPI_PIO_Restore(pio_qspi_t qspi){
+    if (!s_qspi_program_yuklu) { QSPI_PIO_Init(qspi); }
+
+    /* CS yeniden duz GPIO cikisi (bit-bang de oyle birakiyor ama emin olalim) */
+    gpio_init(qspi.pin_cs);
+    gpio_set_dir(qspi.pin_cs, GPIO_OUT);
+    gpio_put(qspi.pin_cs, 1);
+
+    /* Pinleri ve SM'i PIO'ya geri ver; program_init SM'i etkin birakiyor. */
+    qspi_4wire_data_program_init(qspi.pio, qspi.sm_4wire, s_qspi_offset,
+                                 PIN_SCLK, PIN_DIO0, 4);
 }
 
 /******************************************************************************

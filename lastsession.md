@@ -25,6 +25,12 @@ M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
 > Yani hata M6'dan önce de vardı; bu oturumda yalnızca *fark edildi*.
 > Ayrıntı, elenen ihtimaller ve sıradaki adım §9n'de.
 >
+> **Yeni (ölçüldü):** `QSPI_WaitIdle` sağlam, zaman aşımına GİRMİYOR, CS
+> veri hatta çıktıktan sonra yükseliyor — §5.9 geri gelmemiş. Sıradaki iş
+> `y` melez yol testi: pencere komutlarıyla piksel verisini ayrı yollardan
+> yollayıp hangisinin düştüğünü ayırmak. **Göz gerekiyor, kullanıcı
+> çalıştırmalı.**
+>
 > Nasıl gözden kaçmış: §9h'de kullanıcının gözle onayladığı ikili **20 ms**
 > sürümüydü; gönderilen **250 ms** sürümüne hiç bakılmadı ve o oturumun
 > sonundaki *"yeni oturumda ilk iş `--cmd a` ile 10 saniyelik bir bakış
@@ -286,6 +292,8 @@ Kart USB seri olarak görünüyor: **COM13** (`VID_2E8A PID_0009`).
 | `o` | yön testi: 4 köşeye 4 renk | **evet** |
 | `b` | arka ışık teşhisi | **evet**, etkileşimli |
 | `v` | QSPI veri yolu teşhisi | çoğu adım hayır |
+| `w` | **QSPI zamanlama teşhisi** — `QSPI_WaitIdle` ölçümü (§9n) | hayır |
+| `y` | **melez yol testi** — pencere ve piksel ayrı yollardan (§9n) | **evet**, etkileşimli |
 | `t` | dokunmatik teşhisi (canlı akış) | **evet** |
 | `u` | LVGL demo ekranı | **evet** |
 | `m` | **mel + kapı hattı (M3)** | hayır |
@@ -2527,20 +2535,98 @@ Bit-bang çalışıyor, PIO/DMA yolu çalışmıyor → hata **PIO/DMA tarafınd
 §5.9'un imzası: CS, veri hatta çıkmadan yükseliyor. Düzeltme kodda duruyor
 ama görünüşe göre **yetmiyor**.
 
-### Sıradaki adım
+### ✅ ÖLÇÜLDÜ — `QSPI_WaitIdle` sağlam, CS zamanlaması DOĞRU (§9n adım 1–2)
 
-1. `QSPI_WaitIdle`'ın gerçekten beklediğini doğrulayın — zaman aşımı 50 ms
-   ve **sessizce dönüyor**. Zaman aşımına giriyorsa TXSTALL hiç kurulmuyor
-   demektir ve fonksiyon hiçbir şey yapmıyordur. Sayaç ekleyip `x`/`i` gibi
-   bir komuttan bastırın: göz gerektirmeyen ilk gerçek ölçüm bu olur.
-2. `dma_channel_is_busy` sonrası PIO TX FIFO'sunun gerçekten boşaldığını
-   ayrıca kontrol edin (`pio_sm_is_tx_fifo_empty`).
-3. Bit-bang yolu çalıştığına göre en kötü ihtimalle ekran oradan sürülebilir
-   — yavaş ama M7'yi açar.
+Yeni `w` komutu (**göz gerekmiyor**, `python tools/capture_wav.py --port COM13
+--cmd w`) `QSPI_WaitIdle`'ı sayaçlarla ölçüyor: kaç çağrı, kaçı zaman aşımına
+girdi, girerken/çıkarken TX FIFO doluydu mu, kaç döngü döndü, kaç µs sürdü.
+Sayaçlar `qspi_pio.c`'de, `pb_qspi_wait_*`.
+
+| Ölçüm | Pencere komutları (3 CS) | Tek satır blit (4 CS) | Tam ekran (2560 CS) |
+|---|---|---|---|
+| **zaman aşımı** | **0** | **0** | **0** |
+| girerken SM kapalı | 0 | 0 | 0 |
+| çıkarken FIFO hâlâ dolu | 0 | 0 | 0 |
+| geçen süre | — | — | 27,2 ms (PIO tabanı 15,0 ms) |
+
+Süre tek başına da kanıt: her çağrı zaman aşımına girseydi tam ekran doldurma
+2560 × 50 ms = **~128 saniye** sürerdi. 27 ms sürüyor.
+
+**Asıl kanıt `w`'nin 4. adımı — mekanizmanın doğrudan gözlemi.** PIO saati
+150 kHz'e indirilip 32 baytlık bir CASET yollanıyor; bu hızda kalıntı baytlar
+CPU'nun örnekleyebileceği kadar yavaş çıkar:
+
+```
+girerken FIFO doluydu    : 1   (seviye 4/4)   <- bekleme GEREKLIYDI
+gercekten bekledi        : 1   (1147 dongu, 144 us)  <- ve BEKLEDI
+CIKARKEN FIFO hala dolu  : 0
+CS yuksekken SCLK gecisi : 0   <- CS yukseldikten SONRA hat SUSMUS
+```
+
+> **§5.9 geri gelmemiş.** CS, veri hatta çıktıktan sonra yükseliyor. Baytlar
+> yongadan çıkıyor, FIFO boşalıyor, SM sağlıklı. §9n'in 1. ve 2. maddesinin
+> ikisinin de yanıtı **HAYIR**. Bu hipotezi tekrar denemeyin.
+
+### Buradan sonrası — geriye ne kaldı
+
+Veri yolu zamanlaması doğruysa sorun **ne gönderildiğinde** ya da panelin onu
+nasıl yorumladığında. İki aday kaldı ve `y` komutu ikisini de tek oturumda
+ayırıyor:
+
+1. **Pencere komutları (CASET/RASET) panele geçmiyor, piksel verisi geçiyor.**
+   Belirtiyle birebir uyuşuyor: pencere hiç değişmezse her RAMWR yazma
+   imlecini aynı yere döndürür, her çizim bir öncekinin üstüne biner →
+   *"ekran temizlenmiyor, yalnızca EN SON çizilen görünüyor"*. `a` demosunda
+   da aynısı: LVGL'in son çizdiği yeşil etiket görünüyor, gerisi üst üste
+   binmiş durumda.
+2. **SCLK hızı.** Üretim `clkdiv 2.0` → bayt başına 4 PIO çevrimi →
+   **SCLK 37,5 MHz**. AXS15231B'nin üst sınırı bu civarda. Bit-bang ~500 kHz'te
+   çalışıyor — yani "bit-bang çalışıyor, PIO çalışmıyor" farkı yol farkı değil
+   **hız** farkı da olabilir.
+
+### 🔵 SIRADAKİ ADIM — `y` melez yol testi (GÖZ GEREKİR, kullanıcı çalıştırır)
+
+`python tools/capture_wav.py --port COM13 --cmd y` — etkileşimli, altı adım.
+Her adımda ekran **mavi** olmalı ve **ortasında 40x40 beyaz kare**. Pencere
+komutu düşerse kare ortada değil, **en üstte tam genişlikte bir şerit** çıkar.
+
+| Adım | Pencere | Piksel | SCLK |
+|---|---|---|---|
+| 1 | bit-bang | bit-bang | — (kontrol: §9n'e göre çalışıyor) |
+| 2 | bit-bang | PIO/DMA | 37,5 MHz |
+| 3 | PIO | bit-bang | 37,5 MHz |
+| 4 | PIO | PIO/DMA | 37,5 MHz (**üretim yolu**) |
+| 5 | PIO | PIO/DMA | 3,75 MHz |
+| 6 | PIO | PIO/DMA | 0,94 MHz |
+
+Okuma: [2] çalışıp [3] çalışmıyorsa hata **pencere komutlarında**; tersi ise
+**piksel/DMA yolunda**; [4] bozuk ama [5]/[6] düzgünse hata **saat hızında**
+ve düzeltme tek satır (`qspi.pio`'nun clkdiv'i).
+
+### ✅ Yan olarak düzeltildi — bit-bang testi artık PIO'yu geri veriyor
+
+`d`'nin bit-bang varyantı ve `v`'nin 6. adımı pinleri SIO'ya alıp SM'i
+kapatıyor, geri vermiyordu; **ondan sonraki her ekran testi sahte biçimde
+"bozuk" görünüyordu**. Yeni `QSPI_PIO_Restore()` pinleri, SM'i, FIFO'ları ve
+kaydırma sayacını geri alıyor (`pio_add_program`'ı TEKRAR çağırmadan — PIO
+komut belleği 32 komut, her çağrı 2 komut daha yakardı). İki ekran testi
+arasında artık kartı yeniden başlatmak gerekmiyor.
+
+`w` PIO'yu kapalı bırakmıyor, ardından ekran testi çalıştırmak güvenli.
 
 > **Bu hatayı ararken göz gerektiren testi ertelemeyin.** §9h'de tam olarak
 > bu yapıldı (20 ms'lik ikili onaylandı, gönderilen 250 ms'lik sürüme hiç
 > bakılmadı) ve hata bir oturum boyunca sessizce durdu.
+
+### Eğer `y` de sonuçsuz kalırsa — sırada ne var
+
+- **Firmware kaynağı `dba7a01` ile `main` arasında BİREBİR AYNI** (ölçüldü:
+  `git diff dba7a01 main -- src/ CMakeLists.txt boards/ cmake/` boş). Yani
+  `main` = §9h'nin sonunda gönderilen 250 ms'lik ikili, ve kullanıcının gözle
+  onayladığı ikili 250 ms'lik **değil, 20 ms'likti**. Aradaki tek fark o satır.
+  Ucuz A/B: `dba7a01`'i 250 → 20 yapıp derleyin ve baktırın.
+- Son çare: bit-bang yolu çalıştığına göre ekran oradan sürülebilir — yavaş
+  ama M7'yi açar.
 
 ---
 

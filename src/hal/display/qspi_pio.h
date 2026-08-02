@@ -66,11 +66,26 @@ typedef struct pio_qspi {
 
 extern pio_qspi_t qspi;
 
+/* POKEBIRD teshis sayaclari — QSPI_WaitIdle gercekten bekliyor mu (§9n).
+ * `w` komutu okuyor; sifirlamak icin pb_qspi_sayaclari_sifirla(). */
+extern volatile uint32_t pb_qspi_wait_cagri;       /* toplam cagri            */
+extern volatile uint32_t pb_qspi_wait_asim;        /* zaman asimi (SESSIZ hata)*/
+extern volatile uint32_t pb_qspi_wait_sm_kapali;   /* girerken SM etkin degil */
+extern volatile uint32_t pb_qspi_wait_fifo_dolu;   /* girerken FIFO bos degil */
+extern volatile uint32_t pb_qspi_wait_kalinti;     /* cikarken FIFO bos degil */
+extern volatile uint32_t pb_qspi_wait_bekledi;     /* gercekten bekledigi     */
+extern volatile uint32_t pb_qspi_wait_fifo_azami;
+extern volatile uint32_t pb_qspi_wait_donme_azami;
+extern volatile uint32_t pb_qspi_wait_us_azami;
+extern volatile uint32_t pb_qspi_wait_us_top;
+void pb_qspi_sayaclari_sifirla(void);
+
 void QSPI_GPIO_Init(pio_qspi_t qspi);
 void QSPI_Select(pio_qspi_t qspi);
 void QSPI_Deselect(pio_qspi_t qspi);
 void QSPI_WaitIdle(pio_qspi_t qspi);
 void QSPI_PIO_Init(pio_qspi_t qspi);
+void QSPI_PIO_Restore(pio_qspi_t qspi);   /* bit-bang testinden sonra geri al */
 void QSPI_1Wrie_Mode(pio_qspi_t *qspi);
 void QSPI_4Wrie_Mode(pio_qspi_t *qspi);
 void QSPI_DATA_Write(pio_qspi_t qspi, uint32_t val);

@@ -57,4 +57,15 @@ void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 /** Tüm paneli tek renkle doldur. */
 void pb_lcd_fill(uint16_t color);
 
+/**
+ * Pencereyi AYARLAMADAN düz renk piksel akıt — melez yol testi için (§9n).
+ *
+ * NEDEN AYRI: `pb_lcd_blit` pencereyi kendi ayarlıyor, dolayısıyla "pencere
+ * komutu" ile "piksel verisi" aynı yoldan (PIO) gidiyor. Ekran hatasında
+ * ikisini ayırmak gerekiyor: pencereyi bit-bang, pikselleri PIO ile (ya da
+ * tersi) yollayıp hangisinin düştüğünü görebilmek için. Pencereyi çağıran
+ * ayarlar; bu fonksiyon yalnızca RAMWR + veri yolluyor.
+ */
+void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel);
+
 #endif /* POKEBIRD_LCD_BLIT_H */

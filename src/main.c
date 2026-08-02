@@ -646,6 +646,7 @@ static void cmd_display_test(void) {
                     if (bitbang) {
                         printf("  Bit-bang yolu calisiyor, PIO yolu calismiyor:\n");
                         printf("  hata PIO/DMA tarafinda. Yon karesi atlandi.\n\n");
+                        QSPI_PIO_Restore(qspi);   /* pinleri/SM'i PIO'ya geri ver */
                         return;
                     }
                     /* Yon kontrolu: panelin (0,0) kosesine 20x20 beyaz kare.
@@ -663,6 +664,10 @@ static void cmd_display_test(void) {
                 sleep_ms(100);
             }
         }
+        /* Bit-bang varyanti pinleri SIO'ya alip SM'i kapatiyor. Geri
+         * vermezsek BUNDAN SONRAKI her ekran testi sahte bicimde "bozuk"
+         * gorunur — bu tuzak bir oturumu yanilti (§9n). */
+        if (bitbang) QSPI_PIO_Restore(qspi);
         printf("\n");
     }
 
@@ -1111,6 +1116,243 @@ static void cmd_orientation(void) {
     printf("hangi kosede oldugunu soyleyin (sol ust / sag ust / sol alt / sag alt).\n\n");
 }
 
+/* ── §9n: ekran hatası — QSPI zamanlama ve melez yol teşhisleri ───────────
+ *
+ * §9n'in birinci hipotezi: `QSPI_WaitIdle`'ın 50 ms'lik zaman aşımı SESSİZ.
+ * Zaman aşımına giriyorsa fonksiyon hiçbir şey beklemiyordur, §5.9'un hatası
+ * geri gelmiştir (CS, veri hatta çıkmadan yükselir) ve düzeltme kâğıt üstünde
+ * kalmıştır. Aşağıdaki `w` bunu ölçüyor — göz gerekmiyor. */
+
+static void qspi_sayac_yazdir(void) {
+    printf("     WaitIdle cagrisi         : %lu\n",
+           (unsigned long)pb_qspi_wait_cagri);
+    printf("     ZAMAN ASIMI (sessiz hata): %lu%s\n",
+           (unsigned long)pb_qspi_wait_asim,
+           pb_qspi_wait_asim ? "   <<< HIPOTEZ DOGRU: beklemiyor" : "   (0 = beklendi)");
+    printf("     girerken SM kapali       : %lu%s\n",
+           (unsigned long)pb_qspi_wait_sm_kapali,
+           pb_qspi_wait_sm_kapali ? "   <<< SM KAPALI" : "");
+    printf("     girerken FIFO doluydu    : %lu   (en yuksek seviye %lu/4)\n",
+           (unsigned long)pb_qspi_wait_fifo_dolu,
+           (unsigned long)pb_qspi_wait_fifo_azami);
+    printf("     gercekten bekledi        : %lu   (en cok %lu dongu, en uzun %lu us)\n",
+           (unsigned long)pb_qspi_wait_bekledi,
+           (unsigned long)pb_qspi_wait_donme_azami,
+           (unsigned long)pb_qspi_wait_us_azami);
+    printf("     CIKARKEN FIFO hala dolu  : %lu%s\n",
+           (unsigned long)pb_qspi_wait_kalinti,
+           pb_qspi_wait_kalinti ? "   <<< BEKLEME ISE YARAMADI" : "   (0 = FIFO bosaldi)");
+    printf("     toplam bekleme           : %lu us\n\n",
+           (unsigned long)pb_qspi_wait_us_top);
+}
+
+/**
+ * QSPI zamanlama teşhisi — `QSPI_WaitIdle` gerçekten bekliyor mu? (§9n)
+ *
+ * GÖZ GEREKMİYOR. Cihaz kendi yanıtını yazıyor. Dört ölçüm:
+ *
+ *   1) Yalnızca pencere komutları — FIFO'ya CPU yazıyor, DMA yok.
+ *   2) Tek satır blit — piksel yolu, DMA'lı.
+ *   3) Tam ekran doldurma + geçen süre. PIO'nun kuramsal tabanıyla
+ *      karşılaştırılıyor: her WaitIdle zaman aşımına girseydi 640 satır x
+ *      4 işlem x 50 ms = ~2 dakika sürerdi, yani süre tek başına da bir kanıt.
+ *   4) CS yükseldikten SONRA hat hâlâ kıpırdıyor mu — §5.9'un imzasının
+ *      DOĞRUDAN gözlemi. PIO saati kalıntı baytlar CPU'nun örneklemesine
+ *      yetecek kadar yavaşlatılıyor; `QSPI_Deselect` döndükten sonra SCLK'te
+ *      geçiş varsa veri CS yüksekken hatta çıkıyor demektir.
+ *
+ * Bu komut PIO durum makinesini KAPALI BIRAKMIYOR; ardından ekran testi
+ * çalıştırmak güvenli (bkz. `d`'nin bit-bang varyantı, §9n uyarısı).
+ */
+static void cmd_qspi_timing(void) {
+    printf("\nQSPI zamanlama teshisi — WaitIdle gercekten bekliyor mu? (goz GEREKMEZ)\n");
+    printf("======================================================================\n\n");
+
+    printf("0) PIO durumu: sm%u %s, PC %u, sys clk %lu Hz\n\n",
+           (unsigned)qspi.sm,
+           ((qspi.pio->ctrl >> qspi.sm) & 1u) ? "ETKIN" : "KAPALI (!)",
+           (unsigned)pio_sm_get_pc(qspi.pio, qspi.sm),
+           (unsigned long)clock_get_hz(clk_sys));
+
+    printf("1) Pencere komutlari — SetWindows, 3 CS islemi, DMA yok\n");
+    pb_qspi_sayaclari_sifirla();
+    LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, 1);
+    qspi_sayac_yazdir();
+
+    printf("2) Tek satir blit — pencere + DMA piksel, 4 CS islemi\n");
+    {
+        static uint16_t satir[PB_PANEL_W];
+        for (uint32_t i = 0; i < PB_PANEL_W; i++) satir[i] = 0x0000;
+        pb_qspi_sayaclari_sifirla();
+        pb_lcd_blit(0, 0, PB_PANEL_W, 1, satir);
+        qspi_sayac_yazdir();
+    }
+
+    printf("3) Tam ekran doldurma — 640 satir\n");
+    {
+        pb_qspi_sayaclari_sifirla();
+        absolute_time_t t0 = get_absolute_time();
+        pb_lcd_fill(0x0000);
+        int64_t gecen = absolute_time_diff_us(t0, get_absolute_time());
+
+        /* PIO tabani: satir basina 440 bayt (2 pencere islemi 32'ser, ciplak
+         * RAMWR 16, piksel islemi 16 + 344 veri). Bayt basina 4 PIO cevrimi. */
+        uint32_t pio_hz = (uint32_t)(clock_get_hz(clk_sys) / 2);
+        uint64_t taban_us = (uint64_t)PB_PANEL_H * 440ull * 4ull * 1000000ull / pio_hz;
+
+        qspi_sayac_yazdir();
+        printf("     gecen sure               : %lu us\n", (unsigned long)gecen);
+        printf("     PIO tabani (kuramsal)    : %lu us\n", (unsigned long)taban_us);
+        printf("     her cagri zaman asiminda : ~%lu us olurdu\n\n",
+               (unsigned long)((uint64_t)pb_qspi_wait_cagri * 50000ull));
+    }
+
+    printf("4) CS yukseldikten SONRA hat hala kipirdiyor mu? (§5.9'un imzasi)\n");
+    {
+        pio_sm_set_clkdiv(qspi.pio, qspi.sm, 1000.0f);   /* ~150 kHz PIO */
+        pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
+
+        pb_qspi_sayaclari_sifirla();
+        QSPI_Select(qspi);
+        QSPI_REGISTER_Write(qspi, 0x2a);
+        QSPI_DATA_Write(qspi, 0x00);
+        QSPI_DATA_Write(qspi, 0x00);
+        QSPI_DATA_Write(qspi, (PB_PANEL_W - 1) >> 8);
+        QSPI_DATA_Write(qspi, (PB_PANEL_W - 1) & 0xff);
+        QSPI_Deselect(qspi);
+
+        /* Deselect dondu, CS yuksek. Hat susmus OLMALI. */
+        uint32_t gecis = 0;
+        int onceki = gpio_get(PIN_SCLK);
+        absolute_time_t bitis = make_timeout_time_ms(10);
+        while (!time_reached(bitis)) {
+            int simdi = gpio_get(PIN_SCLK);
+            if (simdi != onceki) { gecis++; onceki = simdi; }
+        }
+
+        pio_sm_set_clkdiv(qspi.pio, qspi.sm, 2.0f);
+        pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
+
+        printf("     32 bayt ~150 kHz'te yollandi (islem ~850 us surmeliydi)\n");
+        qspi_sayac_yazdir();
+        printf("     CS yuksekken SCLK gecisi : %lu%s\n\n", (unsigned long)gecis,
+               gecis ? "   <<< VERI CS YUKSEKKEN CIKIYOR — §5.9 GERI GELMIS"
+                     : "   (0 = hat susmus, CS zamanlamasi DOGRU)");
+
+        /* Pencereyi tam ekrana geri al; sonraki cizim dogru yere dussun. */
+        LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, PB_PANEL_H);
+    }
+}
+
+/* ── Melez yol testi: pencere komutu ile piksel verisi AYRI yollardan ──────
+ *
+ * §9n'in ölçülmüş gerçeği: bit-bang düz renkleri doğru basıyor, PIO/DMA yolu
+ * basmıyor. Ama `bb_ekrani_boya` HEM pencereyi HEM pikselleri bit-bang ile
+ * yolluyor, yani hangisinin düştüğünü ayırmıyor.
+ *
+ * Belirti ("ekran temizlenmiyor, yalnızca EN SON çizilen kare görünüyor")
+ * pencere komutlarının düşmesiyle birebir uyuşuyor: pencere hiç değişmezse
+ * her RAMWR yazma imlecini aynı yere döndürür ve her çizim bir öncekinin
+ * üstüne biner. Bu test o hipotezi ikiye ayırıyor. */
+
+static void bb_pencere(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    uint8_t caset[] = { (uint8_t)(x >> 8), (uint8_t)x,
+                        (uint8_t)((x + w - 1) >> 8), (uint8_t)(x + w - 1) };
+    uint8_t raset[] = { (uint8_t)(y >> 8), (uint8_t)y,
+                        (uint8_t)((y + h - 1) >> 8), (uint8_t)(y + h - 1) };
+    bb_cmd(0x2A, caset, 4);
+    bb_cmd(0x2B, raset, 4);
+}
+
+static void bb_piksel(uint16_t renk, uint32_t piksel) {
+    for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) gpio_set_dir(p, GPIO_OUT);
+    gpio_put(PIN_CS, 0);
+    bb_byte(0x32); bb_byte(0x00); bb_byte(0x2C); bb_byte(0x00);
+    uint8_t yuksek = (uint8_t)(renk >> 8), dusuk = (uint8_t)(renk & 0xFF);
+    for (uint32_t i = 0; i < piksel; i++) { bb_byte_quad(yuksek); bb_byte_quad(dusuk); }
+    gpio_put(PIN_CS, 1);
+    for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) gpio_set_dir(p, GPIO_IN);
+}
+
+static void melez_bekle(void) {
+    printf("      >>> EKRANA BAKIN. Devam icin tusa basin (10 s sonra kendi gecer).\n");
+    drain_stdin();
+    for (int t = 0; t < 100; t++) {
+        if (getchar_timeout_us(0) >= 0) return;
+        sleep_ms(100);
+    }
+}
+
+/* PIO'ya geri don ve saati ayarla.
+ * DIKKAT: QSPI_PIO_Restore, program_init uzerinden clkdiv'i 2.0'a geri
+ * cekiyor — saat HER geri donusten SONRA yeniden kurulmali. */
+static void melez_pio_ver(float clkdiv) {
+    QSPI_PIO_Restore(qspi);
+    pio_sm_set_clkdiv(qspi.pio, qspi.sm, clkdiv);
+    pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
+}
+
+static void melez_faz(bool pencere_pio, bool piksel_pio, float clkdiv) {
+    enum { KX = 66, KY = 300, KW = 40, KH = 40 };
+
+    /* 1) Tum ekrani koyu maviye boya */
+    if (pencere_pio) { melez_pio_ver(clkdiv); LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, PB_PANEL_H); }
+    else             { bb_pins_setup();       bb_pencere(0, 0, PB_PANEL_W, PB_PANEL_H); }
+
+    if (piksel_pio)  { melez_pio_ver(clkdiv); pb_lcd_duz_akit(0x001F, (uint32_t)PB_PANEL_W * PB_PANEL_H); }
+    else             { bb_pins_setup();       bb_piksel(0x001F, (uint32_t)PB_PANEL_W * PB_PANEL_H); }
+
+    /* 2) Ekranin ORTASINA 40x40 beyaz kare.
+     *    Pencere komutu dusuyorsa kare ortada degil, EN USTTE tam genislikte
+     *    bir serit olarak cikar — tek bakista ayirt edilir. */
+    if (pencere_pio) { melez_pio_ver(clkdiv); LCD_3IN49_SetWindows(KX, KY, KX + KW, KY + KH); }
+    else             { bb_pins_setup();       bb_pencere(KX, KY, KW, KH); }
+
+    if (piksel_pio)  { melez_pio_ver(clkdiv); pb_lcd_duz_akit(0xFFFF, KW * KH); }
+    else             { bb_pins_setup();       bb_piksel(0xFFFF, KW * KH); }
+
+    melez_pio_ver(2.0f);        /* uretim saatiyle birak */
+}
+
+/**
+ * `y` — melez yol testi. GÖZ GEREKİR, etkileşimli.
+ *
+ * Dört bileşim, her birinde aynı desen: ekran koyu mavi + ORTADA 40x40 beyaz
+ * kare. Sorulacak tek soru: kare ORTADA mı, yoksa EN ÜSTTE geniş bir şerit mi?
+ */
+static void cmd_hybrid_path(void) {
+    printf("\nMelez yol testi — pencere komutu ve piksel verisi ayri yollardan\n");
+    printf("================================================================\n\n");
+    printf("Her adimda ekran MAVI olmali ve ORTASINDA 40x40 BEYAZ KARE.\n");
+    printf("Kare ORTADA ise o bilesim CALISIYOR.\n");
+    printf("Kare EN USTTE genis bir SERIT ise pencere komutu panele ULASMIYOR.\n");
+    printf("Ekran hic mavi olmuyorsa piksel verisi ulasmiyor.\n\n");
+
+    backlight_set(true);
+
+    const struct { bool pencere_pio, piksel_pio; float clkdiv; const char *ad; } faz[] = {
+        { false, false,  2.0f, "pencere BIT-BANG + piksel BIT-BANG   (kontrol: 9n'e gore CALISIYOR)" },
+        { false, true,   2.0f, "pencere BIT-BANG + piksel PIO/DMA    (SCLK 37,5 MHz)" },
+        { true,  false,  2.0f, "pencere PIO      + piksel BIT-BANG   (SCLK 37,5 MHz)" },
+        { true,  true,   2.0f, "pencere PIO      + piksel PIO/DMA    (URETIM YOLU, 37,5 MHz)" },
+        { true,  true,  20.0f, "pencere PIO      + piksel PIO/DMA    (ayni yol, SCLK 3,75 MHz)" },
+        { true,  true,  80.0f, "pencere PIO      + piksel PIO/DMA    (ayni yol, SCLK 0,94 MHz)" },
+    };
+
+    for (size_t i = 0; i < sizeof(faz) / sizeof(faz[0]); i++) {
+        printf("  [%u] %s\n", (unsigned)(i + 1), faz[i].ad);
+        melez_faz(faz[i].pencere_pio, faz[i].piksel_pio, faz[i].clkdiv);
+        melez_bekle();
+        printf("\n");
+    }
+
+    printf("Bildirin: hangi adimlarda kare ORTADAYDI, hangilerinde SERIT/yoktu.\n");
+    printf("  [2] calisip [3] calismiyorsa  -> hata PENCERE komutlarinda.\n");
+    printf("  [3] calisip [2] calismiyorsa  -> hata PIKSEL/DMA yolunda.\n");
+    printf("  [4] bozuk ama [5]/[6] duzgunse-> hata SAAT HIZI (37,5 MHz fazla).\n");
+    printf("  [1] disinda hicbiri calismiyorsa -> PIO yolu bastan asagi bozuk.\n\n");
+}
+
 /**
  * Dokunmatik bring-up ve koordinat eşlemesi.
  *
@@ -1519,12 +1761,10 @@ static void cmd_datapath_probe(void) {
                : "PANELDEN HIC YANIT YOK (hep 00 ya da FF). Panel bu hattan\n"
                  "      bizi duymuyor: pin haritasi ya da kablolama yanlis.");
 
-        /* PIO'yu geri ac */
+        /* PIO'yu geri ac — SM'i de sifirliyor (FIFO/kaydirma sayaci dahil),
+         * eski elle yapilan geri alma bunlari birakiyordu. */
         QSPI_GPIO_Init(qspi);
-        for (uint p = PIN_SCLK; p <= PIN_DIO3; p++) pio_gpio_init(qspi.pio, p);
-        pio_sm_set_consecutive_pindirs(qspi.pio, qspi.sm, PIN_SCLK, 1, true);
-        pio_sm_set_consecutive_pindirs(qspi.pio, qspi.sm, PIN_DIO0, 4, true);
-        pio_sm_set_enabled(qspi.pio, qspi.sm, true);
+        QSPI_PIO_Restore(qspi);
     }
 
     /* â”€â”€ 7. Yedek: gozle komut yolu testi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1805,6 +2045,8 @@ static void print_help(void) {
     printf("  a  DEMO: LVGL kart + canli mel spektrogrami + kapi\n");
     printf("  b  arka isik teshisi\n");
     printf("  v  QSPI veri yolu teshisi\n");
+    printf("  w  QSPI zamanlama teshisi (WaitIdle olcumu, goz GEREKMEZ)\n");
+    printf("  y  melez yol testi: pencere ve piksel ayri yollardan (goz gerekir)\n");
     printf("  s  canli spektrogram\n");
     printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
     printf("  ?  bu yardim\n\n");
@@ -1906,6 +2148,8 @@ int main(void) {
             case 'd': cmd_display_test(); break;
             case 'b': cmd_backlight_probe(); break;
             case 'v': cmd_datapath_probe(); break;
+            case 'w': cmd_qspi_timing(); break;
+            case 'y': cmd_hybrid_path(); break;
             case 'o': cmd_orientation(); break;
             case 't': cmd_touch_probe(); break;
             case 'u': cmd_ui_demo(); break;
