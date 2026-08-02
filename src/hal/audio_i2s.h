@@ -31,11 +31,30 @@ typedef struct {
     bool     timed_out;     /* saat gelmedi (ES8311 BCLK/LRCK üretmiyor)    */
 } pb_capture_result_t;
 
-/** Halka tamponunun kapasitesi (örnek). 24 kHz'de ~170 ms. */
-#define PB_AUDIO_RING_SAMPLES  4096
+/**
+ * Halka tamponunun kapasitesi (örnek). 24 kHz'de ~341 ms.
+ *
+ * M6'DA 4096'DAN (170 ms) BÜYÜTÜLDÜ — ÖLÇÜME DAYALI KARAR.
+ * Tür ağının tek çıkarımı kartta **190 ms** sürüyor ve o süre boyunca core1
+ * halkayı hiç okumuyor. Okuma yolu, birikmiş miktar halkanın 3/4'ünü aşınca
+ * en tazeye atlıyor (aşağıdaki `fifo_overrun`), yani eski 4096'lık halkanın
+ * gerçek toleransı 170 değil **128 ms**'ti: her çıkarımda ses hattı kopardı
+ * ve 3 saniyelik pencerenin ortasında süreksizlik olurdu.
+ *
+ * 8192 örnek = 32 KB, tolerans 3/4 × 341 = **256 ms**. Çıkarımın 1,35 katı.
+ * Aşama-1 ikili ağı eklendiğinde toplam çıkarım süresi artacak; o zaman bu
+ * sayı yeniden ölçülmeli (`k` komutu düşen pencereyi ve overrun'ı basıyor).
+ */
+#define PB_AUDIO_RING_SAMPLES  8192
 
-/** Tek çağrıda okunabilecek en büyük öbek — halkanın yarısı. */
-#define PB_AUDIO_MAX_READ      (PB_AUDIO_RING_SAMPLES / 2)
+/**
+ * Tek çağrıda okunabilecek en büyük öbek.
+ *
+ * Halka boyutuna BAĞLANMADI (eskiden RING/2 idi): teşhis komutlarının
+ * yakalama tamponu `s_chunk` bu sabitle boyutlanıyor ve halkayı büyütmek
+ * onu da büyütürdü — §9g'de 96 KB'dan 4 KB'a indirilen tampon bu.
+ */
+#define PB_AUDIO_MAX_READ      2048
 
 /**
  * MCLK'i başlat, I2S yakalama yolunu kur ve sürekli yakalamayı başlat.

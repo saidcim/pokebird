@@ -39,7 +39,15 @@ add_executable(pokebird
     src/dsp/gate.c
     src/ui/spectrogram.c
     src/ui/lv_port.c
+    src/ai/tur_agi.cc
+    src/ai/tanima.c
+    src/ai/tflm_port.cc
 )
+
+# ── TFLM + CMSIS-NN ────────────────────────────────────────────────────────
+# `tflm` statik kütüphanesini tanımlıyor. pico_sdk_init() SONRASINDA olmalı:
+# SDK'nın hedeflerinden (pico_base_headers) derleyici bayraklarını miras alıyor.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/tflm.cmake)
 
 # ── LVGL v9 ────────────────────────────────────────────────────────────────
 # third_party/lvgl altına klonlu (git'e girmiyor, .gitignore'da). Yoksa:
@@ -75,7 +83,9 @@ target_link_libraries(pokebird PRIVATE
     hardware_i2c
     hardware_pio
     hardware_dma
+    pico_multicore
     lvgl
+    tflm
 )
 
 # Hata ayıklama çıktısı USB CDC üzerinden. Kartta USB dışında kolay erişilebilir
@@ -89,3 +99,14 @@ pico_add_extra_outputs(pokebird)
 target_compile_options(pokebird PRIVATE
     -Wall -Wextra -Wno-unused-parameter
 )
+
+# TFLM tensor arena boyutu. Boş bırakılırsa src/ai/tur_agi.cc'deki ölçülmüş
+# varsayılan (120 KB) geçerli. Buradan ezmek iki işe yarıyor: yeni bir model
+# ölçülürken geçici olarak büyütmek, ve bss boyutunu tek değişken olarak
+# oynatıp yerleşim kaynaklı gerilemeleri A/B ile ayırmak (§5.17).
+#   cmake -S . -B build -DPB_TFLM_ARENA_BAYT=4096
+set(PB_TFLM_ARENA_BAYT "" CACHE STRING "TFLM tensor arena boyutu (bayt)")
+if(PB_TFLM_ARENA_BAYT)
+    target_compile_definitions(pokebird PRIVATE
+        PB_TFLM_ARENA_BAYT=${PB_TFLM_ARENA_BAYT})
+endif()

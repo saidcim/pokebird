@@ -64,3 +64,14 @@ data/negatif/
 models/*.keras
 models/ilerleme.html
 models/test_olasilik.npy
+
+# M6 — TFLM ve bagimliliklari. Hepsi vendor edilmis ucuncu taraf, surumler
+# cmake/tflm.cmake'te sabitlenmis; kurulum README'de.
+third_party/tflite-micro/
+third_party/flatbuffers/
+third_party/gemmlowp/
+third_party/ruy/
+third_party/cmsis-nn/
+
+# A/B probe derlemeleri (bkz. §5.17 uc kosuluk A/B)
+build-*/

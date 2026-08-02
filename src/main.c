@@ -41,6 +41,10 @@
 #include "dsp/gate.h"
 #include "ui/spectrogram.h"
 #include "ui/lv_port.h"
+#include "ai/tur_agi.h"
+#include "ai/tanima.h"
+#include "ai/siniflar.h"
+#include "ai/dogrulama_seti.h"
 #include "lvgl.h"
 
 void pb_display_dma_init(void);   /* hal/display/dev_config.c */
@@ -1620,6 +1624,173 @@ static void cmd_backlight_probe(void) {
 }
 
 
+/* ── x: cihaz-içi doğrulama seti + arena + çıkarım süresi ──────────────────
+ *
+ * M6'nın kabul ölçütü bu komut. Üç şeyi birden ölçüyor ve üçü de TAHMİN
+ * DEĞİL ÖLÇÜM olsun diye buraya kondu (§9l madde 2, 4, 7):
+ *
+ *   1. arena_used_bytes()  — belgedeki 141 KB bir tahmindi, bu gerçeği verir
+ *   2. Invoke() süresi     — 1 s'lik pencere adımına sığmalı
+ *   3. logit karşılaştırma — "PC'de çalışıyor cihazda çalışmıyor"u yakalar
+ *
+ * Ses yolu bilerek İŞİN DIŞINDA: girdi, eğitim kümesinden gömülmüş hazır bir
+ * pencere. Fark çıkarsa mel'e bakmaya gerek yok, hata alanı TFLM/CMSIS-NN/
+ * niceleştirme ile sınırlı. Mikrofon da gerekmiyor — kulaklık kuralı (§5.5)
+ * bu testi hiç ilgilendirmiyor.
+ */
+static void cmd_ai_verify(void) {
+    printf("\n=== TUR AGI — cihaz ici dogrulama ===\n");
+
+    const uint32_t t_init0 = time_us_32();
+    if (!pb_tur_agi_baslat()) {
+        printf("[!] model baslatilamadi.\n");
+        return;
+    }
+    const uint32_t t_init = time_us_32() - t_init0;
+
+    printf("baslatma      %lu us\n", (unsigned long)t_init);
+    printf("arena         %u / %u bayt kullanildi  (%.1f%%)\n",
+           (unsigned)pb_tur_agi_arena_kullanilan(),
+           (unsigned)pb_tur_agi_arena_toplam(),
+           100.0 * pb_tur_agi_arena_kullanilan() / pb_tur_agi_arena_toplam());
+    printf("cikti nicel.  olcek %.9f  sifir %d\n",
+           (double)pb_tur_agi_cikti_olcek(), pb_tur_agi_cikti_sifir());
+
+    int8_t *girdi = pb_tur_agi_girdi();
+    const int8_t *cikti = pb_tur_agi_cikti();
+
+    uint32_t sure_min = 0xFFFFFFFFu, sure_max = 0, sure_top = 0;
+    int birebir = 0, tahmin_ayni = 0, en_buyuk_fark = 0;
+    long fark_top = 0;
+    long fark_adet = 0;
+
+    for (int k = 0; k < PB_DOGRULAMA_ADET; k++) {
+        memcpy(girdi, pb_dogrulama_girdi[k],
+               (size_t)PB_DOGRULAMA_KARE * PB_DOGRULAMA_BANT);
+        if (!pb_tur_agi_calistir()) {
+            printf("[!] pencere %d: Invoke basarisiz\n", k);
+            return;
+        }
+        const uint32_t us = pb_tur_agi_son_sure_us();
+        if (us < sure_min) sure_min = us;
+        if (us > sure_max) sure_max = us;
+        sure_top += us;
+
+        int fark_max = 0, en_iyi = 0;
+        for (int c = 0; c < PB_DOGRULAMA_SINIF; c++) {
+            int d = (int)cikti[c] - (int)pb_dogrulama_logit[k][c];
+            if (d < 0) d = -d;
+            if (d > fark_max) fark_max = d;
+            fark_top += d;
+            fark_adet++;
+            if (cikti[c] > cikti[en_iyi]) en_iyi = c;
+        }
+        if (fark_max == 0) birebir++;
+        if (fark_max > en_buyuk_fark) en_buyuk_fark = fark_max;
+        if (en_iyi == pb_dogrulama_pc_tahmin[k]) tahmin_ayni++;
+
+        printf("  pencere %d  sinif %3d  cihaz-tahmin %3d  PC-tahmin %3d  "
+               "logit max fark %d  %lu us\n",
+               k, (int)pb_dogrulama_sinif[k], en_iyi,
+               (int)pb_dogrulama_pc_tahmin[k], fark_max, (unsigned long)us);
+    }
+
+    printf("\nsure          min %lu  ort %lu  max %lu us   (hedef < 1.000.000)\n",
+           (unsigned long)sure_min,
+           (unsigned long)(sure_top / PB_DOGRULAMA_ADET),
+           (unsigned long)sure_max);
+    printf("logit         %d/%d pencere BIREBIR ayni, en buyuk fark %d, "
+           "ort mutlak fark %.4f\n",
+           birebir, PB_DOGRULAMA_ADET, en_buyuk_fark,
+           (double)fark_top / (double)fark_adet);
+    printf("tahmin        %d/%d pencere ayni sinifi sectik\n",
+           tahmin_ayni, PB_DOGRULAMA_ADET);
+
+    if (birebir == PB_DOGRULAMA_ADET) {
+        printf("\nSONUC: cihaz PC ile BIREBIR ayni. TFLM hatti dogru.\n");
+    } else if (tahmin_ayni == PB_DOGRULAMA_ADET) {
+        printf("\nSONUC: logit'lerde kucuk sapma var ama tahminler ayni.\n"
+               "       Sapma 1-2 adimi asiyorsa cekirdek farki arayin.\n");
+    } else {
+        printf("\n[!] SONUC: cihaz PC'den FARKLI tahmin uretti. TFLM/CMSIS-NN\n"
+               "    veya nicelestirme tarafinda sorun var. Ses yolu bu teste\n"
+               "    hic girmedi, o yuzden mel'e bakmayin.\n");
+    }
+}
+
+/* ── k: gerçek zamanlı tanıma (core 1) ────────────────────────────────────
+ *
+ * M6'nın asıl teslimi. Core 1 sesi okuyup mel çıkarıyor, kapı açılınca
+ * saniyede bir tür ağını çalıştırıyor ve son 8 pencereyi birleştiriyor;
+ * core 0 (burası) yalnızca sonucu basıyor.
+ *
+ * ⛔ AKUSTİK TEST İÇİN PC'DEN SES ÇALMAYIN (§5.5): bilgisayarda kulaklık
+ * takılı, hoparlörden ses çıkmıyor. Bu komutun kuş sesiyle sınanması
+ * gerekiyorsa kullanıcıdan isteyin. Modelin doğru çalıştığı zaten `x`
+ * komutuyla mikrofona hiç dokunmadan kanıtlanıyor.
+ */
+static void cmd_recognize(bool kapi_yoksay) {
+    printf("\n=== GERCEK ZAMANLI TANIMA (core 1) ===\n");
+    if (kapi_yoksay)
+        printf("OLCUM KIPI: kapi YOKSAYILIYOR, her saniye cikarim.\n");
+    else
+        printf("Kapi acilmadikca cikarim CALISMAZ (sessizlikte %%2-3).\n");
+    printf("Birlestirme penceresi: %d\n", PB_BIRLESTIRME_PENCERE);
+    printf("Cikmak icin bir tusa basin.\n\n");
+
+    if (!pb_tanima_baslat(kapi_yoksay)) {
+        printf("[!] tanima hatti baslatilamadi.\n");
+        return;
+    }
+
+    uint32_t gorulen = 0;
+    absolute_time_t sonraki = make_timeout_time_ms(1000);
+
+    while (getchar_timeout_us(0) < 0) {
+        pb_tanima_durum_t d;
+        pb_tanima_oku(&d);
+
+        if (d.surum != gorulen && d.gecerli) {
+            gorulen = d.surum;
+            printf("  [%lu] %lu pencere birlesti, %lu us:\n",
+                   (unsigned long)d.cikarim, (unsigned long)d.birlesen,
+                   (unsigned long)d.son_sure_us);
+            for (int r = 0; r < 3; r++) {
+                const int c = d.ilk3[r];
+                if (c < 0 || c >= PB_SINIF_SAYISI) continue;
+                printf("      %d. %%%5.1f  %-10s %s\n", r + 1,
+                       (double)(d.ilk3_olasilik[r] * 100.0f),
+                       pb_sinif_kod[c], pb_sinif_ad[c]);
+            }
+        }
+
+        if (time_reached(sonraki)) {
+            printf("  kare %lu  kapi %%%lu  cikarim %lu  atlanan %lu  "
+                   "bant %.1f dB  taban %.1f dB  overrun %lu\n",
+                   (unsigned long)d.kare,
+                   (unsigned long)(d.kare ? d.kapi_acik * 100 / d.kare : 0),
+                   (unsigned long)d.cikarim, (unsigned long)d.atlanan,
+                   (double)d.bant_db, (double)d.taban_db,
+                   (unsigned long)d.overrun);
+            sonraki = make_timeout_time_ms(1000);
+        }
+        sleep_ms(20);
+    }
+
+    pb_tanima_durum_t d;
+    pb_tanima_oku(&d);
+    pb_tanima_durdur();
+
+    printf("\n  toplam kare %lu (%lu kapi acik, %%%lu)\n",
+           (unsigned long)d.kare, (unsigned long)d.kapi_acik,
+           (unsigned long)(d.kare ? d.kapi_acik * 100 / d.kare : 0));
+    printf("  cikarim %lu, kapi kapali diye atlanan pencere %lu\n",
+           (unsigned long)d.cikarim, (unsigned long)d.atlanan);
+    printf("  ses halkasi overrun %lu  (0 olmali — degilse cikarim halkadan\n"
+           "                            uzun suruyor, audio_i2s.h'ye bakin)\n\n",
+           (unsigned long)d.overrun);
+}
+
 static void print_help(void) {
     printf("\nKomutlar:\n");
     printf("  i  cihaz ve ses yapilandirmasi\n");
@@ -1635,6 +1806,7 @@ static void print_help(void) {
     printf("  b  arka isik teshisi\n");
     printf("  v  QSPI veri yolu teshisi\n");
     printf("  s  canli spektrogram\n");
+    printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
     printf("  ?  bu yardim\n\n");
 }
 
@@ -1739,6 +1911,9 @@ int main(void) {
             case 'u': cmd_ui_demo(); break;
             case 'm': cmd_mel_pipeline(); break;
             case 'a': cmd_full_demo(); break;
+            case 'x': cmd_ai_verify(); break;
+            case 'k': cmd_recognize(false); break;
+            case 'K': cmd_recognize(true);  break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;
