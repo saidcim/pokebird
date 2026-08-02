@@ -9,7 +9,8 @@
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
-**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 ✅ · M4 ✅
+**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 ✅ ·
+M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı)
 
 Çalışma ağacı temiz, her şey commit edildi (§10).
 
@@ -65,9 +66,23 @@ bolme KAYIT+KAYDEDEN bazinda · bulasik dilimler bayrakli, olcume girmiyor
 negatif sinif ESC-50'den dolduruldu (kus siniflari cikarildi)
 ```
 
-**SIRADAKİ İŞ — M5: model eğitimi + damıtma + INT8.** Bellek bütçesi ölçülmüş
-bir rakam (bss 127.084, arena ile ~208 KB pay), model boyutu ona göre
-seçilebilir. Eğitim kümesinin tam envanteri ve M5'e taşınan kısıtlar §9j'de.
+**M5 AŞAMA-2 TÜR AĞI ✅ BİTTİ (§9k).** Model eğitildi, INT8'e indirildi ve
+cihaza hazır:
+
+```
+models/tur_agi_int8.tflite   270 KB · 209.107 parametre · 6,6 MMAC (butce 30)
+models/tur_agi_int8.h        firmware'in derleyecegi C dizisi
+TEST  INT8  top-1 %58,07  top-3 %74,82        (pencere basina)
+      birlestirme 8 pencere -> top-1 %70,40  top-3 %82,20   <- kullanicinin gordugu
+girdi olcegi 1.000000 / sifir noktasi 0  ->  cihaz mel penceresini DOGRUDAN besler
+```
+
+**SIRADAKİ İŞ — M6: TFLM entegrasyonu, cihazda gerçek zamanlı çıkarım.**
+En büyük bilinmeyen artık model değil, *"PC'de çalışıyor cihazda çalışmıyor"*
+riski. §9l'de ne yapılacağı ve nelere dikkat edileceği yazılı.
+
+M5'ten geriye iki küçük iş kaldı (Aşama-1 ikili ağ, Aşama-3 mevsim tablosu);
+ikisi de M6 ile paralel gidebilir, kritik yolu tıkamıyorlar (§9k sonu).
 
 ---
 
@@ -641,8 +656,8 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
 | M4 | Veri boru hattı + tür listesi (PC tarafı) | ✅ veri (178 tür, 7.111 WAV) · segmentasyon (§9e) · **eğitim kümesi (§9j)** · negatif saha turu M8'e ertelendi (§9f-4) |
-| **M5** | **Model eğitimi + damıtma + INT8** | **🔵 SIRADAKİ** |
-| M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | |
+| M5 | Model eğitimi + damıtma + INT8 | 🔶 **Aşama-2 tür ağı ✅ (§9k)** · Aşama-1 ikili ağ ve Aşama-3 mevsim tablosu kaldı |
+| **M6** | **TFLM entegrasyonu, gerçek zamanlı çıkarım (core1)** | **🔵 SIRADAKİ (§9l)** |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
 | M8 | Saha kalibrasyonu | |
 
@@ -2159,6 +2174,67 @@ ilk üçte olacak.
 
 ---
 
+## 9l. 🔵 SIRADAKİ İŞ — M6: TFLM entegrasyonu, cihazda çıkarım
+
+> Bu iş **karta dokunuyor.** Kart COM13'te, HEAD kartta duruyor ve çalışıyor
+> (bss 127.084, ekran düzgün, ses 63 kare/s kayıp 0).
+
+### Elde ne var
+
+```
+models/tur_agi_int8.h        C dizisi, 270 KB, 16 bayt hizali, PB_TUR_AGI_BOYUT
+models/tur_agi_int8.tflite   ayni model
+models/rapor.txt             dogruluk + en kotu 20 sinif
+models/birlestirme.txt       birlestirme tablosu + en cok karisan ciftler
+data/egitim/siniflar.csv     sinif indeksi -> eBird kodu / Turkce ad (179 satir)
+```
+
+### Yapılacaklar
+
+1. **TFLM vendor** — `third_party/tflite-micro` (git'e girmiyor, `third_party/`
+   deseni zaten öyle). CMSIS-NN çekirdekleriyle derlenmeli, yoksa M33'te
+   referans çekirdekler çok yavaş.
+2. **Arena'yı ÖLÇ.** §9k'daki **141 KB bir tahmin, ölçüm değil.** Gerçeği
+   `interpreter.arena_used_bytes()` ile ölçün, bütçe 180 KB. Bu projede
+   tahmine güvenmek iki kez pahalıya patladı (§9d-2, §9g).
+3. **Girdiyi bağla — en kolay kısım, bilerek öyle tasarlandı.**
+   ```c
+   int8_t pencere[PB_MEL_FRAMES * PB_MEL_BANDS];
+   if (pb_mel_window(pencere))
+       memcpy(input->data.int8, pencere, sizeof(pencere));
+   ```
+   Dönüşüm YOK: TFLite girdi ölçeği 1.0, sıfır noktası 0 (§9k'da assert
+   ediliyor). Kare sırası eskiden yeniye, bant içte — `mel.c`'deki düzenin
+   aynısı, eğitim kümesi de öyle üretildi.
+4. **Çıkarım süresini ölç.** Hedef: 1 s'lik pencere adımına sığmak. 6,6 MMAC
+   @150 MHz CMSIS-NN ile ~0,3–0,5 s bekleniyor (ARCHITECTURE §4) — **ölçün.**
+5. **Core 1'e taşı.** Ses + çıkarım core1'de, arayüz core0'da (§7). Kapı
+   (Aşama-0) açılmadıkça çıkarım hiç çalışmamalı — sessiz odada zamanın
+   %2–3'ü (§9c).
+6. **Zamansal birleştirme: 8 pencere.** Ölçüldü, 12'de artık artmıyor (§9k).
+7. **⚠ CİHAZ-İÇİ DOĞRULAMA SETİ — bu adımı atlamayın.** ARCHITECTURE §6
+   adım 9. "PC'de çalışıyor cihazda çalışmıyor" sınıfını yakalayan **tek**
+   şey bu. En ucuz hâli: `data/egitim/`den birkaç pencereyi C dizisi olarak
+   gömüp cihazda çıkarım yapmak ve **logit'leri PC'deki TFLite çıktısıyla
+   karşılaştırmak.** Aynı girdi → aynı çıktı olmalı; olmuyorsa mel'e,
+   arena'ya ya da niceleştirmeye bakın. Ses yolunu işin içine katmadan
+   sınayın ki hata alanı dar kalsın.
+
+### Beklenen tuzaklar
+
+- **Bellek değişikliği bir zamanlama değişikliğidir (§5.17).** Arena 180 KB
+  eklenince bss yerleşimi kayacak. `main.c`'deki panel hazır olma penceresi
+  (`while (to_ms_since_boot(...) < 250)`) **tam bunun için var — silmeyin,
+  `sleep_ms`'e çevirmeyin.** Ekran bozulursa ilk bakılacak yer orası.
+- Arena'yı `static` bir dizi olarak bss'e koyun, malloc'la değil; 520 KB'de
+  heap parçalanması istemiyoruz.
+- `nm --size-sort -S -td build/pokebird.elf` ile bss'i her adımda ölçün;
+  hedef bss + arena ≤ ~311 KB (§7'de hesaplanmış pay).
+- Ekran/ses gerilemesi olursa **üç koşuluk A/B** (eski / yeni / yeni mantık +
+  eski yerleşim) mantığı yerleşimden ayırır — §5.17'de bir kez işe yaradı.
+
+---
+
 ## 10. Depo düzeni ve git durumu
 
 ```
@@ -2182,6 +2258,11 @@ tools/      capture_wav.py, mel_reference.py,
             birdnet_slist.py, birdnet_run.py,
             birdnet_ozet.py, segment_kes.py ← M4 adım 3: segmentasyon
             esc50_indir.py, egitim_kumesi.py ← M4 adım 4: eğitim kümesi
+            egit.py, birlestirme_olc.py     ← M5: eğitim + değerlendirme
+models/     tur_agi_int8.h                  ← C dizisi (GİRİYOR, firmware derliyor)
+            rapor.txt, birlestirme.txt      ← doğruluk kayıtları (GİRİYOR)
+            tur_agi.keras, *.tflite         ← girmiyor, üretilebilir
+            ilerleme.html                   ← canlı eğitim panosu (girmiyor)
 data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
             birdnet_ad_haritasi.csv         ← kod→BirdNET adı (GİRİYOR, §5.16)
             .xc_key                         ← XC API anahtarı (GİRMİYOR)
@@ -2218,6 +2299,8 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | `9ec1654` | lastsession.md: §9h çözüldü, §9i eğitim kümesi planı, §5.17 dersi |
 | `928e331` | lastsession.md: commit hash'i yazıldı |
 | `3762dd4` | **M4 adım 4: eğitim kümesi** — `egitim_kumesi.py`, `esc50_indir.py`, `dsp_test --pencere`; üç katmanlı birebirlik sağlaması, sızıntı kontrolü, ESC-50 kuş sınıfları (§9j) |
+| `eb29fe7` | **M5: eğitim hattı** — `egit.py`, damıtma + focal + INT8, cihaz sözleşmesi (girdi ölçeği 1.0), HTML ilerleme panosu (§9k) |
+| `96c5094` | **M5 sonuçları** — tür ağı eğitildi, INT8 bedeli ~0, `birlestirme_olc.py` ile birleştirme ölçüldü; iki kendi hatam düzeltildi (dairesel budama ölçümü, kapasite≠darboğaz) |
 
 > HEAD sağlam: bss 127.084, ekran çalışıyor, ses hattı 63 kare/s kayıp 0.
 > Kartta HEAD duruyor.
