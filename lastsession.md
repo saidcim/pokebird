@@ -5,14 +5,31 @@
 > içinde; burada onun özeti, şu ana kadar yapılanlar, **denenip işe yaramayanlar**
 > ve sıradaki adımlar var.
 >
-> Son güncelleme: 2 Ağustos 2026.
+> Son güncelleme: 2 Ağustos 2026 (M6 kapanışı).
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
 **Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 ✅ ·
-M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı)
+M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
+**M6 ✅ (§9m)**
 
-Çalışma ağacı temiz, her şey commit edildi (§10).
+Çalışma ağacı temiz, her şey commit edildi (§10). **Dal `m6`**, `main` değil.
+
+> ### ⛔ EKRAN BOZUK — ve bu M6'DAN GELMİYOR, ÖLÇÜLDÜ
+>
+> `o` testi (dört köşeye dört renk) kartta şunu veriyor: **ekran
+> temizlenmiyor ve yalnızca EN SON çizilen kare görünüyor.** Aynı belirti `a`
+> demosunda da var (yazı tipi bozuk, spektrogram yok).
+>
+> **M6 öncesi `main` derlemesi kartta denendi ve AYNI ŞEKİLDE bozuk.**
+> Yani hata M6'dan önce de vardı; bu oturumda yalnızca *fark edildi*.
+> Ayrıntı, elenen ihtimaller ve sıradaki adım §9n'de.
+>
+> Nasıl gözden kaçmış: §9h'de kullanıcının gözle onayladığı ikili **20 ms**
+> sürümüydü; gönderilen **250 ms** sürümüne hiç bakılmadı ve o oturumun
+> sonundaki *"yeni oturumda ilk iş `--cmd a` ile 10 saniyelik bir bakış
+> atın"* notu yerine getirilmedi. **Göz gerektiren ölçütü ertelemeyin**
+> (§5.10'un aynısı, üçüncü kez).
 
 **M3 KAPANDI (1 Ağustos 2026):** Sürekli yakalama (kendini yenileyen DMA
 halka tamponu) yazıldı ve kartta doğrulandı: **62–63 kare/s, kayıp 0**
@@ -77,12 +94,21 @@ TEST  INT8  top-1 %58,07  top-3 %74,82        (pencere basina)
 girdi olcegi 1.000000 / sifir noktasi 0  ->  cihaz mel penceresini DOGRUDAN besler
 ```
 
-**SIRADAKİ İŞ — M6: TFLM entegrasyonu, cihazda gerçek zamanlı çıkarım.**
-En büyük bilinmeyen artık model değil, *"PC'de çalışıyor cihazda çalışmıyor"*
-riski. §9l'de ne yapılacağı ve nelere dikkat edileceği yazılı.
+**M6 ✅ BİTTİ (§9m).** Model cihazda çalışıyor ve PC ile **birebir aynı**:
 
-M5'ten geriye iki küçük iş kaldı (Aşama-1 ikili ağ, Aşama-3 mevsim tablosu);
-ikisi de M6 ile paralel gidebilir, kritik yolu tıkamıyorlar (§9k sonu).
+```
+TFLM + CMSIS-NN vendor edildi (cmake/tflm.cmake, surumler sabit)
+arena     110.436 bayt OLCULDU   (butce 180 KB; §9k'daki "141 KB" tahmindi)
+cikarim   190 ms                 (hedef: 1 s'lik pencere adimina sigmak)
+dogrulama 8/8 pencere BIREBIR ayni logit  <- "PC'de calisiyor cihazda
+                                             calismiyor" riski KAPANDI
+core1     62,6 kare/s, overrun 0, birlestirme 8 pencere
+```
+
+**SIRADAKİ İŞ — ekran hatası (§9n).** M6'nın çıktısını kullanıcıya
+göstermenin önündeki tek engel bu ve M7'nin tamamı ona bağlı.
+
+Geriye kalan küçük işler: Aşama-1 ikili ağ, Aşama-3 mevsim tablosu (§9k sonu).
 
 ---
 
@@ -264,6 +290,9 @@ Kart USB seri olarak görünüyor: **COM13** (`VID_2E8A PID_0009`).
 | `u` | LVGL demo ekranı | **evet** |
 | `m` | **mel + kapı hattı (M3)** | hayır |
 | `a` | **TAM DEMO**: LVGL kart + canlı mel spektrogramı + kapı | **evet** |
+| `x` | **tür ağı cihaz-içi doğrulama** + arena + çıkarım süresi (M6) | hayır |
+| `k` | **gerçek zamanlı tanıma** (core 1, mikrofon) | hayır |
+| `K` | aynısı ama kapı yoksayılır — ölçüm kipi | hayır |
 
 ```bash
 python tools/capture_wav.py --port COM13 --cmd m --sure 8   # 8 s akit, ozeti al
@@ -590,6 +619,7 @@ değil" sonucunu verdi. Bunu bir kez daha kullanın — ucuz ve kesin.
 | ~~**`s_capture` (96 KB)**~~ | ✅ **ÇÖZÜLDÜ (§9g).** 4 KB'lık `s_chunk`'a indi, bss 218.988 → 127.084. Arena'nın önü açık. |
 | ~~**Ekran gerilemesi**~~ | ✅ **ÇÖZÜLDÜ (§9h).** Panel hazır olma penceresi; ekran başlatması açılıştan ≥250 ms sonraya alındı. Bellek kazancı korundu. |
 | **EMI ölçümü — borç neredeyse kapandı** | `e` komutu artık gerçekten aç/kapa ölçüyor (arka ışık düz GPIO'da): **kapalıya göre +0,4 dB**, yani arka ışık mikrofonu bozmuyor. Kalan tek eksik: son üç ölçüm hâlâ `PWM %50` / `PWM %10` diye etiketleniyor, oysa üçü de aynı "açık" durumu. Etiketler düzeltilip yeniden çalıştırılırsa §4'teki "GEÇERSİZ" uyarısı kaldırılabilir. Küçük iş. |
+| **⛔ EKRAN BOZUK** | `o` testinde yalnızca en son çizilen kare görünüyor; `a` demosunda yazı tipi bozuk. **M6 öncesi derlemede de aynı** — gerileme değil, gözden kaçmış bir hata. Bit-bang yolu çalışıyor, PIO/DMA yolu çalışmıyor. Elenen ihtimaller ve sıradaki adım §9n. **M7'nin tamamı buna bağlı.** |
 | **Dokunmatik park edildi** | Kritik yolda değil. Kaldığı yer §9b. |
 | **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **GPIO34 (LCD_RST) aşağı çekilemiyor** | Ölçüldü, kök neden aranmadı. Bkz. §5.11. |
@@ -674,7 +704,8 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
 | M4 | Veri boru hattı + tür listesi (PC tarafı) | ✅ veri (178 tür, 7.111 WAV) · segmentasyon (§9e) · **eğitim kümesi (§9j)** · negatif saha turu M8'e ertelendi (§9f-4) |
 | M5 | Model eğitimi + damıtma + INT8 | 🔶 **Aşama-2 tür ağı ✅ (§9k)** · Aşama-1 ikili ağ ve Aşama-3 mevsim tablosu kaldı |
-| **M6** | **TFLM entegrasyonu, gerçek zamanlı çıkarım (core1)** | **🔵 SIRADAKİ (§9l)** |
+| M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | ✅ (§9m) — arena 110 KB, çıkarım 190 ms, doğrulama 8/8 birebir |
+| **—** | **EKRAN HATASI** | **⛔ M6 öncesinden geliyor, M7'yi tıkıyor (§9n)** |
 | M7 | Sonradan işleme, tarih ekranı, tam arayüz, günlük, pil | |
 | M8 | Saha kalibrasyonu | |
 
@@ -2267,6 +2298,252 @@ Gerçekten akustik bir teste ihtiyaç olursa **kullanıcıdan isteyin**: ne
 
 ---
 
+## 9m. M6 — TFLM entegrasyonu, cihazda çıkarım ✅ TAMAMLANDI
+
+### Ne yapıldı
+
+| Dosya | Ne |
+|---|---|
+| [`cmake/tflm.cmake`](cmake/tflm.cmake) | TFLM + CMSIS-NN derleme kuralları, sürümler sabitlenmiş |
+| [`src/ai/tur_agi.cc`](src/ai/tur_agi.cc) | TFLM sarmalayıcısı, arena, cihaz sözleşmesi sağlaması |
+| [`src/ai/tflm_port.cc`](src/ai/tflm_port.cc) | `DebugLog`, `micro_time`, **`abort()` ezmesi** |
+| [`src/ai/tanima.c`](src/ai/tanima.c) | core 1 gerçek zamanlı hat + 8 pencere birleştirme |
+| [`tools/dogrulama_seti.py`](tools/dogrulama_seti.py) | cihaz-içi doğrulama seti üreteci |
+| [`tools/sinif_tablosu.py`](tools/sinif_tablosu.py) | `siniflar.csv` → `src/ai/siniflar.h` |
+
+Yeni komutlar: **`x`** (doğrulama + arena + süre), **`k`** (gerçek zamanlı
+tanıma), **`K`** (aynısı ama kapı yoksayılır — ölçüm kipi).
+
+### TFLM'i vendor etmek — TFLM'in kendi Makefile'ı Windows'ta ÇALIŞMIYOR
+
+`tools/make/Makefile` wget/unzip/md5sum ve POSIX kabuğu bekliyor;
+`create_tflm_tree.py` de onu çağırıyor. Kaynak listesi bu yüzden CMake'e
+taşındı — **uydurulmadı**, TFLM'in kendi `tools/make/sources.inc` dosyasından
+alındı. Sürümler de TFLM'in kendi indirme betiklerinden:
+
+```
+tflite-micro  330b1747c9d51c0e394f51a2a34ff42deb9b95f5   (29 Tem 2026)
+flatbuffers   v25.9.23  + tools/make/flatbuffers.patch    <- YAMA SART
+gemmlowp      719139ce755a0f31cbf1c37f7f98adcc7fc9f425    (yalniz baslik)
+ruy           d37128311b445e758136b8602d1bbd2a755e115d    (yalniz baslik)
+CMSIS-NN      4ab83cc3cc98fb85ed6dafb55e8ca02f1628dcae
+```
+
+Kurulum (hiçbiri git'e girmiyor):
+
+```bash
+git clone --depth 1 https://github.com/tensorflow/tflite-micro.git third_party/tflite-micro
+cd third_party && mkdir .dl && cd .dl
+curl -sSL -o fb.zip       https://github.com/google/flatbuffers/archive/refs/tags/v25.9.23.zip
+curl -sSL -o gemmlowp.zip https://github.com/google/gemmlowp/archive/719139ce755a0f31cbf1c37f7f98adcc7fc9f425.zip
+curl -sSL -o ruy.zip      https://github.com/google/ruy/archive/d37128311b445e758136b8602d1bbd2a755e115d.zip
+curl -sSL -o cmsisnn.zip  https://github.com/ARM-software/CMSIS-NN/archive/4ab83cc3cc98fb85ed6dafb55e8ca02f1628dcae.zip
+for z in fb gemmlowp ruy cmsisnn; do unzip -q $z.zip; done
+# klasorleri flatbuffers/ gemmlowp/ ruy/ cmsis-nn/ olarak third_party/ altina tasi
+cd ../flatbuffers && patch -p1 < ../tflite-micro/tensorflow/lite/micro/tools/make/flatbuffers.patch
+```
+
+CMSIS Core başlıkları ayrıca indirilmedi: CMSIS-NN kendi kendine yetiyor
+(`Internal/arm_nn_compiler.h` yalnızca derleyicinin `arm_acle.h`'sini istiyor).
+
+### ⚠ Üç derleme tuzağı — üçü de gerçekti
+
+**1. `-DCMSIS_NN` tanımlanmazsa ODR çakışması.** `kernels/conv.h` gibi
+başlıklar `CMSIS_NN` yoksa `Register_CONV_2D_INT8()`'i **kendisi `inline`
+tanımlıyor**; `cmsis_nn/conv.cc`'deki gerçek tanımla çakışıyor. Derleme
+hatası olarak çıkıyor — iyi ki öyle. Tanım **PUBLIC** olmak zorunda: aynı
+başlıkları `micro_mutable_op_resolver.h` üzerinden bizim kodumuz da görüyor.
+
+**2. TFLM'in `abort()`'u newlib malloc'unu çekiyor — §5.4'ün ikinci kapısı.**
+TFLM birkaç yerde `abort()` çağırıyor (micro_utils.cc, reduce_common.cc,
+quantization_util.cc). newlib'in abort'u `raise()` → `signal()` → `malloc()`
+zincirini açıyor, malloc da `__retarget_lock_acquire_recursive` /
+`__lock___malloc_recursive_mutex` istiyor ve Pico SDK bunları sağlamıyor:
+
+```
+libg.a(libc_a-mlock.o): undefined reference to `__retarget_lock_acquire_recursive'
+```
+
+Kilit saplamaları yazmak yerine **`abort()`'un kendisi ezildi**
+(`tflm_port.cc` → `panic()`). Newlib malloc/signal hiç bağlanmıyor (520 KB'lik
+bir cihazda heap'i kazara canlandırmak istemiyoruz) ve hata sessiz kilitlenme
+yerine seri porta yazılan bir panic oluyor.
+
+> **Teşhis yöntemi kayda değer:** hangi nesnenin malloc'u çektiğini `nm` ile
+> bulamadım (kimse doğrudan çağırmıyordu). `-Wl,-y,<sembol>` linker
+> bayrağı her sembolü kimin tanımlayıp kimin referans verdiğini yazdırıyor;
+> zinciri üç turda ortaya çıkardı. Aynı sınıf hata tekrar çıkarsa bu bayrak.
+
+**3. Üretilmiş `models/tur_agi_int8.h` ile kendi başlığımın include guard'ı
+çakıştı.** İkisi de `POKEBIRD_TUR_AGI_H` kullanıyordu; kendi başlığım önce
+dahil edildiği için model dizisi **sessizce hiç dahil edilmedi** ve
+`pb_tur_agi` "tanımsız" çıktı. Bizimki `POKEBIRD_AI_TUR_AGI_H` oldu.
+
+### ✅ ARENA — ölçüldü (§9l madde 2)
+
+```
+arena_used_bytes()  110.436 bayt      §9k tahmini 141 KB (%28 fazla)
+ayrilan             122.880 (120 KB)  butce 180 KB
+```
+
+Ayrılan boyut ölçülene göre seçildi: %11 pay. 180 KB'da bırakmak 61 KB'ı
+boşuna tutardı. Model değişirse sayı da değişir — `x` komutu her koşuda
+kullanılan baytı basıyor, yetmezse `AllocateTensors` sebebini yazıp duruyor.
+`cmake -DPB_TFLM_ARENA_BAYT=...` ile ezilebilir.
+
+### ✅ ÇIKARIM SÜRESİ — ölçüldü (§9l madde 4)
+
+```
+190 ms / pencere   (min 189.559  ort 189.686  max 189.815 us)
+hedef 1 s'lik pencere adimi  ->  %19 doluluk, 5 kat pay
+```
+
+ARCHITECTURE §4 CMSIS-NN ile 0,3–0,5 s bekliyordu; ölçülen daha iyi.
+
+### ✅ CİHAZ-İÇİ DOĞRULAMA SETİ — 8/8 BİREBİR (§9l madde 7)
+
+M6'nın en kritik maddesi ve tek gerçek riski. 8 pencere (test bölümünden,
+biri negatif sınıf) `src/ai/dogrulama_seti.h`'ye gömüldü; `x` komutu bunları
+modelden geçirip logit'leri PC'nin çıktısıyla karşılaştırıyor.
+
+```
+logit   8/8 pencere BIREBIR ayni, en buyuk fark 0, ort mutlak fark 0.0000
+tahmin  8/8 pencere ayni sinifi sectik
+```
+
+Ses yolu bu teste **hiç girmiyor** (girdi hazır pencere), o yüzden hata alanı
+TFLM/CMSIS-NN/niceleştirme ile sınırlı. Kulaklık kuralı (§5.5) bu testi
+ilgilendirmiyor.
+
+> ### ⚠ İLK KOŞU "SAPMA VAR" DEDİ — SUÇLU PC'YDİ, CİHAZ DEĞİL
+>
+> İlk ölçüm 8/8 tahmin doğru ama logit'lerde **en büyük 2 adım, ortalama
+> mutlak 0,4441** sapma gösterdi. "Cihazda küçük bir sapma var" diye
+> yazmak üzereydim. Önce PC'nin kendi iki çekirdek setini karşılaştırdım:
+>
+> ```
+> XNNPACK vs BUILTIN_REF (ayni 8 pencere, ikisi de PC'de):
+>   en buyuk fark 2   ort mutlak 0,4441      <- BIREBIR AYNI SAYILAR
+> ```
+>
+> Yani sapmanın tamamı `tf.lite.Interpreter`'ın **varsayılan olarak
+> devreye soktuğu XNNPACK delegesinden** geliyordu; XNNPACK int8'i
+> bit-birebir hesaplamıyor. Altın standart referans çekirdekler
+> (`OpResolverType.BUILTIN_REF`) — TFLite'ın int8 tanımını onlar veriyor ve
+> CMSIS-NN onlarla birebir olmayı hedefliyor. Referans o şekilde yeniden
+> üretilince cihaz **8/8 birebir** çıktı.
+>
+> **Ders:** karşılaştırdığınız "referans"ın kendisi bir yaklaşım olabilir.
+> Cihazı suçlamadan önce referansı iki farklı yolla üretip aralarındaki
+> farka bakın — ölçüm ikiye bölünmezse yanlış tarafta hata ararsınız.
+
+### ✅ CORE 1'E TAŞINDI + BİRLEŞTİRME 8 (§9l madde 5, 6)
+
+`k` komutu: core 1 sesi okuyor, mel çıkarıyor, kapı açılınca saniyede bir
+çıkarım yapıyor ve son 8 pencereyi birleştiriyor; core 0 yalnızca basıyor.
+Birleştirme kuralı `tools/birlestirme_olc.py`'ninkiyle **aynı** (softmax
+ortalaması) — başka bir kural seçilse §9k'daki %70,40 / %82,20 geçersiz olurdu.
+
+### ⚠ SES HALKASI 4096 → 8192 BÜYÜTÜLDÜ — ölçüme dayalı, şart
+
+Çıkarım 190 ms sürüyor ve o süre boyunca core 1 halkayı **hiç okumuyor**.
+Okuma yolu, birikmiş miktar halkanın 3/4'ünü aşınca en tazeye atlıyor; yani
+eski 4096'lık halkanın gerçek toleransı 170 değil **128 ms**'ti. Her çıkarımda
+ses hattı kopar ve 3 saniyelik pencerenin ortasında süreksizlik olurdu —
+üstelik hiçbir yerde hata olarak görünmeden.
+
+```
+8192 ornek = 32 KB, tolerans 3/4 x 341 = 256 ms   (cikarimin 1,35 kati)
+```
+
+`PB_AUDIO_MAX_READ` halka boyutundan **koparıldı** (eskiden RING/2 idi):
+teşhis tamponu `s_chunk` onunla boyutlanıyor ve §9g'de 96 KB'dan 4 KB'a
+indirilen kazanç geri gidecekti.
+
+Kartta ölçülen (kapı yoksayılarak, yani her saniye çıkarım — en kötü durum):
+
+```
+1252 kare / 20 s = 62,6 kare/s      (gercek zaman 62,5)
+overrun 0                            <- halka yetiyor
+17 cikarim, her biri 190 ms, birlestirme 8 pencere
+```
+
+> Aşama-1 ikili ağ eklenince toplam çıkarım süresi artacak; halka toleransı
+> o zaman **yeniden ölçülmeli**. `k` komutu overrun'ı basıyor.
+
+### Bellek — ölçüldü
+
+```
+text 463.056 -> 944.992   (model 277 KB + dogrulama seti 94 KB + TFLM kodu)
+bss  127.084 -> 295.784   (arena 120 KB + halka +16 KB + birlestirme 5,7 KB
+                           + core1 yigini 8 KB)
+520 KB SRAM'de yigin/heap payi ~231 KB
+```
+
+Flash 16 MB'de sorun değil. §9l "bss + arena ≤ ~311 KB" diyordu; 295.784.
+
+### Kabul ölçütü — durum
+
+| # | Ölçüt | Sonuç |
+|---|---|---|
+| 1 | TFLM CMSIS-NN çekirdekleriyle derleniyor | ✅ |
+| 2 | Arena ÖLÇÜLDÜ, ≤180 KB | ✅ **110.436** ölçüldü, 120 KB ayrıldı |
+| 3 | Girdi dönüşümsüz bağlandı | ✅ `memcpy`, ölçek 1.0 cihazda da assert ediliyor |
+| 4 | Çıkarım 1 s'lik adıma sığıyor | ✅ **190 ms** |
+| 5 | Core 1'de, kapı açılmadıkça çalışmıyor | ✅ `k` komutu; kapı 14 fırsatın 5'ini eledi |
+| 6 | Birleştirme penceresi 8 | ✅ ve kural ölçümle aynı |
+| 7 | **Cihaz-içi doğrulama seti** | ✅ **8/8 BİREBİR** |
+| — | Ekranda gösterim | ⛔ **ekran bozuk, ama M6'dan değil — §9n** |
+
+Kabul ölçütlerinin **hiçbiri ekrana bakmayı gerektirmedi**; M6 baştan öyle
+tasarlanmıştı (§9l) ve bu, ekran hatası ortaya çıkınca işe yaradı.
+
+---
+
+## 9n. ⛔ EKRAN BOZUK — M6 ÖNCESİNDEN GELİYOR (açık iş)
+
+### Belirti (kullanıcı gözle doğruladı)
+
+- **`o` (dört köşeye dört renk):** ekran temizlenmiyor ve yalnızca **EN SON**
+  çizilen kare (sarı) görünüyor. Kırmızı/yeşil/mavi yok, `pb_lcd_fill(0x0000)`
+  hiç etki etmiyor.
+- **`a` (tam demo):** panel çalışıyor ama yazı tipi bozuk okunmuyor,
+  spektrogram yok, zemin beyaz. Yeşil "ses algılandı" yazısı **sesle tepki
+  veriyor** — yani ses hattı ve demo mantığı sağlam, sorun çizimde.
+
+### Ölçümle ELENENLER — tekrar bakmayın
+
+| İhtimal | Nasıl elendi |
+|---|---|
+| **M6 gerilemesi** | M6 öncesi `main` derlemesi (bss 127.084, text 463.056) kartta denendi: **aynı şekilde bozuk** |
+| **bss boyutu / yerleşimi** | Probe: aynı kod, `-DPB_TFLM_ARENA_BAYT=4096` → bss 295.784 → 177.000, **flash birebir aynı**. Hiç değişmedi |
+| **Panel ya da kablolama** | `d` teşhisinin **bit-bang** varyantı (PIO/DMA tamamen devre dışı) düz renkleri **doğru** basıyor |
+| **§5.9'un düzeltmesi kaybolmuş** | `QSPI_WaitIdle` yerinde, `QSPI_Deselect` onu çağırıyor |
+
+### Buradan çıkan
+
+Bit-bang çalışıyor, PIO/DMA yolu çalışmıyor → hata **PIO/DMA tarafında**
+(§9a'daki tablonun tam olarak bu satırı). "Yalnızca en son yazılan görünüyor"
+§5.9'un imzası: CS, veri hatta çıkmadan yükseliyor. Düzeltme kodda duruyor
+ama görünüşe göre **yetmiyor**.
+
+### Sıradaki adım
+
+1. `QSPI_WaitIdle`'ın gerçekten beklediğini doğrulayın — zaman aşımı 50 ms
+   ve **sessizce dönüyor**. Zaman aşımına giriyorsa TXSTALL hiç kurulmuyor
+   demektir ve fonksiyon hiçbir şey yapmıyordur. Sayaç ekleyip `x`/`i` gibi
+   bir komuttan bastırın: göz gerektirmeyen ilk gerçek ölçüm bu olur.
+2. `dma_channel_is_busy` sonrası PIO TX FIFO'sunun gerçekten boşaldığını
+   ayrıca kontrol edin (`pio_sm_is_tx_fifo_empty`).
+3. Bit-bang yolu çalıştığına göre en kötü ihtimalle ekran oradan sürülebilir
+   — yavaş ama M7'yi açar.
+
+> **Bu hatayı ararken göz gerektiren testi ertelemeyin.** §9h'de tam olarak
+> bu yapıldı (20 ms'lik ikili onaylandı, gönderilen 250 ms'lik sürüme hiç
+> bakılmadı) ve hata bir oturum boyunca sessizce durdu.
+
+---
+
 ## 10. Depo düzeni ve git durumu
 
 ```
@@ -2282,6 +2559,11 @@ src/
     display/  qspi.pio, qspi_pio(.c/.h), LCD_3in49(.c/.h),
               DEV_Config.h, dev_config.c, lcd_blit(.c/.h)
   dsp/        fft(.c/.h), mel(.c/.h), gate(.c/.h)
+  ai/         tur_agi(.cc/.h)     ← TFLM sarmalayicisi + arena
+              tflm_port.cc        ← DebugLog / micro_time / abort() ezmesi
+              tanima(.c/.h)       ← core1 gercek zamanli hat + birlestirme
+              dogrulama_seti.h    ← URETILMIS (GIRIYOR, 94 KB flash)
+              siniflar.h          ← URETILMIS (GIRIYOR)
   ui/         spectrogram(.c/.h), lv_conf.h, lv_port(.c/.h)
 test/       CMakeLists.txt, dsp_test.c      ← host tarafı DSP testleri
 tools/      capture_wav.py, mel_reference.py,
@@ -2291,6 +2573,8 @@ tools/      capture_wav.py, mel_reference.py,
             birdnet_ozet.py, segment_kes.py ← M4 adım 3: segmentasyon
             esc50_indir.py, egitim_kumesi.py ← M4 adım 4: eğitim kümesi
             egit.py, birlestirme_olc.py     ← M5: eğitim + değerlendirme
+            dogrulama_seti.py               ← M6: cihaz-içi doğrulama seti
+            sinif_tablosu.py                ← M6: sınıf adları -> siniflar.h
 models/     tur_agi_int8.h                  ← C dizisi (GİRİYOR, firmware derliyor)
             rapor.txt, birlestirme.txt      ← doğruluk kayıtları (GİRİYOR)
             tur_agi.keras, *.tflite         ← girmiyor, üretilebilir
@@ -2311,13 +2595,23 @@ data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
                 wav/<kategori>/*.wav · esc50_kayitlar.csv
                 birdnet_sonuc/              ← negatiflerin kuş taraması
 .venv-birdnet/  BirdNET 3.11 ortamı + model (girmiyor, ~1 GB)
-third_party/  pico-sdk/, lvgl/              (ikisi de git'e girmiyor)
+third_party/  pico-sdk/, lvgl/              (git'e girmiyor)
+              tflite-micro/, flatbuffers/, gemmlowp/, ruy/, cmsis-nn/
+                                            ← M6, girmiyor; kurulum §9m'de
 rsvpnano/     kullanıcının kopyası           (git'e girmiyor)
 ```
 
 ### Git
 
-Dal `main`, uzak depo yok, çalışma ağacı temiz.
+**Dal `m6`** (uzak depo yok, çalışma ağacı temiz). `main` M5 sonunda duruyor;
+`m6` ekran hatası ayıklanırken kontrol grubu olarak kullanıldı ve o yüzden
+henüz birleştirilmedi. Kontrol derlemesi: `git checkout main && cmake -S . -B build-head ...`
+
+M6 oturumunun commit'leri (2 Ağustos 2026):
+
+| Commit | Ne |
+|---|---|
+| `ce79542` | **M6: TFLM + CMSIS-NN entegrasyonu** — `cmake/tflm.cmake`, `src/ai/`, `x`/`k`/`K` komutları, ses halkası 8192, cihaz-içi doğrulama seti (§9m) |
 
 Bu oturumun (2 Ağustos 2026) commit'leri:
 
