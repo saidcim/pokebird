@@ -377,11 +377,28 @@ Newlib'in tüm stdio kilit makinesini çekiyor (`__retarget_lock_acquire_recursi
 vb. tanımsız), Pico SDK'nın minimal printf'i onları sağlamıyor. SDK'nın kendi
 `stdio_flush()` fonksiyonu kullanılmalı.
 
-### 5.5 PC hoparlöründen bip çalarak akustik test — GEÇERSİZ
+### 5.5 PC'den ses çalıp cihazın duymasını beklemek — GEÇERSİZ, HÂLÂ GEÇERSİZ
 
 `[Console]::Beep` ile test yapıldı, "mikrofon çalışıyor" sanıldı. **Ama
 bilgisayarda kulaklık takılıydı, hoparlörden ses çıkmadı.** Görülen artış
 odadaki başka bir sesti. Doğru test: kullanıcının el çırpması (geçti).
+
+> ### ⛔ KURAL — kullanıcı 2 Ağustos 2026'da tekrar hatırlattı
+>
+> **Bilgisayarda kulaklık takılı ve öyle kalacak.** Bu yüzden:
+>
+> **PC'den ses çalıp cihazın mikrofonuyla duymasını bekleyen HİÇBİR test
+> kurmayın.** Ne `Console::Beep`, ne WAV çalma, ne ffplay, ne tarayıcıdan
+> kuş sesi. Hoparlörden ses çıkmıyor; test sessizce "başarısız" değil,
+> sessizce **anlamsız** olur — cihaz hiçbir şey duymaz ve siz bunu kod
+> hatası sanıp saatlerce yanlış yerde ararsınız.
+>
+> **Akustik bir test gerekiyorsa KULLANICIDAN İSTEYİN.** Ne çalacağını,
+> ne kadar süre, cihazı nereye tutacağını açıkça yazın; sonucu o size
+> bildirsin. Elle yapılan test geçerli, otomatik olan değil.
+>
+> Bu, §5.10'un ("dolaylı ölçüme fazla güvenmeyin") akustik hâli: burada
+> ölçüm dolaylı bile değil, **hiç yapılmıyor.**
 
 ### 5.6 Ev dizini kazara bir git deposu
 
@@ -2219,6 +2236,21 @@ data/egitim/siniflar.csv     sinif indeksi -> eBird kodu / Turkce ad (179 satir)
    karşılaştırmak.** Aynı girdi → aynı çıktı olmalı; olmuyorsa mel'e,
    arena'ya ya da niceleştirmeye bakın. Ses yolunu işin içine katmadan
    sınayın ki hata alanı dar kalsın.
+
+### ⛔ M6'da akustik test: PC'den ses ÇALMAYIN
+
+**Bilgisayarda kulaklık takılı (§5.5).** Cihazın mikrofonuyla duymasını
+bekleyen otomatik test kurmayın — hoparlörden ses çıkmıyor, test anlamsız
+olur ve sonucu kod hatası sanarsınız.
+
+M6'nın doğrulaması zaten **ses gerektirmiyor**: madde 7'deki cihaz-içi
+doğrulama seti gömülü pencereleri kullanıyor, mikrofonu hiç işin içine
+katmıyor — hata alanı bu yüzden dar. Çıkarım doğruluğunu böyle sınayın.
+
+Gerçekten akustik bir teste ihtiyaç olursa **kullanıcıdan isteyin**: ne
+çalacağını, kaç saniye, cihazı nereye tutacağını yazın; sonucu o bildirsin.
+İlk saha doğrulaması (boş odada bilgisayardan kuş sesi çalmak) da böyle,
+**kullanıcının elleriyle** yapılacak.
 
 ### Beklenen tuzaklar
 
