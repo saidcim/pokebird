@@ -2041,24 +2041,121 @@ bir değer.
 > yeniden mel çıkarmak demek. M8 saha kayıtlarıyla birlikte yapılacak —
 > asıl değerini de orada verecek zaten (gerçek İstanbul gürültüsüyle).
 
-### Durum
+### ✅ SONUÇ — 60 devir, ölçüldü
 
-🔵 **Eğitim çalışıyor** (60 devir, ~1 sa 40 dk). İlk devir sonunda doğrulama
-top-1 **%25,56**, top-3 %43,39 — 179 sınıfta rastgele %0,56 olduğuna göre
-hat öğreniyor. Sonuçlar `models/rapor.txt`'e yazılacak; beklenti
-ARCHITECTURE §4'te **top-1 %65–75, top-3 %85–90** (temiz kayıtlarda).
+```
+TEST (hic dokunulmamis 6.267 pencere)
+  float32  top-1 %58,05   top-3 %75,01
+  INT8     top-1 %58,07   top-3 %74,82      <- nicelestirme bedeli ~0
+tflite 270 KB · girdi olcegi 1.000000 / sifir noktasi 0
+```
 
-### Bundan sonra (M5'in kalanı)
+**INT8'in bedeli sıfır çıktı** (+0,02 / −0,19 puan). ReLU6 + temsilî veri
+kümesiyle kalibrasyon işini görmüş; bu, plandaki "niceleştirme öncesi/sonrası
+fark raporlanır" maddesinin cevabı.
 
-1. Eğitim bitince `rapor.txt`: top-1/top-3, INT8 bedeli, en kötü 20 sınıf
-   ve en çok karıştıkları tür.
-2. **Aşama-1 ikili ağ** (~15 KB): kuş var mı yok mu. Aynı veri, iki sınıf
-   (178 tür → "kuş", negatif → "kuş değil").
-3. Aşama-3 mevsim tablosu: `species_istanbul.csv`'deki `ay_01..ay_12`'den
-   178×12 log-öncelik tablosu, ±2.0 logit tavanıyla.
-4. M6: TFLM entegrasyonu, gerçek arena ölçümü, cihaz-içi doğrulama seti
-   (ARCHITECTURE §6 adım 9 — "PC'de çalışıyor cihazda çalışmıyor" sınıfını
-   yakalayan tek şey).
+### ⚠ Ama asıl sayı bu değil — zamansal birleştirme ölçüldü
+
+`egit.py`'nin bildirdiği rakam **tek 3 saniyelik pencere** başına. Cihaz öyle
+çalışmıyor: adım 1 sn ve Aşama-3 ardışık pencereleri birleştiriyor.
+[`tools/birlestirme_olc.py`](tools/birlestirme_olc.py) bunu ölçüyor
+(`models/birlestirme.txt`):
+
+| birleştirilen pencere | top-1 | top-3 |
+|---|---|---|
+| 1 (ham) | %58,07 | %74,82 |
+| 2 | %64,21 | %79,63 |
+| 3 | %67,58 | %81,18 |
+| 5 | %69,29 | %81,98 |
+| **8** | **%70,40** | **%82,20** |
+| 12 | %69,71 | %82,33 |
+
+**Kazanç 5–8 pencerede doyuyor**, 12'de artık artmıyor (hatta top-1 düşüyor).
+Aşama-3'ün penceresi buna göre seçilmeli: **~8 pencere.** Daha uzunu bedava
+değil, gecikme getiriyor ve karşılığını vermiyor.
+
+Böylece top-1 **%70,4** ile ARCHITECTURE §4'ün %65–75 bandının içinde;
+top-3 **%82,2** ile %85–90 bandının biraz altında. Üstelik plan **~110 tür**
+varsayıyordu, bizde **179** var.
+
+> **Bu sayılar bir ÜST SINIR tahmini, dürüst yazalım.** Birleştirme test
+> kümesindeki aynı kaydın ardışık dilimleri üzerinden yapıldı. Cihaz 1 sn
+> adımla daha çok örtüşen pencere görecek → hataları daha ilintili → gerçek
+> kazanç bir miktar daha düşük. Ayrıca bu dilimler BirdNET'in kuş duyduğu
+> dilimler, yani "kuş sürekli ötüyor" varsayımı burada geçerli. Kesin cevap
+> M8 saha testinde.
+
+### Saha açısından iki kritik oran (pencere başına)
+
+```
+negatifi kus sanma : %8,37     <- sahada en pahali hata
+kusu negatif sanma : %1,40
+```
+
+Negatifi kuş sanma %8,37 tek pencerede yüksek görünüyor ama üç şey onu
+bastıracak: birleştirme, **Aşama-0 kapısı** (sessiz odada zamanın yalnızca
+%2–3'ünde açılıyor, §9c) ve henüz yazılmamış **Aşama-1 ikili ağ**.
+
+### ⚠ Sınıf budama ölçüldü — sanıldığı kadar işe yaramıyor
+
+Karışıklık listesindeki en zayıf türleri atmak cazip görünüyordu. **İlk
+ölçümüm daireseldi** (en zayıf türleri *test* kümesine bakarak seçip yine
+testte ölçmek) ve %65,5 gibi şişik bir sayı verdi. Doğru yol — seçimi
+**doğrulamada**, ölçümü **testte** yapmak:
+
+| çıkarılan tür | kalan sınıf | top-1 | top-3 |
+|---|---|---|---|
+| 0 | 179 | %58,07 | %74,82 |
+| 20 | 159 | %59,65 | %76,62 |
+| 40 | 139 | %61,66 | %78,18 |
+
+**40 tür feda edip 3,6 puan.** Kötü takas. §9d'de "sonradan budamak kolay"
+diye not düşülmüştü; ölçüldü, kolay ama getirisi küçük. Budama yapılacaksa
+en sona bırakılmalı.
+
+### Asıl darboğaz: ezberleme, kapasite değil
+
+```
+devir 15: kayip 0,65  dogrulama top-1 %52,2
+devir 60: kayip 0,20  dogrulama top-1 %56,8      <- kayip 3 kat dustu, dogruluk +4,6 puan
+```
+
+Eğitim kaybı düşmeye devam ederken doğrulama doğruluğu 15. devirden sonra
+neredeyse yatay. Bu **aşırı öğrenme** imzası. Dolayısıyla:
+
+- **Modeli büyütmek muhtemelen işe yaramaz** (MAC'in %78'i boş olsa da).
+  Kapasite eksik değil, genelleme eksik.
+- İşe yarayacak olan: **daha güçlü veri artırma** (mixup, daha agresif
+  SpecAugment), ağırlık sönümü, ve M8'de gerçek gürültüyle SNR karıştırma.
+- Ya da **tür başına daha çok kayıt** — M4'te kota 40'tı, yükseltilebilir
+  (ama 13 GB daha indirme demek).
+
+### Karışıklıklar akustik olarak ANLAMLI — iyiye işaret
+
+En çok karışan çiftler (`models/birlestirme.txt`):
+
+```
+Serce -> Agac Sercesi · Cilikusu -> Surmeli Cilikusu
+Benekli Sinekkapan -> Kucuk Sinekkapan · Benekli Bulbul -> Bulbul
+Sutavugu -> Sakarmeke · Ibibik -> Guguk
+```
+
+Model gürültü ezberlemiyor; **gerçekten benzer öten türleri** karıştırıyor.
+Bu, mimarinin sağlam olduğunu söyleyen bir işaret — ve top-3 gösteriminin
+neden doğru tasarım kararı olduğunu da gösteriyor: bu çiftlerin ikisi de
+ilk üçte olacak.
+
+### Bundan sonra
+
+1. **M6'ya geçmek** — en büyük bilinmeyen artık model değil, "PC'de çalışıyor
+   cihazda çalışmıyor" riski. Gerçek arena ölçümü, çıkarım süresi, cihaz-içi
+   doğrulama seti (ARCHITECTURE §6 adım 9).
+2. **Aşama-1 ikili ağ** (~15 KB): aynı veriden iki sınıf (178 tür → "kuş",
+   negatif → "kuş değil"). Küçük iş, negatifi kuş sanma oranını düşürür.
+3. **Aşama-3 mevsim tablosu**: `species_istanbul.csv`'deki `ay_01..ay_12`'den
+   178×12 log-öncelik, ±2.0 logit tavanı. Birleştirme penceresi **8**.
+4. Doğruluk iterasyonu (artırma güçlendirme) M6'dan sonra — çünkü asıl
+   ölçüt boş odadaki saha testi, ve o testi ancak cihaz çalışınca yapabiliriz.
 
 ---
 

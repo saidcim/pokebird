@@ -1,0 +1,92 @@
+model     : 209,107 parametre
+MAC/pencere: 6.6 M  (butce 30 M)
+aktivasyon tepesi (kaba): 141 KB (arena butcesi 180 KB)
+tflite    : 270 KB
+girdi     : int8, olcek 1.000000, sifir noktasi 0
+
+TEST float32 : top-1 %58.05  top-3 %75.01
+TEST int8    : top-1 %58.07  top-3 %74.82   (nicelestirme bedeli +0.02 puan)
+
+EN KOTU 20 SINIF (int8, test kumesi duyarliligi):
+  İskender Papağanı            %  0.0  (13 pencere)  en cok karistigi: Sarıasma
+  Kara Karınlı Kumkuşu         %  0.0  (7 pencere)  en cok karistigi: Sakarca
+  Balaban                      %  0.0  (15 pencere)  en cok karistigi: Gece Balıkçılı
+  Bahri                        %  0.0  (16 pencere)  en cok karistigi: Turna
+  Küçük Batağan                %  0.0  (13 pencere)  en cok karistigi: Sürmeli Kervançulluğu
+  Karabatak                    %  0.0  (24 pencere)  en cok karistigi: negatif / bilinmiyor
+  Alaca Ağaçkakan              %  0.0  (12 pencere)  en cok karistigi: Orman Alaca Ağaçkakanı
+  Alaca Balıkçıl               %  0.0  (2 pencere)  en cok karistigi: Gece Balıkçılı
+  Yılan Kartalı                %  0.0  (16 pencere)  en cok karistigi: Arıkuşu
+  Küçük Kartal                 %  3.8  (26 pencere)  en cok karistigi: Yeşilbacak
+  Sıvacı                       %  5.1  (39 pencere)  en cok karistigi: Kara Başlı Ötleğen
+  Çıkrıkçın                    %  6.7  (15 pencere)  en cok karistigi: Kara Gagalı Sumru
+  Erguvani Balıkçıl            % 10.0  (10 pencere)  en cok karistigi: Kulaklı Orman Baykuşu
+  Kara Çaylak                  % 10.0  (20 pencere)  en cok karistigi: Poyrazkuşu
+  Hazar Martısı                % 10.0  (10 pencere)  en cok karistigi: Kuzey Gümüş Martısı
+  Kerkenez                     % 11.1  (27 pencere)  en cok karistigi: Delice Doğan
+  İbibik                       % 11.5  (26 pencere)  en cok karistigi: Guguk
+  Saka                         % 13.6  (44 pencere)  en cok karistigi: Çayır Taşkuşu
+  Kır İncirkuşu                % 13.8  (29 pencere)  en cok karistigi: Çayır İncirkuşu
+  Ağaç Serçesi                 % 14.3  (42 pencere)  en cok karistigi: Serçe
+
+devir  kayip   dogrulama top-1  top-3
+    1  4.4264  %       25.56  %43.39
+    2  2.5765  %       35.87  %56.30
+    3  1.9665  %       41.72  %62.70
+    4  1.6087  %       47.35  %68.47
+    5  1.3871  %       42.36  %63.66
+    6  1.2408  %       47.11  %68.19
+    7  1.1230  %       47.75  %67.18
+    8  1.0332  %       51.82  %71.95
+    9  0.9689  %       52.19  %72.31
+   10  0.8799  %       48.14  %68.41
+   11  0.8166  %       52.04  %71.62
+   12  0.7821  %       49.99  %70.66
+   13  0.7327  %       51.04  %70.72
+   14  0.6948  %       51.05  %70.26
+   15  0.6506  %       52.21  %71.13
+   16  0.6421  %       45.24  %65.72
+   17  0.6087  %       47.58  %67.18
+   18  0.5782  %       53.01  %71.92
+   19  0.5669  %       53.28  %71.19
+   20  0.5276  %       54.17  %72.62
+   21  0.5031  %       51.99  %70.86
+   22  0.5047  %       53.60  %72.37
+   23  0.4719  %       53.19  %71.27
+   24  0.4516  %       54.00  %72.87
+   25  0.4424  %       53.12  %72.40
+   26  0.4350  %       53.24  %72.58
+   27  0.4033  %       53.96  %73.20
+   28  0.3904  %       53.74  %72.29
+   29  0.3802  %       54.37  %72.82
+   30  0.3621  %       53.77  %72.89
+   31  0.3475  %       53.45  %72.05
+   32  0.3485  %       54.79  %72.96
+   33  0.3413  %       53.29  %72.09
+   34  0.3285  %       54.06  %72.48
+   35  0.3262  %       55.69  %73.88
+   36  0.3046  %       56.01  %73.68
+   37  0.2943  %       56.01  %73.72
+   38  0.2819  %       55.37  %73.91
+   39  0.2751  %       55.35  %73.18
+   40  0.2663  %       55.58  %73.46
+   41  0.2637  %       55.64  %73.62
+   42  0.2524  %       55.83  %73.68
+   43  0.2503  %       56.05  %73.72
+   44  0.2520  %       56.22  %73.98
+   45  0.2404  %       56.37  %74.26
+   46  0.2339  %       56.12  %73.47
+   47  0.2300  %       55.83  %73.77
+   48  0.2319  %       55.88  %74.07
+   49  0.2286  %       56.28  %73.84
+   50  0.2208  %       56.41  %74.27
+   51  0.2179  %       56.72  %74.50
+   52  0.2127  %       56.95  %74.53
+   53  0.2182  %       56.50  %74.32
+   54  0.2068  %       56.81  %74.39
+   55  0.2114  %       56.95  %74.57
+   56  0.2123  %       56.78  %74.34
+   57  0.2057  %       56.84  %74.46
+   58  0.2002  %       56.81  %74.41
+   59  0.2028  %       56.83  %74.37
+   60  0.1994  %       56.83  %74.47

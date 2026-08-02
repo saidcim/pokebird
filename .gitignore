@@ -63,3 +63,4 @@ data/negatif/
 # .keras her egitimde yeniden uretiliyor ve buyuk; ilerleme.html gecici pano.
 models/*.keras
 models/ilerleme.html
+models/test_olasilik.npy

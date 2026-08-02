@@ -1,0 +1,30 @@
+ZAMANSAL BIRLESTIRME — kac ardisik pencere oylanirsa ne oluyor
+(secim yok, olcum test kumesinde; ust sinir tahmini, bkz. betik basligi)
+
+ pencere   ornek    top-1     top-3
+       1    6267   %58.07   %74.82
+       2    2872   %64.21   %79.63
+       3    2184   %67.58   %81.18
+       5    1654   %69.29   %81.98
+       8    1365   %70.40   %82.20
+      12    1228   %69.71   %82.33
+
+negatifi kus sanma orani (pencere basina): %8.37
+kusu negatif sanma orani  (pencere basina): %1.40
+
+En cok karisan 15 cift (pencere basina, test):
+  Serçe                      -> Ağaç Serçesi                 20
+  Büyük Baştankara           -> Ağaç İncirkuşu               15
+  İbibik                     -> Guguk                        15
+  Kayın Baştankarası         -> Ağaç İncirkuşu               15
+  Dağ İspinozu               -> Halkalı Sinekkapan           14
+  Çalıkuşu                   -> Sürmeli Çalıkuşu             13
+  Bahçe Tırmaşıkkuşu         -> Yalıçapkını                  12
+  Turna                      -> Ötücü Kuğu                   11
+  Ev Kırlangıcı              -> Ağaç Serçesi                 11
+  Boz Ötleğen                -> Bülbül                       11
+  Benekli Sinekkapan         -> Küçük Sinekkapan             11
+  Saka                       -> Çayır Taşkuşu                10
+  Ökse Ardıcı                -> Mavi Baştankara              10
+  Benekli Bülbül             -> Bülbül                       10
+  Sutavuğu                   -> Sakarmeke                     9
