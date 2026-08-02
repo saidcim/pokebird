@@ -63,11 +63,25 @@ static_assert(PICO_FLASH_SIZE_BYTES == 16 * 1024 * 1024,
 #define BL_PWM_WRAP     2048
 #define ES8311_I2C_ADDR 0x18
 
-/* 2 saniyelik yakalama tamponu. 24 kHz x 16 bit = 96 KB; 520 KB SRAM'de rahat.
- * Gürültü tabanı ve SNR ölçümü için 2 saniye fazlasıyla yeterli. */
+/**
+ * Yakalama parçası — akıştan tek seferde okunan en büyük öbek.
+ *
+ * Burada eskiden 2 saniyelik bitişik bir tampon vardı: 24 kHz × 16 bit =
+ * 96.000 bayt, tek başına bss'in yarısı. Onu kullanan teşhis komutlarının
+ * hiçbirinin 2 saniyeyi bir arada görmesi gerekmiyordu — hepsi ya biriktirici
+ * (RMS, tepe, DC) ya da pencere pencere çalışıyor. M3'ün sürekli yakalama
+ * halkası geldiğinden beri (hal/audio_i2s.c) veri kesintisiz biçimde parça
+ * parça okunabiliyor, bu yüzden tampon parça boyuna indirildi.
+ *
+ * Kazanç 96.000 → 4.096 bayt. M6'nın TFLM arena'sı (180 KB) ancak bu yer
+ * açıldıktan sonra sığıyor.
+ */
+#define CHUNK_SAMPLES   PB_AUDIO_MAX_READ       /* 2048 ornek = 4096 bayt */
+static int16_t s_chunk[CHUNK_SAMPLES];
+
+/* 'r' komutunun kayıt uzunluğu. */
 #define CAPTURE_SECONDS 2
 #define CAPTURE_SAMPLES (PB_SAMPLE_RATE * CAPTURE_SECONDS)
-static int16_t s_capture[CAPTURE_SAMPLES];
 
 static const pb_audio_cfg_t s_audio_cfg = {
     .mclk_freq   = PB_MCLK_RATE,
@@ -151,26 +165,61 @@ typedef struct {
  * optimize edilmiş log10f'i zaten bağlı ve M3'te CMSIS-DSP gelecek. */
 #include <math.h>
 
-static audio_stats_t compute_stats(const int16_t *x, uint32_t n) {
-    audio_stats_t st = { 0 };
-    if (n == 0) return st;
+/**
+ * Akış biriktiricisi — istatistik tek geçişte.
+ *
+ * Eski `compute_stats` İKİ geçişliydi: önce DC ortalamasını buluyor, sonra
+ * aynı diziyi ikinci kez tarayıp o ortalamaya göre RMS hesaplıyordu. Bu,
+ * örneklerin tamamının bellekte durmasını şart koşuyordu. Parça parça
+ * okurken ikinci geçiş için veri yok — parça işlendikten sonra üzerine
+ * yenisi yazılıyor.
+ *
+ * Çözüm varyans özdeşliği:  rms² = sumsq/n − (sum/n)²
+ * Böylece ham toplamlar biriktirilip DC ancak sonda çıkarılabiliyor.
+ * `double` ile güvenli: 48.000 örnek × 32768² ≈ 5,2e13, double'ın tam sayı
+ * kesinliği 9e15'e kadar. Host tarafında iki yol aynı veriyle karşılaştırıldı:
+ * karttan alınan gerçek kayıtta sapma 3,6e-14 dB, DC 20000 üzerine ±3 AC gibi
+ * fark almayı zorlayan uydurma bir durumda bile 3,6e-8 dB. (Kabul sınırı
+ * 0,1 dB idi.)
+ */
+typedef struct {
+    double   sum;
+    double   sumsq;
+    int32_t  peak;
+    uint32_t n;
+} stats_acc_t;
 
-    double sum = 0.0;
-    for (uint32_t i = 0; i < n; i++) sum += (double)x[i];
-    st.dc_offset = sum / (double)n;
-
-    double sumsq = 0.0;
-    int32_t peak = 0;
+static void stats_add(stats_acc_t *a, const int16_t *x, uint32_t n) {
     for (uint32_t i = 0; i < n; i++) {
-        double v = (double)x[i] - st.dc_offset;   /* DC'yi çıkararak gerçek gürültü */
-        sumsq += v * v;
-        int32_t a = x[i] < 0 ? -(int32_t)x[i] : (int32_t)x[i];
-        if (a > peak) peak = a;
+        double v = (double)x[i];
+        a->sum   += v;
+        a->sumsq += v * v;
+        int32_t m = x[i] < 0 ? -(int32_t)x[i] : (int32_t)x[i];
+        if (m > a->peak) a->peak = m;
     }
-    st.rms  = sqrt(sumsq / (double)n);
-    st.peak = peak;
-    st.dbfs = (st.rms > 0.0) ? 20.0 * log10(st.rms / 32768.0) : -999.0;
+    a->n += n;
+}
+
+static audio_stats_t stats_finish(const stats_acc_t *a) {
+    audio_stats_t st = { 0 };
+    if (a->n == 0) return st;
+
+    double mean = a->sum / (double)a->n;
+    double var  = a->sumsq / (double)a->n - mean * mean;
+    if (var < 0.0) var = 0.0;        /* yuvarlama sıfırın altına düşürebilir */
+
+    st.dc_offset = mean;
+    st.rms       = sqrt(var);
+    st.peak      = a->peak;
+    st.dbfs      = (st.rms > 0.0) ? 20.0 * log10(st.rms / 32768.0) : -999.0;
     return st;
+}
+
+/** Bellekteki küçük bir tampon için kolaylık sarmalayıcısı. */
+static audio_stats_t compute_stats(const int16_t *x, uint32_t n) {
+    stats_acc_t acc = { 0 };
+    stats_add(&acc, x, n);
+    return stats_finish(&acc);
 }
 
 /**
@@ -181,37 +230,35 @@ static audio_stats_t compute_stats(const int16_t *x, uint32_t n) {
  * bölüp pencere RMS'lerinin 10. yüzdeliğini almak, geçici seslere karşı
  * dayanıklı ve "en sessiz an" için çok daha dürüst bir sayı veriyor.
  */
-#define NOISE_WINDOWS 64
+/* Pencere sayısı 64'ten 48'e indi ve pencere uzunluğu parça sınırına hizalandı.
+ *
+ * Eskiden 2 saniye tek parça okunup 64'e bölünüyordu (pencere 750 örnek).
+ * Akışta pencerenin okuma parçasına hizalı olması gerekiyor, yoksa pencereler
+ * parça sınırını aşar. 1024 örneklik 48 pencere = 49.152 örnek = 2,048 s.
+ *
+ * YAN ETKİ — belgelenmeli: yüzdelik indeksi `count/10` olduğu için 64 pencerede
+ * 6. eleman (%9,4), 48 pencerede 4. eleman (%8,3) seçiliyor. Yani "10.
+ * yüzdelik" biraz kaydı. Sonuç diagnostik; M1'in -36 dBFS tabanıyla
+ * karşılaştırma yaparken bu kayma akılda tutulmalı. */
+#define NOISE_WINDOWS 48
+#define NOISE_WIN_LEN 1024      /* 42,7 ms @ 24 kHz — parça boyunun böleni */
 
-static double noise_floor_dbfs(const int16_t *x, uint32_t n, double *out_rms) {
-    uint32_t w = n / NOISE_WINDOWS;
-    if (w < 16) w = n, n = w;   /* çok kısa sinyal: tek pencere */
+static double window_rms(const int16_t *x, uint32_t n) {
+    stats_acc_t acc = { 0 };
+    stats_add(&acc, x, n);
+    return stats_finish(&acc).rms;
+}
 
-    double rms_list[NOISE_WINDOWS];
-    uint32_t count = 0;
-    for (uint32_t k = 0; k + w <= n && count < NOISE_WINDOWS; k += w, count++) {
-        double sum = 0.0;
-        for (uint32_t i = 0; i < w; i++) sum += (double)x[k + i];
-        double mean = sum / (double)w;
-        double sq = 0.0;
-        for (uint32_t i = 0; i < w; i++) {
-            double v = (double)x[k + i] - mean;
-            sq += v * v;
-        }
-        rms_list[count] = sqrt(sq / (double)w);
-    }
-    if (count == 0) { if (out_rms) *out_rms = 0.0; return -999.0; }
-
-    /* küçükten büyüğe sırala (n küçük, basit ekleme sıralaması yeterli) */
+/** Sıralayıp 10. yüzdeliği döndür (liste yerinde değiştirilir). */
+static double percentile10(double *v, uint32_t count) {
+    /* küçükten büyüğe (count küçük, basit ekleme sıralaması yeterli) */
     for (uint32_t i = 1; i < count; i++) {
-        double v = rms_list[i];
+        double t = v[i];
         uint32_t j = i;
-        while (j > 0 && rms_list[j - 1] > v) { rms_list[j] = rms_list[j - 1]; j--; }
-        rms_list[j] = v;
+        while (j > 0 && v[j - 1] > t) { v[j] = v[j - 1]; j--; }
+        v[j] = t;
     }
-    double p10 = rms_list[count / 10];
-    if (out_rms) *out_rms = p10;
-    return (p10 > 0.0) ? 20.0 * log10(p10 / 32768.0) : -999.0;
+    return v[count / 10];
 }
 
 static void print_stats(const char *label, const audio_stats_t *st,
@@ -223,14 +270,48 @@ static void print_stats(const char *label, const audio_stats_t *st,
     printf("\n");
 }
 
+/**
+ * Akıştan `total` örnek oku ve yalnızca istatistik biriktir — ham veri
+ * saklanmaz, her parça bir sonrakinin üzerine yazılır.
+ *
+ * TUZAK: flush YALNIZCA döngüden önce, bir kez çağrılıyor. Parça başına
+ * `pb_audio_capture` çağırmak cazip görünüyor (imzası tam uyuyor) ama o
+ * fonksiyon flush + oku sarmalayıcısı: her çağrıda birikmişi atar. Parça
+ * parça çağrılırsa parçalar ARASINDAKİ örnekler düşer ve ölçüm sessizce
+ * bozulur — `fifo_overrun` bu kaybı bildirmez, çünkü halka taşmamıştır,
+ * biz attırmışızdır.
+ */
+static pb_capture_result_t stream_stats(uint32_t total, audio_stats_t *out) {
+    pb_capture_result_t res = { 0 };
+    stats_acc_t acc = { 0 };
+
+    pb_audio_stream_flush();
+    while (res.samples < total) {
+        uint32_t want = total - res.samples;
+        if (want > CHUNK_SAMPLES) want = CHUNK_SAMPLES;
+
+        pb_capture_result_t part = pb_audio_stream_read(s_chunk, want, 1000);
+        res.samples      += part.samples;
+        res.fifo_overrun |= part.fifo_overrun;
+        res.timed_out    |= part.timed_out;
+        stats_add(&acc, s_chunk, part.samples);
+
+        if (part.timed_out) break;
+    }
+    if (out) *out = stats_finish(&acc);
+    return res;
+}
+
 /* Ölçüm alırken arka ışığı verilen duruma getirip bekle (güç hattı otursun) */
 static audio_stats_t measure_with_backlight(bool enable,
                                             pb_capture_result_t *cap_out) {
     backlight_set(enable);
     sleep_ms(250);
-    pb_capture_result_t cap = pb_audio_capture(s_capture, PB_SAMPLE_RATE / 2); /* 0.5 s */
+
+    audio_stats_t st;
+    pb_capture_result_t cap = stream_stats(PB_SAMPLE_RATE / 2, &st);  /* 0.5 s */
     if (cap_out) *cap_out = cap;
-    return compute_stats(s_capture, cap.samples);
+    return st;
 }
 
 /* â”€â”€ Komutlar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -258,19 +339,43 @@ static void cmd_info(void) {
 }
 
 static void cmd_noise(void) {
-    printf("\nGurultu tabani olcumu (%d s). Ortami sessiz tutun...\n", CAPTURE_SECONDS);
+    const uint32_t total = (uint32_t)NOISE_WINDOWS * NOISE_WIN_LEN;
+
+    printf("\nGurultu tabani olcumu (%.2f s). Ortami sessiz tutun...\n",
+           (double)total / PB_SAMPLE_RATE);
     backlight_set(false);
     sleep_ms(300);
 
-    pb_capture_result_t cap = pb_audio_capture(s_capture, CAPTURE_SAMPLES);
-    audio_stats_t st = compute_stats(s_capture, cap.samples);
+    /* Pencere pencere oku: her pencere hem genel istatistiğe eklenir hem de
+     * kendi RMS'iyle yüzdelik listesine girer. Ham veri saklanmıyor. */
+    pb_capture_result_t cap = { 0 };
+    stats_acc_t acc = { 0 };
+    double rms_list[NOISE_WINDOWS];
+    uint32_t count = 0;
 
-    printf("  Yakalanan    %lu / %lu ornek\n",
-           (unsigned long)cap.samples, (unsigned long)CAPTURE_SAMPLES);
+    pb_audio_stream_flush();        /* bir KEZ, döngüden önce (bkz. stream_stats) */
+    for (uint32_t w = 0; w < NOISE_WINDOWS; w++) {
+        pb_capture_result_t part =
+            pb_audio_stream_read(s_chunk, NOISE_WIN_LEN, 1000);
+        cap.samples      += part.samples;
+        cap.fifo_overrun |= part.fifo_overrun;
+        cap.timed_out    |= part.timed_out;
+
+        if (part.samples < NOISE_WIN_LEN) break;    /* saat yok — eksik pencere */
+
+        stats_add(&acc, s_chunk, part.samples);
+        rms_list[count++] = window_rms(s_chunk, part.samples);
+    }
+    audio_stats_t st = stats_finish(&acc);
+
+    printf("  Yakalanan    %lu / %lu ornek  (%lu / %d pencere)\n",
+           (unsigned long)cap.samples, (unsigned long)total,
+           (unsigned long)count, NOISE_WINDOWS);
     print_stats("tum pencere (RMS)", &st, &cap);
 
-    double floor_rms;
-    double floor_db = noise_floor_dbfs(s_capture, cap.samples, &floor_rms);
+    double floor_rms = (count > 0) ? percentile10(rms_list, count) : 0.0;
+    double floor_db  = (floor_rms > 0.0)
+                     ? 20.0 * log10(floor_rms / 32768.0) : -999.0;
     printf("  %-22s RMS %8.1f  %7.1f dBFS   <- gecici seslere dayanikli\n",
            "gurultu tabani (P10)", floor_rms, floor_db);
 
@@ -295,12 +400,15 @@ static void cmd_noise(void) {
  * pratik yolu: el çırpın, ıslık çalın, konuşun — çubuk anında tepki vermeli. */
 static void cmd_level_meter(void) {
     printf("\nCanli seviye. El cirpin / konusun. Cikmak icin bir tusa basin.\n\n");
-    const uint32_t win = PB_SAMPLE_RATE / 10;   /* 100 ms */
+    /* 2048 ornek = 85 ms. Eskiden 100 ms'ti; parca boyuna indirildi.
+     * Canli gosterge oldugu icin her turda en tazeye atlamasi zaten isteniyor,
+     * bu yuzden flush+oku sarmalayicisi (pb_audio_capture) burada DOGRU olan. */
+    const uint32_t win = CHUNK_SAMPLES;
 
     while (getchar_timeout_us(0) < 0) {
-        pb_capture_result_t cap = pb_audio_capture(s_capture, win);
+        pb_capture_result_t cap = pb_audio_capture(s_chunk, win);
         if (cap.samples == 0) break;
-        audio_stats_t st = compute_stats(s_capture, cap.samples);
+        audio_stats_t st = compute_stats(s_chunk, cap.samples);
 
         int bars = (int)((st.dbfs + 80.0) / 2.0);   /* -80 dBFS -> 0, 0 dBFS -> 40 */
         if (bars < 0) bars = 0;
@@ -366,26 +474,78 @@ static void cmd_gain(void) {
 
 /* Ham örnekleri PC'ye aktar. Basit ve kendini tanıtan bir çerçeve kullanıyoruz;
  * tools/capture_wav.py bunu WAV'a çeviriyor. */
+/**
+ * Kayıt artık akış hâlinde: 2 saniye önce belleğe alınıp sonra yazdırılmıyor,
+ * parça parça okunup anında aktarılıyor. Üç ayrıntı kritik:
+ *
+ * 1. SIRA. `tools/capture_wav.py` başlıktaki `samples=N`'i okuyup N örnek
+ *    bekliyor (capture_wav.py:112), yani başlık örneklerden ÖNCE gitmeli.
+ *    Ama istatistik ancak akış bitince hazır olur. Bu yüzden yeni sıra:
+ *    başlık → örnekler → #WAV-END → istatistik. (Araç #WAV-END'de okumayı
+ *    bıraktığı için istatistiği o göstermez; seri terminalde görünür.)
+ *
+ * 2. SAAT KONTROLÜ BAŞLIKTAN ÖNCE. Başlığı yazdıktan sonra çekilmek yok:
+ *    `samples=N` sözü verilmiş olur. Bu yüzden ilk parça başlıktan önce
+ *    okunuyor; saat yoksa hiç başlık yazmadan çıkıyoruz.
+ *
+ * 3. GERÇEK ZAMANA YETİŞMEK. Yazdırma okumayla iç içe geçtiği için aktarım
+ *    gerçek zamandan yavaş kalırsa halka (170 ms) taşar ve WAV'da kopukluk
+ *    olur. Kartta ölçüldü: CDC 276 KB/s, ondalık biçimde gereken 102 KB/s —
+ *    2,7 kat pay var. Yine de her parçanın `fifo_overrun`'ı toplanıp sonda
+ *    yüksek sesle bildiriliyor: bu projede sessiz bozulma iki kez pahalıya
+ *    patladı (lastsession.md §5.10), kopukluk sessizce geçmemeli.
+ */
 static void cmd_record(void) {
     printf("\nKayit basliyor (%d s)...\n", CAPTURE_SECONDS);
-    pb_capture_result_t cap = pb_audio_capture(s_capture, CAPTURE_SAMPLES);
-    audio_stats_t st = compute_stats(s_capture, cap.samples);
-    print_stats("kayit", &st, &cap);
 
-    if (cap.samples == 0) {
-        printf("Kayit alinamadi.\n\n");
+    pb_capture_result_t cap = { 0 };
+    stats_acc_t acc = { 0 };
+
+    /* Saat var mı? İlk parçayı başlıktan ÖNCE oku (yukarıdaki 2. madde). */
+    pb_audio_stream_flush();        /* bir KEZ; sonrasında sadece stream_read */
+    uint32_t first = CAPTURE_SAMPLES < CHUNK_SAMPLES ? CAPTURE_SAMPLES : CHUNK_SAMPLES;
+    pb_capture_result_t part = pb_audio_stream_read(s_chunk, first, 1000);
+    if (part.samples == 0) {
+        printf("Kayit alinamadi (ES8311 saat uretmiyor).\n\n");
         return;
     }
 
     printf("#WAV-BEGIN rate=%d channels=1 bits=16 samples=%lu\n",
-           PB_SAMPLE_RATE, (unsigned long)cap.samples);
-    /* Satir basina 32 ornek, isaretli ondalik. Basit ve hata ayiklamasi kolay;
-     * 2 saniye icin ~250 KB metin, USB CDC'de birkac saniye surer. */
-    for (uint32_t i = 0; i < cap.samples; i++) {
-        printf("%d%c", s_capture[i], ((i % 32) == 31) ? '\n' : ' ');
+           PB_SAMPLE_RATE, (unsigned long)CAPTURE_SAMPLES);
+
+    /* Satir basina 32 ornek, isaretli ondalik — bicim degismedi, PC tarafi
+     * oldugu gibi calisiyor. */
+    uint32_t emitted = 0;
+    for (;;) {
+        cap.samples      += part.samples;
+        cap.fifo_overrun |= part.fifo_overrun;
+        cap.timed_out    |= part.timed_out;
+        stats_add(&acc, s_chunk, part.samples);
+
+        for (uint32_t i = 0; i < part.samples; i++, emitted++) {
+            printf("%d%c", s_chunk[i], ((emitted % 32) == 31) ? '\n' : ' ');
+        }
+
+        if (part.timed_out || cap.samples >= CAPTURE_SAMPLES) break;
+
+        uint32_t want = CAPTURE_SAMPLES - cap.samples;
+        if (want > CHUNK_SAMPLES) want = CHUNK_SAMPLES;
+        part = pb_audio_stream_read(s_chunk, want, 1000);
     }
-    if (cap.samples % 32) printf("\n");
-    printf("#WAV-END\n\n");
+    if (emitted % 32) printf("\n");
+    printf("#WAV-END\n");
+
+    audio_stats_t st = stats_finish(&acc);
+    print_stats("kayit", &st, &cap);
+    if (cap.samples != CAPTURE_SAMPLES) {
+        printf("  [!] %lu / %lu ornek gonderildi — PC tarafi EKSIK diyecek.\n",
+               (unsigned long)cap.samples, (unsigned long)CAPTURE_SAMPLES);
+    }
+    if (cap.fifo_overrun) {
+        printf("  [!] ORNEK DUSTU: aktarim gercek zamana yetisemedi, kayitta\n");
+        printf("      kopukluk var. WAV'i olcum icin KULLANMAYIN.\n");
+    }
+    printf("\n");
 }
 
 
@@ -398,11 +558,11 @@ static void cmd_spectrogram(void) {
 
     uint8_t bins[PB_SPEC_HEIGHT];
     while (getchar_timeout_us(0) < 0) {
-        pb_capture_result_t cap = pb_audio_capture(s_capture, PB_FFT_SIZE);
+        pb_capture_result_t cap = pb_audio_capture(s_chunk, PB_FFT_SIZE);
         if (cap.samples < PB_FFT_SIZE) break;
         /* -75 dBFS taban: M1'de olculen ~-36 dBFS oda gurultusunun altinda,
          * boylece sessizlik siyah kaliyor ama zayif sesler hala goruluyor. */
-        pb_fft_spectrum(s_capture, bins, PB_SPEC_HEIGHT, -75.0f);
+        pb_fft_spectrum(s_chunk, bins, PB_SPEC_HEIGHT, -75.0f);
         pb_spec_push_column(bins, PB_SPEC_HEIGHT);
     }
     printf("cikildi\n\n");

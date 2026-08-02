@@ -44,12 +44,21 @@ doğrulama testi boş odada bilgisayardan kuş sesi çalarak yapılacak; o
 senaryoda şehir gürültüsü yok. Odak tür tanımada. Ayrıntı ve *ama*'sı
 §9f-4'te — negatif **sınıfı** yine de bir şeyle doldurulmak zorunda.
 
-**SIRADAKİ İŞ — `s_capture` bellek temizliği. Adım adım tarifi §9g'de**
-(ölçülen bss, kullanan yerler, dört tuzak, kabul ölçütü).
+**`s_capture` temizliği ✅ BİTTİ (§9g).** Teşhis komutları 96 KB'lık bitişik
+tampon yerine 4 KB'lık parçalarla akışa çevrildi:
 
-Kullanıcı bunu eğitim kümesinden önce yapmayı seçti: M5'te seçilecek model
-boyutu tensor arena bütçesine bağlı, o yüzden bütçeyi önce ölçmek gerekiyor.
-Ondan sonrası eğitim kümesi (§9f-5) → M5.
+```
+bss  218.988  ->  127.084 bayt     (91.904 bayt serbest, hedef <=130.000)
+arena (180 KB) ile birlikte 311.404  ->  520 KB SRAM'de ~208 KB pay
+```
+
+Beş kabul ölçütünün **dördü ölçümle doğrulandı**; beşincisi (WAV'ı dinlemek ve
+`a` demosunu ekranda görmek) kullanıcının gözü/kulağı gerektiriyor —
+oturum sonunda dosyalar gönderildi, sonuç §9g'de.
+
+**SIRADAKİ İŞ — eğitim kümesi (§9f-5) → M5.** `data/segmentler.csv` hazır
+bekliyor. Tensor arena bütçesi artık ölçülmüş bir rakam: M5'e gerçek sayıyla
+girilebilir.
 
 ---
 
@@ -505,7 +514,7 @@ Eşleme artık **eBird kodu** üzerinden, BirdNET'in kendi
 | Konu | Durum |
 |---|---|
 | **EMI ölçümü geçersiz** | M1'deki tarama PWM ile yapıldı, ışık hep kapalıydı. `e` komutu aç/kapa olarak düzeltilip yeniden ölçülmeli (§4). |
-| **`s_capture` (96 KB) hâlâ duruyor** | **SIRADAKİ İŞ — tarifi §9g'de.** Teşhis komutları (`n`, `r`, `e`...) kullanıyor. Sürekli yakalama halkası (16 KB) ayrı. TFLM arena'sı (180 KB, M6) eklenmeden küçültülmeli. bss **ölçüldü: 218.988 bayt** (§7'deki "206 KB" eski). |
+| ~~**`s_capture` (96 KB)**~~ | ✅ **ÇÖZÜLDÜ (§9g).** 4 KB'lık `s_chunk`'a indi, bss 218.988 → 127.084. Arena'nın önü açık. |
 | **Dokunmatik park edildi** | Kritik yolda değil. Kaldığı yer §9b. |
 | **PWM GPIO36'yı sürmüyor** | Kök neden bulunmadı; arka ışık düz GPIO. Parlaklık ayarı gerekirse (M7) çözülmeli. |
 | **GPIO34 (LCD_RST) aşağı çekilemiyor** | Ölçüldü, kök neden aranmadı. Bkz. §5.11. |
@@ -555,19 +564,26 @@ yüzden tek cevap değil **ilk 3 tahmin** gösterecek.
 **Bellek bütçesi (520 KB):** arena 180 + LVGL 26 + mel 12 + ham ses 24 +
 DMA 8 + FatFS 10 + tablo 20 + yığın/heap 80 = **~360 KB**, ~160 KB pay.
 
-### Şu anki gerçek kullanım
+### Şu anki gerçek kullanım (2 Ağustos 2026, `arm-none-eabi-size` ile ölçüldü)
 
 ```
-text 460 KB (flash, 16 MB'de sorun değil)
-bss  206 KB (520 KB SRAM'de)
+text 463.016 (flash, 16 MB'de sorun değil)
+bss  127.084 (520 KB SRAM'de)          <- s_capture temizliginden SONRA
 ```
 
-bss'in içinde: `s_capture` (M1 test tamponu, ~96 KB — teşhis komutları hâlâ
-kullanıyor) + sürekli yakalama halkası (16 KB, 16 KB'a hizalı) + LVGL çizim
-tamponu (25 KB) + mel halkası (12 KB). TFLM arena'sı (180 KB) gelmeden
-**s_capture küçültülmeli/kaldırılmalı**, yoksa bütçe taşar. Sürekli yakalama
-sayesinde teşhis komutları artık halkadan parça parça da okuyabilir —
-s_capture'ı kaldırmanın yolu açık.
+bss'teki en büyük altı nesne (`nm --size-sort -S`):
+
+| Nesne | bayt |
+|---|---|
+| `s_draw_buf` — LVGL çizim tamponu (640×20 px) | 25.600 |
+| `work_mem_int` — LVGL bellek havuzu | 24.576 |
+| `s_ring` — sürekli yakalama halkası (16 KB'a hizalı) | 16.384 |
+| `pencere.0` / `pencere.2` / mel `s_ring` — mel halkaları (64×187 int8) | 3 × 11.968 |
+| **`s_chunk`** — teşhis yakalama parçası | **4.096** |
+
+TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
+520 KB SRAM'de yığın/heap için ~208 KB pay kalıyor. Plan §7'nin öngördüğü
+~360 KB bütçenin altında.
 
 ---
 
@@ -821,7 +837,7 @@ doğruladı: kart + akan mel spektrogramı + "SES ALGILANDI" yeşil.
 
 ---
 
-## 9d. M4 — veri boru hattı (BURADA KALDIK)
+## 9d. M4 — veri boru hattı ✅ TAMAMLANDI
 
 ### Yapılanlar
 
@@ -1243,22 +1259,21 @@ dilimin en yüksek skorlu türü de basılıyor, dinlerken karşılaştırın.
 
 - Girdi **64×187 int8** (mel penceresi) — cihazdaki `pb_mel_window()` çıktısı
 - Hedef **≤30 MMAC/pencere**, tensor arena **≤180 KB**
-- **`s_capture` (96 KB) hâlâ duruyor**, arena eklenmeden kaldırılmalı (§6)
+- Bellek bütçesi **ölçüldü ve yer açıldı** (§9g): bss 127.084, arena ile
+  birlikte 311.404 → ~208 KB pay. Model boyutu bu rakama göre seçilebilir.
 - Mel parametreleri değiştirilirse cihaz tarafı da değişmeli: HTK mel,
   alan normalizasyonu YOK, periyodik Hann (§9c). Bu iki ayrıntı tutmazsa
   model sessizce kötü çalışır.
 
 ---
 
-## 9g. SIRADAKİ İŞ — `s_capture` temizliği (M6'nın önünü açar)
+## 9g. `s_capture` temizliği ✅ TAMAMLANDI (M6'nın önünü açtı)
 
-> Bu bölüm yeni bir oturumun hiçbir şey sormadan başlayabilmesi için yazıldı.
-> **Kullanıcı kararı (2 Ağustos 2026):** eğitim kümesinden ÖNCE bu yapılacak.
-> Gerekçe: M5'te seçilecek model boyutu tensor arena bütçesine bağlı; bütçeyi
-> önce ölçersek M5'e gerçek rakamla gireriz. Sonraya bırakırsak modeli eğitip
-> "sığmıyor" deyip küçültmek gerekebilir.
+> **Kullanıcı kararı (2 Ağustos 2026):** eğitim kümesinden ÖNCE yapıldı.
+> Gerekçe: M5'te seçilecek model boyutu tensor arena bütçesine bağlı; bütçe
+> artık ölçülmüş bir rakam, M5'e gerçek sayıyla girilebilir.
 
-### Ölçülen başlangıç durumu
+### Başlangıç durumu (değişiklikten önce)
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
@@ -1284,10 +1299,19 @@ bss'in içindekiler:
 | kalanı | ~69.000 |
 
 TFLM arena'sı **180 KB**. 218.988 + 184.320 = 403.308 → 520 KB'a sığıyor
-gibi ama yığın/heap payı kalmıyor. `s_capture` gidince ~127 KB'a düşer,
-arena ile birlikte ~311 KB — rahat pay kalır.
+gibi ama yığın/heap payı kalmıyor.
 
-### Yapılacak: 96 KB'lık tamponu 4 KB'lık pencereye indirmek
+### SONUÇ — ölçüldü
+
+```
+bss  218.988  ->  127.084 bayt        (91.904 serbest = tam 96.000 - 4.096)
+text 461.952  ->  463.016 bayt        (+1.064; akis dongulerinin bedeli)
+arena ile birlikte 311.404  ->  ~208 KB yigin/heap payi
+```
+
+Kabul ölçütü ≤130.000 idi; **127.084** ile karşılandı.
+
+### Yapılan: 96 KB'lık tamponu 4 KB'lık parçaya indirmek
 
 `s_capture` tek bir 2 saniyelik bitişik tampon. **Onu kullanan hiçbir teşhis
 komutunun aslında 2 saniyeyi bir arada görmesi gerekmiyor** — hepsi ya
@@ -1300,73 +1324,149 @@ halkası (M3, §9c) geldiğinden beri veriyi parça parça okumak mümkün.
 static int16_t s_chunk[CHUNK_SAMPLES];
 ```
 
-Beklenen kazanç: **96.000 → 4.096 bayt, ~89,7 KB.**
+Gerçekleşen kazanç: **96.000 → 4.096 bayt.**
 
-Okuma kalıbı:
+### Kullanan yerler — ne yapıldı
 
-```c
-pb_audio_stream_flush();                       /* bir KEZ, basta */
-for (kalan = toplam; kalan; kalan -= n) {
-    n = kalan > CHUNK_SAMPLES ? CHUNK_SAMPLES : kalan;
-    pb_capture_result_t cap = pb_audio_stream_read(s_chunk, n, timeout_ms);
-    /* ... parcayi isle ... */
-}
-```
+| Komut | Ne istiyordu | Ne oldu |
+|---|---|---|
+| `e` EMI | 0,5 s istatistik | `stream_stats()` yardımcısı — parça parça oku, biriktir |
+| `n` gürültü | 2 s istatistik + pencere yüzdelik | pencere = okuma birimi (1024 örnek × 48) |
+| `l` seviye | 100 ms istatistik | 85 ms'e (2048) indi; canlı gösterge olduğu için `pb_audio_capture` **doğru** olan |
+| `r` kayıt | 2 s'yi PC'ye aktar | parça parça akıtılıyor, biçim değişmedi |
+| `s` spektrogram | 512 örnek | sadece tampon adı değişti |
 
-### Kullanan yerler ve her birinde ne değişecek
+Yeni yardımcılar (`src/main.c`): `stats_acc_t` + `stats_add` + `stats_finish`
+(tek geçişli istatistik), `stream_stats` (oku-ve-biriktir döngüsü),
+`window_rms`, `percentile10`.
 
-| main.c | Komut | Ne istiyor | Değişiklik |
-|---|---|---|---|
-| 231 | `e` EMI | 0,5 s istatistik | biriktiriciye çevir |
-| 265–273 | `n` gürültü | 2 s istatistik + 64 pencere yüzdelik | pencere = parça yap |
-| 301 | `g` kazanç | `win` örnek istatistik | biriktiriciye çevir |
-| 371–385 | `r` kayıt | 2 s'yi PC'ye aktar | parça parça yazdır |
-| 401–405 | `s` spektrogram | 512 örnek | zaten küçük, tampon adı değişir |
+### ⚠ Dört tuzak — hepsi gerçekti, nasıl geçildi
 
-### ⚠ Dört tuzak — bunlara dikkat
+**1. `pb_audio_capture`'ı parça başına ÇAĞIRMAYIN.** O fonksiyon flush + read
+sarmalayıcısı; her çağrıda birikmişi atar, parçalar arasındaki örnekler
+sessizce düşerdi. Uygulanan: `pb_audio_stream_flush()` **bir kez**, sonra
+`pb_audio_stream_read()` döngüsü. `stream_stats`'ın başındaki yorum bunu
+anlatıyor ki bir sonraki okuyan aynı tuzağa düşmesin.
 
-**1. `pb_audio_capture`'ı parça başına ÇAĞIRMAYIN.** O fonksiyon
-flush + read sarmalayıcısı (§9c); her çağrıda birikmişi atar. Parça parça
-çağrılırsa **parçalar arasındaki örnekler düşer** ve `r` komutu süreksiz
-bir kayıt üretir — üstelik sessizce, çünkü `fifo_overrun` bunu bildirmez.
-Doğrusu: `pb_audio_stream_flush()` bir kez, sonra `pb_audio_stream_read()`
-döngüsü.
+> Tek istisna `l` (canlı seviye): orada her turda en tazeye atlamak zaten
+> **isteniyor**, o yüzden `pb_audio_capture` bilerek korundu.
 
-**2. `compute_stats` İKİ geçişli** (main.c:154): önce DC ortalamasını
-çıkarıyor, sonra o ortalamayla RMS hesaplıyor. Akışta ikinci geçiş yok —
-veri gitti. Varyans özdeşliğiyle tek geçişe çevirin:
+**2. `compute_stats` İKİ geçişliydi.** Varyans özdeşliğiyle tek geçişe
+çevrildi (`rms² = sumsq/n − (sum/n)²`). **Host tarafında ölçülerek
+doğrulandı** (kabul sınırı 0,1 dB idi):
 
 ```
-rms² = sumsq/n − (sum/n)²
+karttan alinan gercek kayit (before.wav, DC 14.3):
+  ESKI (2 gecis) RMS 447.149577093   YENI (1 gecis) RMS 447.149577093
+  sapma 3.6e-14 dB
+zor durum (DC 20000 uzerine +-3 AC, 80 dB fark alma):
+  sapma 3.6e-08 dB
 ```
 
-`double` ile sayısal olarak güvenli. Karşılaştırma testi yapın: aynı sesle
-eski ve yeni yol ±0,1 dB içinde olmalı.
+**3. `noise_floor_dbfs` 64 pencereye bölüyordu** (750 örnek, parça sınırına
+hizasız). 48 pencere × 1024 örnek = 49.152 örnek = **2,048 s** yapıldı.
+Yüzdelik indeksi `count/10` olduğu için seçilen eleman 6/64 (%9,4) yerine
+4/48 (%8,3) — yani biraz daha sessiz bir pencere. Ölçülen etki **0,6 dB**
+(aşağıdaki kabul ölçütü 3), yönü de bu kaymayla tutarlı. M1'in -36 dBFS
+tabanıyla karşılaştırma yapılırken akılda tutun.
 
-**3. `noise_floor_dbfs` 64 pencereye bölüyor** (48000/64 = 750 örnek).
-Parça sınırıyla hizalanmıyor. En temizi **parça boyutunu pencere boyutu
-yapmak**: 1024 örneklik 48 parça = 2,05 s, 48 pencere. Yüzdelik indeksi
-`count/10` olduğu için 64→48 geçişi 10. yüzdeliği biraz kaydırır — sonuç
-diagnostik, kabul edilebilir, **ama belgeleyin** (M1'in -36 dBFS tabanıyla
-karşılaştırma yapılıyor).
+**4. `r` komutunun çerçevesi.** Yeni sıra: başlık → örnekler → `#WAV-END` →
+istatistik. Buna **beşinci bir ayrıntı** eklendi: başlık yazıldıktan sonra
+`samples=N` sözü verilmiş oluyor, geri dönüş yok. Bu yüzden **ilk parça
+başlıktan ÖNCE** okunuyor; saat yoksa hiç başlık yazılmadan çıkılıyor.
 
-**4. `r` komutunun çerçevesi bozulmamalı.** `tools/capture_wav.py`
-`#WAV-BEGIN rate=... samples=N` başlığını okuyup N örnek bekliyor
-(capture_wav.py:112). Sorun: **istatistikler şu an başlıktan ÖNCE
-yazdırılıyor** ve tüm tamponu istiyor. Akışta bu mümkün değil. Yeni sıra:
-başlığı yaz → parçaları akıt ve istatistiği biriktir → `#WAV-END` →
-istatistiği yaz. `samples=N` gerçekten gönderilen sayıyla tutmalı, yoksa
-PC tarafı *"eksik"* diyor.
+> Yan etki: `capture_wav.py` `#WAV-END`'de okumayı bıraktığı için istatistik
+> satırını **artık göstermiyor** (seri terminalde görünüyor). Kayıt özeti
+> aracın kendi hesabından geliyor, bilgi kaybı yok.
 
-### Kabul ölçütü
+### ⚠ BEŞİNCİ tuzak — belgede yoktu, ölçümle bulundu
 
-1. `arm-none-eabi-size` ile bss **≤ 130.000 bayt** (şimdi 218.988)
-2. `python tools/capture_wav.py --port COM13 --out test.wav` çalışıyor ve
-   üretilen WAV **süreksizlik içermiyor** (tık/kopukluk yok — dinleyin;
-   dolaylı ölçüm bu projede iki kez yanılttı, §5.10)
-3. `--cmd n` gürültü tabanı, temizlik öncesiyle **±1 dB** içinde
-4. `--cmd m` hâlâ 62–63 kare/s, kayıp 0 (§9c'deki değer)
-5. `--cmd a` tam demo ekranda çalışıyor
+Yazdırma artık okumayla iç içe geçiyor. Aktarım gerçek zamandan yavaş kalırsa
+halka (170 ms) taşar ve WAV'da kopukluk olur — **tam da kabul ölçütü 2'nin
+yasakladığı şey.** `main.c`'deki yorum "2 saniye için ~250 KB metin, USB
+CDC'de birkaç saniye sürer" diyordu; bu ~83 KB/s demek olurdu ve gereken
+102 KB/s'nin altında kalırdı. O rakama güvenip ondalık biçimi terk etmek
+(base64/ikili) planlanmıştı.
+
+**Ölçünce öyle çıkmadı** (eski firmware, `r`, gövde 208.327 bayt):
+
+```
+saf aktarim 0,74 s  ->  276 KB/s        gereken: 24000 x 4,34 = 102 KB/s
+                                        pay: 2,7 kat
+```
+
+Yani **ondalık biçim rahatça yetiyor** ve protokolü değiştirmeye gerek yok:
+`tools/capture_wav.py` hiç dokunulmadan çalışıyor. Yeni firmware'de ölçülen:
+
+```
+basliktan #WAV-END'e 1,98 s   (48.000 ornek = 2,00 s -> tam gercek zaman)
+komuttan #WAV-END'e  2,08 s   (eski: 2,85 s -> %27 daha hizli,
+                               cunku yakalama ve aktarim artik ust uste biniyor)
+```
+
+Yine de pay sonsuz değil: PC tarafı 170 ms'den uzun takılırsa halka taşar.
+Bu yüzden her parçanın `fifo_overrun`'ı toplanıp sonda **yüksek sesle**
+bildiriliyor ("ORNEK DUSTU ... WAV'i olcum icin KULLANMAYIN"). Bu projede
+sessiz bozulma iki kez pahalıya patladı (§5.10); kopukluk sessizce geçmemeli.
+
+> **Ders (yine aynısı):** kaynak kodundaki bir yorumdaki performans tahmini
+> ölçüm değildir. Buradaki tahmin 3,3 kat yanlıştı ve gereksiz bir protokol
+> değişikliğine yol açacaktı. §9d-2'deki "dosya boyutu 9 kat yanlış"ın aynısı.
+
+### Kabul ölçütü — durum
+
+| # | Ölçüt | Sonuç |
+|---|---|---|
+| 1 | bss ≤ 130.000 bayt | ✅ **127.084** (218.988'den) |
+| 2 | `r` çalışıyor, WAV süreksizlik içermiyor | ✅ objektif · 🔶 dinleme aşağıda |
+| 3 | `--cmd n` tabanı öncesiyle ±1 dB içinde | ✅ **0,6 dB** fark |
+| 4 | `--cmd m` 62–63 kare/s, kayıp 0 | ✅ **63 kare/s, kayıp 0** |
+| 5 | `--cmd a` tam demo ekranda çalışıyor | ✅ 63 kare/s, kayıp 0 · 🔶 göz aşağıda |
+
+**Ölçüt 3 — aynı odada, aynı oturumda, önce/sonra:**
+
+```
+ONCE (eski firmware, 64 pencere)  -37.2  -37.8  -37.4  dBFS   ort -37.47
+SONRA (yeni firmware, 48 pencere) -38.1  -38.5  -37.6  dBFS   ort -38.07
+fark 0,6 dB — sinir 1 dB. Yonu de 4. tuzaktaki yuzdelik kaymasiyla tutarli.
+```
+
+> Bu karşılaştırma için **eski firmware kasten geri yüklendi**: belgedeki eski
+> sayılarla değil, aynı gün aynı odada ölçülen sayılarla karşılaştırmak için.
+> Oda ölçüm sırasında değişti (tam pencere RMS önce -18…-29 dB, sonra
+> -36…-37 dB) — P10 metriği tam da bunun için var ve gerçekten dayandı.
+
+**Ölçüt 2 — süreksizlik ölçümü.** Kopukluk olsaydı **parça sınırında** (her
+2048 örnekte, yani 85 ms'de bir) görünürdü. Ardışık örnek farkları:
+
+```
+                    medyan  %99.9   maks
+after.wav genel        110    563    820
+  parca sinirlari (23 nokta)  maks 329   ort 123.9
+  parca ortalari  (22 nokta)  maks 327   ort 101.9
+```
+
+Parça sınırları parça ortalarından **ayırt edilemiyor** (329 vs 327) ve ikisi
+de sinyalin kendi maksimumunun (820) altında. Ayrıca cihazın kendi raporunda
+`[!]` yok: ne `ORNEK DUSTU` ne eksik örnek. 48.000/48.000 gönderildi.
+
+🔶 **Kullanıcı doğrulaması bekliyor (2 madde).** Bu projede dolaylı ölçüm iki
+kez yanılttı (§5.10), o yüzden objektif sağlamalar yeterli sayılmadı:
+- `after.wav` dinlenecek (before.wav ile birlikte gönderildi)
+- `a` demosu ekranda görülecek (`--sure 25` ile 2 kez çalıştırıldı)
+
+### Bu turda ayrıca görülen
+
+- **`e` (EMI) komutu artık gerçekten aç/kapa ölçüyor.** §6'daki "EMI ölçümü
+  geçersiz" borcu PWM'den kaynaklanıyordu; arka ışık düz GPIO'ya alındığından
+  beri `measure_with_backlight(false/true)` gerçek bir kapalı/açık
+  karşılaştırması yapıyor. Ölçülen: **kapalıya göre +0,4 dB.** *Ama borç tam
+  kapanmadı:* dört ölçümün son üçü hâlâ `PWM %50` / `PWM %10` diye
+  etiketleniyor, oysa üçü de aynı "açık" durumu. Etiketler düzeltilip
+  yeniden çalıştırılırsa borç kapanır — küçük iş, bu turun kapsamı değildi.
+- `l` komutu `--sure` desteklemiyor (yalnızca `m` ve `a` destekliyor);
+  `--cmd l` ile çalıştırılırsa **hiç bitmez** ve portu tutar. Canlı akıştığı
+  için aracın 4 sn'lik sessizlik çıkışı hiç tetiklenmiyor.
 
 ### Bundan sonra
 
@@ -1419,6 +1519,7 @@ Bu oturumun (2 Ağustos 2026) commit'leri:
 | Commit | Ne |
 |---|---|
 | `ae9ae90` | **M4 adım 3: BirdNET segmentasyon boru hattı** — dört araç, üç ölçülmüş karar, bir sessiz hata (§9e, §5.13–5.16) |
+| *(bu tur)* | **`s_capture` temizliği** — teşhis komutları akışa çevrildi, bss 218.988 → 127.084 (§9g) |
 
 Önceki oturumlardan (eskiden yeniye): `7273768` ekran çalışıyor (§5.9) ·
 `68ba8b2` spektrogram yönü · `768cda9` M3 mel + kapı · `9e7e2dc` dokunmatik
