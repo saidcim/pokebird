@@ -1684,6 +1684,28 @@ int main(void) {
      * 3. adım atlanırsa hiçbir SM çalışmadığı için PIO TX FIFO hiç
      * boşalmıyor ve DMA sonsuza kadar bekliyor — ekran tamamen siyah kalıyor,
      * üstelik ilk çizim çağrısında kilitleniyor. */
+    /* PANEL HAZIR OLMA PENCERESİ — silmeyin, ölçülerek kondu.
+     *
+     * AXS15231B açılıştan sonra bir süre başlatma dizisini kabul etmiyor.
+     * Erken başlatılırsa panel kendi başlatılmamış GRAM'ını göstermeye devam
+     * ediyor (karıncalanma) ve bu durum KALICI: GPIO34 dışarıdan yüksek
+     * tutulduğu için panele donanım reset'i atamıyoruz (§5.11), yani yeniden
+     * deneme şansı yok.
+     *
+     * NEDEN BÖYLE ÖĞRENDİK: `s_capture` temizliği bss'i 218.988'den 127.084'e
+     * indirdi. bss'i sıfırlamak (crt0, main'den önce) o kadar kısa sürmeye
+     * başladı ki firmware panel başlatmaya ~1 ms daha erken varır oldu ve
+     * ekran bozuldu. Yani eski hâl bu pencereyi KIL PAYI geçiyormuş; hata
+     * kodda zaten vardı, temizlik yalnızca payı bitirdi. Kartta ölçüldü:
+     * 20 ms'lik gecikme yetiyor (500 ms de çalışıyor, 0 çalışmıyor).
+     *
+     * NEDEN `sleep_ms` DEĞİL: sabit bir uyku yalnızca o anki paya sabit bir
+     * miktar ekler; kendinden ÖNCEKİ kod hızlanırsa aynı tuzak yeniden kurulur
+     * (bizi buraya tam olarak bu düşürdü). Mutlak alt sınır kısıtın kendisini
+     * ifade ediyor ve önceki kodun süresinden bağımsız. USB beklemesi zaten
+     * uzun sürdüyse bu satır hiç beklemez, yani normalde bedeli sıfır. */
+    while (to_ms_since_boot(get_absolute_time()) < 250) sleep_ms(5);
+
     QSPI_GPIO_Init(qspi);
     QSPI_PIO_Init(qspi);
     QSPI_4Wrie_Mode(&qspi);
