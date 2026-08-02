@@ -1537,6 +1537,18 @@ static void cmd_cursor_seek(void) {
     enum { KX = 66, KY = 300, KW = 40, KH = 40 };
     const uint16_t MAVI = 0x001F, BEYAZ = 0xFFFF, KIRMIZI = 0xF800;
 
+    /* Atlama sütunu genişliği ve o genişlikte KY satır ilerlemek için gereken
+     * piksel sayısı. İlk turda 1 piksellik pencere denendi ve kare hem
+     * NOKTALI çıktı hem de hedeflenen satırın yarısı kadar ilerledi — bu,
+     * panelin sütun aralığını 2 piksele YUVARLADIĞININ klasik imzası
+     * (CASET(66,66) fiilen 66..67 oluyor, 300 piksel 300 değil 150 satır
+     * ilerletiyor ve RAMWRC tek piksel kaymış hizadan devam ediyor). */
+    const struct { uint32_t x1, x2; const char *ad; } atlama[] = {
+        { KX, KX + 1, "2 piksel HIZALI (x1 cift, x2 tek) — ana hipotez" },
+        { 0,  1,      "2 piksel HIZALI ama BASKA sutunda (x=0..1)"      },
+        { KX, KX,     "1 piksel (ilk turda noktali cikan hal)"          },
+    };
+
     printf("\nImlec konumlandirma testi — dar pencereyle ucuz atlama\n");
     printf("======================================================\n\n");
     printf("Her adimda hedef ayni: MAVI zemin + ORTADA 40x40 BEYAZ kare.\n");
@@ -1544,59 +1556,50 @@ static void cmd_cursor_seek(void) {
 
     backlight_set(true);
 
-    for (int adim = 1; adim <= 3; adim++) {
+    for (size_t i = 0; i < sizeof(atlama) / sizeof(atlama[0]); i++) {
+        const uint32_t genislik = atlama[i].x2 - atlama[i].x1 + 1;
         z_zemin(MAVI);
 
-        switch (adim) {
-        case 1:
-            printf("  [1] DAR ATLAMA, ayni sutunda: pencere 1 piksel (x=%d),\n", KX);
-            printf("      %d piksel kirmizi, sonra pencere genisletilip RAMWRC\n", KY);
-            qspi_caset(KX, KX);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(KIRMIZI, KY);          /* satir 0 -> KY */
-            pb_lcd_akis_bitir();
-            qspi_caset(KX, KX + KW - 1);
-            pb_lcd_akis_basla(0x3C);                /* RAMWRC — satir korunuyor mu? */
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
-            break;
+        printf("  [%u] DAR ATLAMA: %s\n", (unsigned)(i + 1), atlama[i].ad);
+        printf("      pencere %lu..%lu, %lu piksel kirmizi (= %d satir),\n",
+               (unsigned long)atlama[i].x1, (unsigned long)atlama[i].x2,
+               (unsigned long)(KY * genislik), KY);
+        printf("      sonra pencere %d..%d ve RAMWRC ile beyaz\n", KX, KX + KW - 1);
 
-        case 2:
-            printf("  [2] DAR ATLAMA, BASKA sutunda: pencere 1 piksel (x=0),\n");
-            printf("      %d piksel kirmizi, sonra pencere x=%d..%d ve RAMWRC\n",
-                   KY, KX, KX + KW - 1);
-            qspi_caset(0, 0);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(KIRMIZI, KY);
-            pb_lcd_akis_bitir();
-            qspi_caset(KX, KX + KW - 1);
-            pb_lcd_akis_basla(0x3C);
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
-            break;
+        qspi_caset(atlama[i].x1, atlama[i].x2);
+        pb_lcd_akis_basla(0x2C);
+        pb_lcd_akis_renk(KIRMIZI, KY * genislik);   /* satir 0 -> KY */
+        pb_lcd_akis_bitir();
+        qspi_caset(KX, KX + KW - 1);
+        pb_lcd_akis_basla(0x3C);                    /* RAMWRC — satir korunuyor mu? */
+        pb_lcd_akis_renk(BEYAZ, KW * KH);
+        pb_lcd_akis_bitir();
 
-        case 3:
-            printf("  [3] KONTROL (z[4] ile ayni, dogru oldugu biliniyor):\n");
-            printf("      pencere %d..%d, %d satir kirmizi atlama, sonra beyaz\n",
-                   KX, KX + KW - 1, KY);
-            qspi_caset(KX, KX + KW - 1);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(KIRMIZI, (uint32_t)KY * KW);
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
-            break;
-        }
         melez_bekle();
         printf("\n");
     }
 
-    printf("Bildirin (her adim icin): beyaz kare ORTADA mi, UCTA mi?\n");
-    printf("Kirmizi nasil gorunuyor: INCE cizgi mi, GENIS blok mu, yok mu?\n\n");
-    printf("  [1] ve [2] ortada + INCE kirmizi cizgi -> UCUZ KONUMLANDIRMA VAR.\n");
+    z_zemin(MAVI);
+    printf("  [4] KONTROL (z[4] ile ayni, dogru oldugu biliniyor):\n");
+    printf("      pencere %d..%d, %d satir genis kirmizi atlama, sonra beyaz\n",
+           KX, KX + KW - 1, KY);
+    qspi_caset(KX, KX + KW - 1);
+    pb_lcd_akis_basla(0x2C);
+    pb_lcd_akis_renk(KIRMIZI, (uint32_t)KY * KW);
+    pb_lcd_akis_renk(BEYAZ, KW * KH);
+    pb_lcd_akis_bitir();
+    melez_bekle();
+
+    printf("\nBildirin (her adim icin uc sey):\n");
+    printf("  a) beyaz kare ORTADA mi, ORTAYA YAKIN mi, UCTA mi?\n");
+    printf("  b) kare DUZ mu, NOKTALI mi?\n");
+    printf("  c) kirmizi INCE cizgi mi, GENIS blok mu?\n\n");
+    printf("  [1] ortada + DUZ  -> panel sutunu 2'ye yuvarliyor, UCUZ\n");
+    printf("      KONUMLANDIRMA VAR: y satir ilerletmek 2*y piksel.\n");
     printf("      pb_lcd_blit genel amacli kalir, `a` demosu duzelir.\n");
-    printf("  [1]/[2] ucta -> pencere degisince satir sifirlaniyor. Panel\n");
-    printf("      yalnizca yukaridan asagi TEK GECIS cizime izin veriyor;\n");
-    printf("      arayuz katmani ona gore kurulacak.\n\n");
+    printf("  [1] hala noktali/kayik -> dar pencere yolu OLU. Panel yalnizca\n");
+    printf("      yukaridan asagi TEK GECIS cizime izin veriyor; arayuz\n");
+    printf("      katmani (kart + serit duzeni) ona gore yeniden kurulacak.\n\n");
 
     qspi_caset(0, PB_PANEL_W - 1);
     pb_lcd_imlec_gecersiz();

@@ -2721,7 +2721,33 @@ panel geri gitmeye izin vermiyor.
 Bunu `j` testinin sonucu belirliyor (aşağıda). `o`, `d`, `u` ve `pb_lcd_fill`
 şu anki hâliyle doğru; **`a` hâlâ bozuk** ve öyle olduğu biliniyor.
 
-### 🔵 SIRADAKİ ADIM — `j` imleç konumlandırma testi (GÖZ GEREKİR)
+### ✅ `o` ONAYLANDI — baş belirti KAPANDI (kullanıcı gözle)
+
+> **"doğru 4 renk kare de çıkıyor. reset atınca da ekran sıfırlanıyor."**
+
+Dört köşe dört ayrı renk. §9n'in en görünür belirtisi ("yalnızca EN SON
+çizilen kare görünüyor") **gitti**. `pb_lcd_fill` de gerçekten temizliyor.
+
+### 🔵 `j` — ilk tur: dar pencere yolu ham hâliyle ÇALIŞMIYOR (ölçüldü)
+
+> **"1. ve 2. adım noktalardan oluşan bir kare, tam köşede değil ama sola
+> daha yakın. 3. adımdan sonra kırmızı bir hat var arkasında."**
+
+[3] (geniş atlama, kontrol) beklendiği gibi: kare + arkasında geniş kırmızı
+blok. [1] ve [2] (1 piksellik atlama penceresi) ise iki şeyi birden söylüyor:
+
+- **Satır İLERLEDİ** — kare satır 0'da değil. Yani `CASET` satırı sıfırlamıyor
+  ve `RAMWRC` pencere değişse bile satırı koruyor. Mekanizma çalışıyor.
+- **Ama yarı yolda kaldı ve kare NOKTALI.** "Sola daha yakın" = hedeflenen
+  300. satır yerine ~150. satır (yatay tutuşta panel Y+ soldan sağa).
+
+İkisi birden tek bir şeye işaret ediyor: **panel sütun aralığını 2 piksele
+yuvarlıyor.** `CASET(66,66)` fiilen `66..67` oluyor → 300 piksel 300 değil
+**150 satır** ilerletiyor, ve `RAMWRC` bir piksel kaymış hizadan devam ettiği
+için beyaz kare zeminle dişleşip **noktalı** çıkıyor. Bu, QSPI AXS15231B/SH8601
+panellerinde bilinen bir kısıt.
+
+### 🔵 SIRADAKİ ADIM — `j` (yenilendi): 2 piksel hizalı atlama (GÖZ GEREKİR)
 
 `python tools/capture_wav.py --port COM13 --cmd j` — üç adım, mimariyi
 belirleyen tek soru: **sütun penceresi daraltılırsa satır daha ucuza
@@ -2730,20 +2756,23 @@ ilerletilebilir mi, ve pencere yeniden genişleyince satır korunur mu?**
 Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor. Pencere 1 piksel
 genişse `y` satır ilerletmek `172*y` yerine **`y`** piksele mal olur.
 
-| Adım | Yöntem | Beklenen (çalışıyorsa) |
-|---|---|---|
-| 1 | dar atlama aynı sütunda (x=66), sonra CASET genişlet + RAMWRC | ortada + **ince** kırmızı çizgi |
-| 2 | dar atlama başka sütunda (x=0), sonra CASET 66..105 + RAMWRC | ortada + ince kırmızı çizgi kenarda |
-| 3 | kontrol: `z[4]` ile aynı (geniş atlama) | ortada + **geniş** kırmızı blok |
+| Adım | Atlama penceresi | Yazılan | Beklenen (hipotez doğruysa) |
+|---|---|---|---|
+| 1 | `66..67` (2 px, x1 çift / x2 tek) | 600 px | ortada + **düz** kare, ince kırmızı çizgi |
+| 2 | `0..1` (2 px, başka sütun) | 600 px | ortada + düz kare, çizgi kenarda |
+| 3 | `66..66` (1 px — ilk turdaki hâl) | 300 px | yarı yolda + noktalı (karşılaştırma) |
+| 4 | kontrol: geniş atlama (`z[4]`) | 300×40 px | ortada + geniş kırmızı blok |
 
-- **[1] ve [2] ortadaysa** → ucuz konumlandırma var. `pb_lcd_blit` genel amaçlı
-  kalır, spektrogram ile LVGL aynı ekranda yaşar, bedel satır başına 1 piksel.
-- **[1]/[2] uçtaysa** → pencere değişince satır sıfırlanıyor. Panel yalnızca
-  yukarıdan aşağı **tek geçiş** çizime izin veriyor; arayüz katmanı (`a`
-  demosunun kart + şerit düzeni) buna göre yeniden kurulmalı.
+Her adım için üç şey soruluyor: kare **ortada mı**, **düz mü noktalı mı**,
+kırmızı **ince mi geniş mi**.
 
-Aynı turda **`o` da bakılmalı**: dört köşe artık dört ayrı köşede olmalı.
-Bu, §9n'in baş belirtisinin gerçekten kapandığının gözle onayı.
+- **[1] ortada ve DÜZ** → panel sütunu 2'ye yuvarlıyor, ucuz konumlandırma
+  var: `y` satır ilerletmek `2*y` piksel. `pb_lcd_blit` genel amaçlı kalır,
+  spektrogram ile LVGL aynı ekranda yaşar, `a` demosu düzelir.
+- **[1] hâlâ noktalı/kayık** → dar pencere yolu ölü. Panel yalnızca yukarıdan
+  aşağı **tek geçiş** çizime izin veriyor; `a`'nın kart + şerit düzeni buna
+  göre yeniden kurulacak (LVGL'e dar bir ekran verip spektrogramı ayrı sütun
+  bandına almak gibi).
 
 ### Çözüm tasarımı — `z` doğrularsa (yapıldı, yukarıda)
 
