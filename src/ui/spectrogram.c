@@ -36,24 +36,49 @@ static uint16_t s_column[PB_SPEC_HEIGHT];
 static uint32_t s_write_x = 0;
 
 /**
- * Genliği renge çevir — siyah → koyu mavi → camgöbeği → sarı → beyaz.
+ * Genliği renge çevir — SICAK rampa: ekran zemini → köz → kehribar → beyaz.
  *
  * Doğrusal gri tonlama kuş sesi için kötü: ilgilendiğimiz detay üst
- * genliklerde toplanıyor ve gri tonlamada ayırt edilemiyor. Renk geçişi hem
- * zayıf harmonikleri hem güçlü temel frekansı aynı anda okunur kılıyor.
+ * genliklerde toplanıyor ve gri tonlamada ayırt edilemiyor. Parlaklığı
+ * boydan boya artan bir rampa hem zayıf harmonikleri hem güçlü temel
+ * frekansı aynı anda okunur kılıyor. Bu gerekçe DEĞİŞMEDİ.
+ *
+ * ⚠ RENKLER DEĞİŞTİ (eski: siyah → koyu mavi → camgöbeği → sarı → beyaz).
+ * Sebep önizlemede görüldü: arayüzün kalanı sıcak ve koyu (kehribar/yeşil,
+ * zemin #0B0908), spektrogram ise elektrik mavisiydi. Yan yana iki ayrı
+ * ürün gibi duruyordu ve x=384'te sert bir dikey dikiş bırakıyordu.
+ *
+ * İki şey birden çözülüyor:
+ *   · rampa tasarımın kehribarına (#FFB020) oturuyor
+ *   · TABAN, ekran zemininin TA KENDİSİ (#0B0908) — sessizlik arayüzün
+ *     zeminiyle aynı renk olduğu için dikiş kayboluyor
  */
+typedef struct { uint8_t v, r, g, b; } durak_t;
+
+/* Parlaklık boydan boya artıyor; ara renkler tasarımın kehribarından geçiyor. */
+static const durak_t RAMPA[] = {
+    {   0, 0x0B, 0x09, 0x08 },   /* ekran zemini — sessizlik              */
+    {  56, 0x2E, 0x18, 0x0A },   /* köz                                    */
+    { 128, 0x8A, 0x3F, 0x0C },   /* kızıl kehribar                         */
+    { 190, 0xFF, 0xB0, 0x20 },   /* PB_RENK_VURGU — tasarımın vurgusu      */
+    { 255, 0xFF, 0xF2, 0xCC },   /* sıcak beyaz — tepe                     */
+};
+
 static uint16_t amplitude_to_rgb565(uint8_t v) {
-    uint8_t r, g, b;
-    if (v < 64) {
-        r = 0;   g = 0;                        b = (uint8_t)(v * 2);
-    } else if (v < 128) {
-        r = 0;   g = (uint8_t)((v - 64) * 4);  b = (uint8_t)(128 + (v - 64) * 2);
-    } else if (v < 192) {
-        r = (uint8_t)((v - 128) * 4); g = 255; b = (uint8_t)(255 - (v - 128) * 4);
-    } else {
-        r = 255; g = 255;                      b = (uint8_t)((v - 192) * 4);
-    }
-    return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+    const uint32_t n = sizeof(RAMPA) / sizeof(RAMPA[0]);
+
+    uint32_t i = 0;
+    while (i + 2 < n && v > RAMPA[i + 1].v) i++;
+
+    const durak_t *a = &RAMPA[i], *b = &RAMPA[i + 1];
+    const int araligi = (int)b->v - (int)a->v;
+    const int t = araligi > 0 ? ((int)v - (int)a->v) * 255 / araligi : 0;
+
+    const uint8_t r = (uint8_t)(a->r + ((int)b->r - (int)a->r) * t / 255);
+    const uint8_t g = (uint8_t)(a->g + ((int)b->g - (int)a->g) * t / 255);
+    const uint8_t bl = (uint8_t)(a->b + ((int)b->b - (int)a->b) * t / 255);
+
+    return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (bl >> 3));
 }
 
 /** Arayüz sütununu (ux) panele yaz: panelde ny=ux satırı, nx=0..171.
@@ -84,10 +109,12 @@ void pb_spec_push_column(const uint8_t *bins, uint32_t n_bins) {
     }
     write_ui_column(PB_SPEC_X0 + s_write_x, s_column);
 
-    /* Bir sonraki sütunu koyu gri imleçle işaretle: şeridin "şimdi"si
-     * belli olmazsa kayan görüntü okunmuyor. */
+    /* Bir sonraki sütunu imleçle işaretle: şeridin "şimdi"si belli olmazsa
+     * kayan görüntü okunmuyor. Renk PB_RENK_KENAR (0x3A332A) — arayüzün
+     * ayraç rengiyle aynı; eski koyu gri sıcak paletin içinde yabancı
+     * duruyordu. */
     static uint16_t cursor[PB_SPEC_HEIGHT];
-    for (uint32_t nx = 0; nx < PB_SPEC_HEIGHT; nx++) cursor[nx] = 0x4208;
+    for (uint32_t nx = 0; nx < PB_SPEC_HEIGHT; nx++) cursor[nx] = 0x3985;
     write_ui_column(PB_SPEC_X0 + ((s_write_x + 1) % PB_SPEC_WIDTH), cursor);
 
     s_write_x = (s_write_x + 1) % PB_SPEC_WIDTH;

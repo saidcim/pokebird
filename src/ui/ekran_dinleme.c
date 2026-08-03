@@ -24,28 +24,49 @@
 #define ROZET_X      16
 #define ROZET_BOY    20
 #define AD_X         44
-#define AD_W         206         /* AD_X .. 250 — çubuğa çarpmadan          */
-#define CUBUK_X      258
-#define CUBUK_W      62
-#define YUZDE_X      326
-#define YUZDE_W      40
+#define AD_W         232         /* AD_X .. 276 — çubuğa çarpmadan          */
+#define CUBUK_X      284
+#define CUBUK_W      52
+#define YUZDE_X      342
+#define YUZDE_W      40          /* .. 382, LVGL'in sahibi olduğu son sütun */
+
+/* ⚠ ETİKETE YÜKSEKLİK DE VERİLMELİ. `LV_LABEL_LONG_MODE_DOTS` yalnızca
+ * genişlikle çalışmıyor: kesmenin NEREDE olacağını yükseklikten öğreniyor.
+ * Yükseklik verilmezse etiket içeriğe göre büyüyor, uzun ad İKİ SATIRA
+ * SARIYOR ve altındaki bilimsel adın üstüne biniyor. Önizlemede yakalandı. */
+#define AD_H         21          /* pb_font_ad_18 tek satır                 */
+#define LATIN_H      13          /* pb_font_mono_10 tek satır               */
 
 typedef struct {
     lv_obj_t *rozet, *rozet_yazi;
     lv_obj_t *ad, *latin;
     lv_obj_t *cubuk_yatak, *cubuk;
     lv_obj_t *yuzde;
+    lv_obj_t *ayrac;                /* satır altı çizgisi; 3. satırda NULL   */
 
     char son_ad[80];
     char son_latin[64];
     char son_yuzde[12];
     int32_t son_cubuk_w;
     uint32_t son_renk;
+    const lv_font_t *son_font;
 } aday_t;
 
 static lv_obj_t *s_ekran;
-static lv_obj_t *s_nokta, *s_durum;
+static lv_obj_t *s_nokta, *s_durum, *s_bos;
 static aday_t    s_aday[3];
+static int       s_son_liste = -1;   /* 1 = satırlar açık, 0 = boş durum */
+
+/** Aday satırını tümüyle göster/gizle. */
+static void satir_goster(aday_t *a, bool goster) {
+    lv_obj_t *hepsi[] = { a->rozet, a->ad, a->latin,
+                          a->cubuk_yatak, a->cubuk, a->yuzde, a->ayrac };
+    for (uint32_t i = 0; i < sizeof(hepsi) / sizeof(hepsi[0]); i++) {
+        if (!hepsi[i]) continue;
+        if (goster) lv_obj_clear_flag(hepsi[i], LV_OBJ_FLAG_HIDDEN);
+        else        lv_obj_add_flag(hepsi[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
 
 static char s_son_durum[32];
 static uint32_t s_son_nokta_renk;
@@ -87,15 +108,14 @@ static void aday_kur(aday_t *a, int sira, int32_t y)
     lv_label_set_text(a->rozet_yazi, n);
 
     a->ad = pb_etiket(s_ekran, &pb_font_ad_18, PB_RENK_METIN, AD_X, y - 2);
-    lv_obj_set_width(a->ad, AD_W);
-    /* Kesme (DOT) seçildi, kaydırma (SCROLL) DEĞİL: kayan yazı her karede
+    lv_obj_set_size(a->ad, AD_W, AD_H);
+    /* Kesme (DOTS) seçildi, kaydırma (SCROLL) DEĞİL: kayan yazı her karede
      * kendini geçersizleştirir, bizde her geçersizleştirme bir dilimin
-     * panele yeniden basılması (44 KB) demek. Uzun ad kesilir, tam hâli
-     * seri portta yazılı. */
+     * panele yeniden basılması (44 KB) demek. Tam ad seri portta yazılı. */
     lv_label_set_long_mode(a->ad, LV_LABEL_LONG_MODE_DOTS);
 
-    a->latin = pb_etiket(s_ekran, &pb_font_mono_10, PB_RENK_LATIN, AD_X + 1, y + 19);
-    lv_obj_set_width(a->latin, AD_W);
+    a->latin = pb_etiket(s_ekran, &pb_font_mono_10, PB_RENK_LATIN, AD_X + 1, y + 20);
+    lv_obj_set_size(a->latin, AD_W, LATIN_H);
     lv_label_set_long_mode(a->latin, LV_LABEL_LONG_MODE_DOTS);
 
     a->cubuk_yatak = pb_kutu(s_ekran, CUBUK_X, y + 12, CUBUK_W, 5,
@@ -110,6 +130,7 @@ static void aday_kur(aday_t *a, int sira, int32_t y)
     a->son_ad[0] = a->son_latin[0] = a->son_yuzde[0] = '\0';
     a->son_cubuk_w = -1;
     a->son_renk = 0xFFFFFFFFu;
+    a->son_font = &pb_font_ad_18;
 
     rozet_boya(a, PB_RENK_SOLUK, false);
 }
@@ -130,10 +151,25 @@ lv_obj_t *pb_ekran_dinleme_olustur(void)
         aday_kur(&s_aday[i], i, SATIR_Y0 + i * SATIR_ADIM);
         /* Satır altı ince ayraç — tasarımdaki border-bottom. */
         if (i < 2) {
-            pb_kutu(s_ekran, ROZET_X, SATIR_Y0 + i * SATIR_ADIM + 36,
-                    YUZDE_X + YUZDE_W - ROZET_X, 1, PB_RENK_SATIR, 0);
+            s_aday[i].ayrac = pb_kutu(s_ekran, ROZET_X,
+                                      SATIR_Y0 + i * SATIR_ADIM + 36,
+                                      YUZDE_X + YUZDE_W - ROZET_X, 1,
+                                      PB_RENK_SATIR, 0);
         }
     }
+
+    /* Boş durum: henüz aday yokken üç boş satır göstermek anlamsız (ve
+     * yer tutucu bir tire de yazı tipinde olmayan bir karakteri davet
+     * ediyor). Satırlar gizlenip yerine tek bir satır çıkıyor. */
+    s_bos = pb_etiket(s_ekran, &pb_font_dar_11, PB_RENK_SILIK, 0, 84);
+    lv_obj_set_width(s_bos, PB_SOL_W);
+    lv_obj_set_style_text_align(s_bos, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_text(s_bos, "ses bekleniyor");
+
+    /* Spektrogramla arasındaki ince ayraç (tasarımdaki `border-left`).
+     * LVGL'in sahip olduğu son sütuna çiziliyor; şeridin kendisi 384'ten
+     * başlıyor, yani bu çizgi iki bölgenin tam sınırında duruyor. */
+    pb_kutu(s_ekran, PB_SOL_W - 1, 10, 1, PB_EKRAN_H - 28, PB_RENK_CIZGI, 0);
 
     pb_sayfa_noktalari(s_ekran, PB_EKRAN_DINLEME);
 
@@ -169,15 +205,41 @@ void pb_ekran_dinleme_guncelle(const pb_sonuc_gorunum_t *g)
         lv_obj_set_style_bg_color(s_nokta, lv_color_hex(vurgu), LV_PART_MAIN);
     }
 
+    /* ── Aday var mı: satırlar mı, boş durum mu ── */
+    const int liste = (g->ilk3_ad[0] != NULL) ? 1 : 0;
+    if (liste != s_son_liste) {
+        s_son_liste = liste;
+        for (int i = 0; i < 3; i++) satir_goster(&s_aday[i], liste == 1);
+        if (liste) lv_obj_add_flag(s_bos, LV_OBJ_FLAG_HIDDEN);
+        else       lv_obj_clear_flag(s_bos, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!liste) return;
+
     /* ── Üç aday ── */
     for (int i = 0; i < 3; i++) {
         aday_t *a = &s_aday[i];
         const char *ham = g->ilk3_ad[i];
         const float p = g->ilk3_olasilik[i];
 
+        /* ⚠ Yer tutucu ASCII olmalı: üretilen yazı tipleri 0x20-0x7E artı
+         * Türkçe harfleri içeriyor, uzun tire (U+2014) YOK ve yazılırsa
+         * kutu çıkıyor (önizlemede yakalandı). */
         char buf[80];
         if (ham) pb_turkce_buyut(ham, buf, sizeof(buf));
-        else     snprintf(buf, sizeof(buf), "—");
+        else     buf[0] = '\0';
+
+        /* Uzun adı KESMEK yerine önce KÜÇÜLT. 178 türün birkaçı 18 px'e
+         * sığmıyor ("Uzun Kuyruklu Baştankara" büyük harfle ~216 px, alan
+         * 232 px ama büyük harf daha geniş). Bir kademe küçük yazı tipiyle
+         * tamamı okunuyor; kesme yalnızca ona da sığmayan için kalıyor. */
+        const lv_font_t *font =
+            (lv_text_get_width(buf, (uint32_t)strlen(buf), &pb_font_ad_18, 0) > AD_W)
+                ? &pb_font_kalin_13 : &pb_font_ad_18;
+        if (font != a->son_font) {
+            a->son_font = font;
+            lv_obj_set_style_text_font(a->ad, font, LV_PART_MAIN);
+        }
+
         pb_yaz(a->ad, a->son_ad, sizeof(a->son_ad), buf);
 
         pb_yaz(a->latin, a->son_latin, sizeof(a->son_latin),

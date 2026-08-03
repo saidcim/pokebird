@@ -65,12 +65,14 @@ static void satir_kur(satir_t *s, int32_t y)
     s->sure = pb_etiket(s_ekran, &pb_font_mono_10, PB_RENK_SILIK, SURE_X, y + 4);
     lv_obj_set_width(s->sure, SURE_W);
 
+    /* ⚠ Yükseklik de veriliyor — yalnızca genişlikle `DOTS` kesmiyor, uzun ad
+     * iki satıra sarıp bilimsel adın üstüne biniyor (bkz. ekran_dinleme.c). */
     s->ad = pb_etiket(s_ekran, &pb_font_kalin_13, PB_RENK_METIN, AD_X, y);
-    lv_obj_set_width(s->ad, AD_W);
+    lv_obj_set_size(s->ad, AD_W, 16);
     lv_label_set_long_mode(s->ad, LV_LABEL_LONG_MODE_DOTS);
 
-    s->latin = pb_etiket(s_ekran, &pb_font_mono_10, PB_RENK_LATIN, AD_X + 1, y + 15);
-    lv_obj_set_width(s->latin, AD_W);
+    s->latin = pb_etiket(s_ekran, &pb_font_mono_10, PB_RENK_LATIN, AD_X + 1, y + 16);
+    lv_obj_set_size(s->latin, AD_W, 13);
     lv_label_set_long_mode(s->latin, LV_LABEL_LONG_MODE_DOTS);
 
     pb_kutu(s_ekran, CUBUK_X, y + 8, CUBUK_W, 5, PB_RENK_SATIR, 3);

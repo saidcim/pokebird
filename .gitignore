@@ -75,3 +75,6 @@ third_party/cmsis-nn/
 
 # A/B probe derlemeleri (bkz. §5.17 uc kosuluk A/B)
 build-*/
+
+# Arayuz onizlemesi (host) — derleme ciktisi ve uretilen goruntuler
+tools/arayuz_onizle/build/

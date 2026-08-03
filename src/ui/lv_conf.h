@@ -20,12 +20,27 @@
 #define LV_COLOR_DEPTH 16
 
 /* LVGL'in kendi yığını. Nesneler, stiller, animasyonlar buradan.
- * 24 KB, 640x172'lik tek ekranlık basit bir arayüz için bol; darlık
- * olursa lv_mem_monitor() ile ölçüp büyütün, tahminle değil. */
+ *
+ * ⚠ 24 KB YETMEDİ — ÖLÇÜLDÜ, tahmin değil. Eski yorum "tek ekranlık basit bir
+ * arayüz için bol" diyordu ve arayüz İKİ ekrana çıkınca yanlış oldu.
+ * `tools/arayuz_onizle` (host, cihazla aynı lv_conf) `lv_mem_monitor` ile
+ * ölçtü:
+ *
+ *     ekran 0 (dinleme) kurulduktan sonra:  16.384 / 20.624 bayt  = %80 dolu
+ *     ekran 1 (gunluk) kurulurken           havuz tukendi
+ *
+ * (24 KB'ın ~20,6 KB'ı kullanılabilir; gerisi LVGL'in kendi defteri.)
+ * Havuz tükenince `lv_obj_create` NULL dönüyor ve çağıran onu denetlemiyor —
+ * host'ta segfault, kartta ise sessizce eksik/bozuk çizilen bir ekran.
+ *
+ * 64 KB seçildi: iki ekran ~33 KB, kalanı etiket metni değiştikçe oluşan
+ * parçalanma ve ileride eklenecek ekranlar için pay. Bedeli karşılanabilir —
+ * arayüzün dilim yoluna geçmesi bss'ten 19,9 KB kazandırmıştı ve ana SRAM'de
+ * ~153 KB boş var. */
 #define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING    LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF   LV_STDLIB_BUILTIN
-#define LV_MEM_SIZE             (24 * 1024)
+#define LV_MEM_SIZE             (64 * 1024)
 
 /* Zaman tabanı: v9'da makro yok, çalışma anında `lv_tick_set_cb()` ile
  * veriliyor (bkz. ui/lv_port.c). v8'deki LV_TICK_CUSTOM burada işe yaramaz. */
@@ -36,9 +51,20 @@
 #define LV_DRAW_SW_DRAW_UNIT_CNT 1
 #define LV_DRAW_THREAD_STACK_SIZE (2 * 1024)
 
-/* Karmaşık efektler (gölge, degrade maskesi) hem RAM hem CPU yiyor;
- * bu arayüzde ihtiyaç yok. */
-#define LV_DRAW_SW_COMPLEX      0
+/* ⚠ 1 OLMAK ZORUNDA — eski değeri 0'dı ve gerekçesi EKSİKTİ.
+ *
+ * Eski yorum "karmaşık efektler (gölge, degrade maskesi) gerekmez" diyordu.
+ * Doğru ama yetersiz: bu bayrak **YUVARLAK KÖŞELERİ de** kapatıyor. Yarıçapı
+ * sıfırdan büyük her dikdörtgen sessizce HİÇ ÇİZİLMİYOR — hata vermiyor,
+ * sadece görünmüyor.
+ *
+ * Eski metin ağırlıklı kartta hiç yuvarlak nesne olmadığı için fark
+ * edilmemişti. Yeni arayüz güven çubukları (yarıçap 3), sıra rozetleri
+ * (daire) ve sayfa noktaları üzerine kurulu; hepsi kaybolmuştu.
+ *
+ * `tools/arayuz_onizle` ile YAKALANDI: ayraç çizgileri (yarıçap 0) çiziliyor,
+ * çubuklar ve rozetler çizilmiyordu. Kartta da aynısı oluyordu. */
+#define LV_DRAW_SW_COMPLEX      1
 
 /* ── Kapatılan özellikler — flash ve RAM tasarrufu ─────────────────────── */
 #define LV_USE_LOG              0

@@ -1841,8 +1841,73 @@ static void cmd_touch_probe(void) {
     gpio_set_dir(PB_PIN_TP_INT, GPIO_IN);
     gpio_pull_up(PB_PIN_TP_INT);
 
-    printf("Cihazi USB soketi SAGDA olacak sekilde YATAY tutun.\n");
-    printf("Kenarlarda ve koselerde gezdirin; her degisiklik yaziliyor.\n");
+    printf("Cihazi USB soketi SAGDA olacak sekilde YATAY tutun.\n\n");
+
+    /* ── YONLENDIRMELI KALIBRASYON ────────────────────────────────────────
+     *
+     * NEDEN: dokunmatik calisiyor ama ekran degistirme YANLIS EKSENDE
+     * tetikleniyor (kullanici DIKEY kaydiriyor, kod YATAY kaydirma sayiyor).
+     * Hangi bayt ciftinin hangi fiziksel eksen oldugu ve yonun hangi tarafa
+     * arttigi TAHMIN EDILEMEZ; dort kenar tek tek olculuyor.
+     *
+     * Her kenarda ORTANCA aliniyor, ortalama degil: cip ara sira panel disi
+     * (~4000) deger veriyor ve ortalama ondan bozulur, ortanca bozulmaz. */
+    {
+        static uint16_t ox[256], oy[256];
+        const char *kenar[4] = { "SOL", "SAG", "ALT", "UST" };
+        uint16_t mx[4], my[4];
+
+        printf("KALIBRASYON — dort kenar sirayla olculecek.\n");
+        printf("Her komutta parmaginizi o kenarin ORTASINA basili tutun.\n\n");
+
+        for (int k = 0; k < 4; k++) {
+            /* Pico SDK'nin stdio'su tamponlamiyor; fflush KULLANILMIYOR —
+             * newlib'in fflush'i __retarget_lock_* sembollerini cekiyor ve
+             * SDK onlari saglamiyor, bag hatasi veriyor. */
+            printf("  >> %s kenarina simdi basili tutun", kenar[k]);
+            for (int g = 3; g > 0; g--) { printf(" %d", g); sleep_ms(700); }
+
+            uint32_t n = 0;
+            absolute_time_t bitis = make_timeout_time_ms(2000);
+            while (!time_reached(bitis) && n < 256) {
+                pb_touch_state_t st = pb_touch_read();
+                if (st.ok && st.fingers > 0) { ox[n] = st.p.raw_x; oy[n] = st.p.raw_y; n++; }
+                sleep_ms(8);
+            }
+            if (n == 0) { printf("  -> dokunma OKUNAMADI\n"); mx[k] = my[k] = 0xFFFF; continue; }
+
+            /* Ortanca: kucukten buyuge siralayip ortayi al (n kucuk, basit
+             * ekleme siralamasi yeter). */
+            for (uint32_t i = 1; i < n; i++) {
+                uint16_t a = ox[i], b = oy[i];
+                uint32_t j = i;
+                while (j > 0 && ox[j - 1] > a) { ox[j] = ox[j - 1]; j--; }
+                ox[j] = a;
+                j = i;
+                while (j > 0 && oy[j - 1] > b) { oy[j] = oy[j - 1]; j--; }
+                oy[j] = b;
+            }
+            mx[k] = ox[n / 2];
+            my[k] = oy[n / 2];
+            printf("  -> ortanca ham_x %4u  ham_y %4u   (%lu ornek, en kucuk/buyuk "
+                   "x %u/%u  y %u/%u)\n",
+                   mx[k], my[k], (unsigned long)n, ox[0], ox[n - 1], oy[0], oy[n - 1]);
+        }
+
+        printf("\n  SONUC:\n");
+        printf("    SOL->SAG  ham_x %u -> %u   (degisim %d)\n",
+               mx[0], mx[1], (int)mx[1] - (int)mx[0]);
+        printf("    SOL->SAG  ham_y %u -> %u   (degisim %d)\n",
+               my[0], my[1], (int)my[1] - (int)my[0]);
+        printf("    ALT->UST  ham_x %u -> %u   (degisim %d)\n",
+               mx[2], mx[3], (int)mx[3] - (int)mx[2]);
+        printf("    ALT->UST  ham_y %u -> %u   (degisim %d)\n",
+               my[2], my[3], (int)my[3] - (int)my[2]);
+        printf("  Hangi ham eksen YATAY'da cok degisiyorsa arayuzun x'i odur;\n");
+        printf("  degisimin isareti de yonu verir.\n\n");
+    }
+
+    printf("Simdi CANLI AKIS. Kenarlarda gezdirin; her degisiklik yaziliyor.\n");
     printf("INT sutunu dokununca 0'a dusuyorsa cip dokunusu goruyor demektir.\n");
     printf("Cikmak icin bir tusa basin.\n\n");
     printf("  INT  parmak   ham x   ham y   ilk 8 bayt\n");
