@@ -20,9 +20,8 @@ doğrulanmayı bekliyor)
 >
 > Arayüz host'ta render ediliyor artık (§9r, `tools/arayuz_onizle`) ve ilk
 > koşusu üç gerçek cihaz hatası yakaladı (LVGL yığını, yuvarlak köşeler,
-> etiket kesme). Üçü de düzeltildi. **Açık kalan tek şey kaydırma ekseni:**
-> kullanıcı dikey kaydırınca ekran değişiyor. `--cmd t` kalibrasyonu
-> çalıştırılmadan eksene DOKUNMAYIN.
+> etiket kesme). Üçü de düzeltildi. Kaydırma ekseni de ÖLÇÜLDÜ ve
+> düzeltildi (§9r sonu). **Kalan: yeni hâlin gözle doğrulanması.**
 >
 > ### (geçmiş) iki göz testi bekliyordu (§9q sonu)
 >
@@ -3580,8 +3579,33 @@ hangi ham eksenin yatayda değiştiğini ve işaretini doğrudan yazıyor.
 python tools/capture_wav.py --port COM13 --cmd t
 ```
 
-**Bu ölçüm gelmeden kaydırma eksenine dokunmayın** — tahminle çevirmek bir
-tur daha göz masrafı demek.
+### ✅ ÖLÇÜLDÜ VE DÜZELTİLDİ — kaydırma artık HAM EKSENDE
+
+Kullanıcı kalibrasyonu çalıştırdı:
+
+
+
+Üç sonuç:
+
+1. **Yatay eksen ** ve soldan sağa **AZALIYOR**. §9q'daki yön çıkarımı
+   doğruymuş.
+2. ** KULLANILAMAZ:** ekranın tamamı boyunca yalnızca 14 birim
+   değişiyor. Kasanın çıkıntısı üst/alt kenara gerçekten dokunmayı
+   engelliyor olmalı. Dikey oran kısıtı () bu yüzden
+   **kaldırıldı** — güvenilmeyen bir sayıyla bölmek, elemekten kötü.
+3. **Asıl hata:** dikey kaydırmada  **111 birim** kayıyor ve eski eşik
+   90 pikseldi. Yani dikey hareket yatay kaydırma sayılıyordu — kullanıcının
+   gördüğü davranışın birebir açıklaması.
+
+Kaydırma artık türetilmiş pikselde değil **ham eksende** ölçülüyor ve eşik
+ölçülen iki sayının ARASINA konuldu:
+
+
+
+⚠ **Ham→piksel ölçeği KALİBRE EDİLMEDİ** (sol kenar 432 okuyor, 639 değil).
+Gerekmiyor: ekranda dokunulacak bir şey yok, yalnızca kaydırma var. LVGL'in
+işaretçi eşlemesi () duruyor ama **kullanılmıyor**;
+ekranda tıklanabilir bir nesne eklenirse önce o kalibre edilmeli.
 
 ---
 

@@ -5,6 +5,7 @@
 
 #include "pico/stdlib.h"
 
+#include "hal/touch.h"
 #include "ui/ekran_dinleme.h"
 #include "ui/ekran_gunluk.h"
 #include "ui/lv_port.h"
@@ -27,20 +28,38 @@ static char s_son_gunluk_ad[48];
 
 /* ── Kaydırma algılayıcısı ────────────────────────────────────────────────
  *
- * NEDEN LVGL'İN KENDİ HAREKET ALGILAMASI DEĞİL: dokunmatik bugüne kadar hiç
- * parmakla denenmedi (§9b — boşta sabit 0xDB geliyor ve bunun "dokunma yok"
- * mu bozuk paket mi olduğu belirlenemedi). Çalışmazsa NEDEN çalışmadığını
- * ekrana bakmadan görebilmek gerekiyor; bu yüzden algılama ham noktanın
+ * NEDEN LVGL'İN KENDİ HAREKET ALGILAMASI DEĞİL: çalışmadığında NEDEN
+ * çalışmadığını ekrana bakmadan görebilmek gerekiyor. Algılama ham noktanın
  * üstünde duruyor ve her aşaması ayrı sayaçla ölçülüyor.
  *
- * Eşikler: ekran 640 piksel geniş, 90 piksel yaklaşık yedide biri — kazayla
- * aşılmayacak, bilerek yapılan bir kaydırmada rahat aşılacak kadar. Dikey
- * kısıt, listeye dokunup parmağı kaydıran kullanıcının ekran değiştirmesini
- * engelliyor.                                                              */
-#define KAYDIRMA_ESIK_PX   90
-#define KAYDIRMA_DIKEY_PAY  2      /* |dx| > 2*|dy| olmalı */
+ * ⚠ HAM EKSENDE ÖLÇÜLÜYOR, TÜRETİLMİŞ PİKSELDE DEĞİL — ve bu ölçüme dayalı
+ * bir karar. `t` kalibrasyonu (kullanıcı, dört kenar, ortanca):
+ *
+ *     SOL -> SAG (yatay):   ham_x 432 -> 3     degisim -429
+ *     ALT -> UST (dikey):   ham_x 560 -> 449   degisim -111
+ *                           ham_y 107 -> 93    degisim  -14
+ *
+ * Buradan çıkan üç şey:
+ *   1. Yatay eksen ham_x ve SOLDAN SAĞA AZALIYOR.
+ *   2. ham_y kullanılamaz: ekranın tamamı boyunca yalnızca 14 birim
+ *      değişiyor (kasanın çıkıntısı üst/alt kenara dokunmayı engelliyor
+ *      olmalı). Bu yüzden DİKEY ORAN KISITI KALDIRILDI — güvenilmeyen bir
+ *      sayıyla bölmek, elemekten daha kötü.
+ *   3. Asıl hata buydu: dikey kaydırmada ham_x 111 birim kayıyor ve eski
+ *      eşik 90'dı, yani dikey hareket yatay kaydırma sayılıyordu.
+ *
+ * Eşik ikisinin ARASINA konuldu: kazara kayma 111, bilinçli kaydırma ~429.
+ * 200 ikisinden de rahat uzakta.
+ *
+ * Ham->piksel ölçeği KALİBRE EDİLMEDİ (sol kenar 432 okuyor, 639 değil) ama
+ * gerekmiyor: ekranda dokunulacak bir şey yok, yalnızca kaydırma var.       */
+#define KAYDIRMA_ESIK_HAM  200
 #define KAYDIRMA_AZAMI_MS  1200
 #define PARMAK_BIRAKMA_MS    80    /* bu kadar okumasız kalınca "kalktı"    */
+
+/* Uzun eksenin makul üst sınırı. Çip ara sıra ~4000 veriyor (12 bit, panel
+ * dışı); o kareler düşürülüyor. Ölçülen en büyük gerçek değer 560. */
+#define HAM_AZAMI          1000
 
 uint32_t pb_kaydirma_dokunma;
 uint32_t pb_kaydirma_basla;
@@ -50,9 +69,19 @@ int32_t  pb_kaydirma_son_dx;
 int32_t  pb_kaydirma_son_dy;
 
 static bool     s_basili;
-static int32_t  s_bas_x, s_bas_y, s_son_x, s_son_y;
+static int32_t  s_bas_ham, s_son_ham;
 static uint32_t s_bas_ms, s_son_dokunma_ms;
 static bool     s_bu_dokunusta_kaydirildi;
+
+/** Kaydırmayı uygula. `d` ham eksendeki değişim.
+ *
+ * ham_x soldan sağa AZALDIĞI için (kalibrasyon), sağdan sola kaydırma —
+ * yani sayfa çevirme yönü, "sonraki ekran" — ham_x'i ARTIRIYOR. */
+static void kaydirmayi_uygula(int32_t d)
+{
+    pb_kaydirma_kabul++;
+    pb_arayuz_ekran_ayarla(d > 0 ? s_aktif + 1 : s_aktif - 1);
+}
 
 static void kaydirma_bitir(uint32_t simdi)
 {
@@ -61,66 +90,59 @@ static void kaydirma_bitir(uint32_t simdi)
 
     if (s_bu_dokunusta_kaydirildi) return;
 
-    const int32_t dx = s_son_x - s_bas_x;
-    const int32_t dy = s_son_y - s_bas_y;
-    pb_kaydirma_son_dx = dx;
-    pb_kaydirma_son_dy = dy;
+    const int32_t d = s_son_ham - s_bas_ham;
+    pb_kaydirma_son_dx = d;
 
-    const int32_t adx = dx < 0 ? -dx : dx;
-    const int32_t ady = dy < 0 ? -dy : dy;
-
+    const int32_t ad = d < 0 ? -d : d;
     if (simdi - s_bas_ms > KAYDIRMA_AZAMI_MS) { pb_kaydirma_kisa++; return; }
-    if (adx < KAYDIRMA_ESIK_PX)               { pb_kaydirma_kisa++; return; }
-    if (adx <= KAYDIRMA_DIKEY_PAY * ady)      { pb_kaydirma_kisa++; return; }
+    if (ad < KAYDIRMA_ESIK_HAM)               { pb_kaydirma_kisa++; return; }
 
-    pb_kaydirma_kabul++;
-    /* Sağdan sola kaydırma = "sonraki ekran" (sayfa çevirme yönü). */
-    pb_arayuz_ekran_ayarla(dx < 0 ? s_aktif + 1 : s_aktif - 1);
+    kaydirmayi_uygula(d);
 }
 
 static void kaydirma_yokla(void)
 {
     const uint32_t simdi = to_ms_since_boot(get_absolute_time());
 
-    int32_t x, y;
-    if (pb_lv_dokunma_al(&x, &y)) {
+    /* Ham noktayı doğrudan okuyoruz: eşik ham eksende ölçüldü (yukarıdaki
+     * kalibrasyon) ve ham->piksel ölçeği kalibre edilmiş değil. */
+    pb_touch_state_t st = pb_touch_read();
+    const bool gecerli = st.ok && st.fingers > 0 && st.p.raw_x < HAM_AZAMI;
+
+    if (gecerli) {
+        const int32_t ham = (int32_t)st.p.raw_x;
         pb_kaydirma_dokunma++;
+        pb_kaydirma_son_dy = (int32_t)st.p.raw_y;   /* teşhis için ham kısa eksen */
         s_son_dokunma_ms = simdi;
 
         if (!s_basili) {
             s_basili = true;
             s_bu_dokunusta_kaydirildi = false;
-            s_bas_x = s_son_x = x;
-            s_bas_y = s_son_y = y;
+            s_bas_ham = s_son_ham = ham;
             s_bas_ms = simdi;
             pb_kaydirma_basla++;
             return;
         }
 
-        s_son_x = x;
-        s_son_y = y;
+        s_son_ham = ham;
 
         /* Parmak henüz kalkmadan eşiği aştıysa hemen geç: kullanıcı
          * parmağını kaldırana kadar beklemek "tepki vermiyor" hissi veriyor. */
         if (!s_bu_dokunusta_kaydirildi) {
-            const int32_t dx = s_son_x - s_bas_x;
-            const int32_t dy = s_son_y - s_bas_y;
-            const int32_t adx = dx < 0 ? -dx : dx;
-            const int32_t ady = dy < 0 ? -dy : dy;
-            if (adx >= KAYDIRMA_ESIK_PX && adx > KAYDIRMA_DIKEY_PAY * ady &&
-                simdi - s_bas_ms <= KAYDIRMA_AZAMI_MS) {
-                pb_kaydirma_son_dx = dx;
-                pb_kaydirma_son_dy = dy;
-                pb_kaydirma_kabul++;
+            const int32_t d = s_son_ham - s_bas_ham;
+            const int32_t ad = d < 0 ? -d : d;
+            if (ad >= KAYDIRMA_ESIK_HAM && simdi - s_bas_ms <= KAYDIRMA_AZAMI_MS) {
+                pb_kaydirma_son_dx = d;
                 s_bu_dokunusta_kaydirildi = true;
-                pb_arayuz_ekran_ayarla(dx < 0 ? s_aktif + 1 : s_aktif - 1);
+                kaydirmayi_uygula(d);
             }
         }
         return;
     }
 
-    /* Okuma yok. Dokunmatik ara ara kare düşürüyor; hemen "kalktı" demeden
-     * kısa bir pencere bekleniyor, yoksa tek kayıp kare kaydırmayı böler. */
+    /* Okuma yok (ya da panel dışı kare). Dokunmatik ara ara kare düşürüyor;
+     * hemen "kalktı" demeden kısa bir pencere bekleniyor, yoksa tek kayıp
+     * kare kaydırmayı böler. */
     if (s_basili && (simdi - s_son_dokunma_ms) > PARMAK_BIRAKMA_MS) {
         kaydirma_bitir(simdi);
     }
