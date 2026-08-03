@@ -39,7 +39,17 @@ add_executable(pokebird
     src/dsp/gate.c
     src/ui/spectrogram.c
     src/ui/lv_port.c
-    src/ui/sonuc_karti.c
+    src/ui/tema.c
+    src/ui/metin.c
+    src/ui/ekran_dinleme.c
+    src/ui/ekran_gunluk.c
+    src/ui/arayuz.c
+    # Yazı tipleri ÜRETİLMİŞ (tools/font_uret.py). LVGL'in gömülü
+    # Montserrat'ında Türkçe harfler yok; bunlarda var (üretimde doğrulanıyor).
+    src/ui/fonts/pb_font_ad_18.c
+    src/ui/fonts/pb_font_kalin_13.c
+    src/ui/fonts/pb_font_dar_11.c
+    src/ui/fonts/pb_font_mono_10.c
     src/ai/tur_agi.cc
     src/ai/tanima.c
     src/ai/karar.c

@@ -19,6 +19,7 @@
 #include "dsp/fft.h"
 #include "dsp/gate.h"
 #include "dsp/mel.h"
+#include "ui/metin.h"
 
 static int g_fail = 0;
 static int g_run  = 0;
@@ -367,6 +368,57 @@ static int dump_window(const char *yol) {
     return 0;
 }
 
+/* ── Türkçe büyük harf ────────────────────────────────────────────────────
+ *
+ * NEDEN TEST EDİLİYOR: arayüz tür adlarını BÜYÜK harf gösteriyor (tasarım).
+ * Türkçe'de büyütme dile özgü — `i`->`İ` ve `ı`->`I` — ve yanlışı ekranda
+ * ancak Türkçe okuyan biri fark eder, yani gözle yakalaması pahalı. Ayrıca
+ * dönüşüm bayt uzunluğunu DEĞİŞTİRİYOR (i 1->2 bayt, ı 2->1), tampon sınırı
+ * bu yüzden gerçek bir risk.
+ */
+static void esit_metin(const char *girdi, const char *beklenen) {
+    char out[64];
+    pb_turkce_buyut(girdi, out, sizeof(out));
+    char ayrinti[160];
+    snprintf(ayrinti, sizeof(ayrinti), "\"%s\" -> \"%s\", beklenen \"%s\"",
+             girdi, out, beklenen);
+    check(strcmp(out, beklenen) == 0, girdi, ayrinti);
+}
+
+static void test_turkce_buyut(void) {
+    printf("Turkce buyuk harf\n");
+
+    /* ASCII */
+    esit_metin("Karatavuk", "KARATAVUK");
+
+    /* i -> İ (iki bayt), ı -> I (tek bayt): ikisi de aynı kelimede */
+    esit_metin("Kızılgerdan", "KIZILGERDAN");
+    esit_metin("İskender Papağanı", "İSKENDER PAPAĞANI");
+
+    /* Diğer Türkçe harfler */
+    esit_metin("Bülbül", "BÜLBÜL");
+    esit_metin("Baştankara", "BAŞTANKARA");
+    esit_metin("Şahin çığlığı", "ŞAHİN ÇIĞLIĞI");
+    esit_metin("Ötleğen", "ÖTLEĞEN");
+
+    /* Sınır durumları */
+    esit_metin("", "");
+
+    /* Tampon taşması: 'i' iki bayta çıkıyor, yarım UTF-8 dizisi ÇIKMAMALI.
+     * Beş baytlık tampon: "İ" (2) + "İ" (2) + sonlandırıcı = tam dolu. */
+    char kucuk[5];
+    pb_turkce_buyut("iiii", kucuk, sizeof(kucuk));
+    check(strcmp(kucuk, "İİ") == 0, "tampon tasmasi yarim UTF-8 birakmiyor",
+          kucuk);
+
+    /* NULL girdi çökmemeli, boş string vermeli. */
+    char nl[8] = "xxx";
+    pb_turkce_buyut(NULL, nl, sizeof(nl));
+    check(nl[0] == '\0', "NULL girdi bos string veriyor", nl);
+
+    printf("\n");
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--dump") == 0) {
         dump_frame();
@@ -383,6 +435,7 @@ int main(int argc, char **argv) {
     test_mel_window();
     test_gate();
     test_karar();
+    test_turkce_buyut();
 
     printf("\n%d test, %d kaldi\n", g_run, g_fail);
     return g_fail ? 1 : 0;

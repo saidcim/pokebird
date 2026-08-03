@@ -16,8 +16,16 @@
 
 #include <stdint.h>
 
-/** Ekranın spektrograma ayrılan bölgesi (sağ taraf; sol taraf kimlik kartı) */
-#define PB_SPEC_X0      200
+/** Ekranın spektrograma ayrılan bölgesi (sağ taraf; solu LVGL çiziyor).
+ *
+ * ⚠ SINIR DİLİME OTURMAK ZORUNDA. LVGL artık tam genişlik çalışıyor ve paneli
+ * 128 pikselgenişliğinde dikey DİLİMLER hâlinde basıyor (lv_port.c). Bu şerit
+ * sağdaki İKİ dilim: 384..639. LVGL ile spektrogram aynı dilimi paylaşırsa
+ * her ikisi de o dilimin tamamını yazdığı için birbirlerini silerler.
+ *
+ * Tasarım (Kus Sesi Arayuz.dc.html) 236 px istiyordu; 256 dilim sınırına oturan
+ * en yakın değer ve 20 piksel fark yerleşimde fark ettirmiyor. */
+#define PB_SPEC_X0      384
 #define PB_SPEC_X1      639
 #define PB_SPEC_WIDTH   (PB_SPEC_X1 - PB_SPEC_X0 + 1)
 #define PB_SPEC_HEIGHT  172

@@ -64,7 +64,13 @@ def run_interactive(ser, cmd):
 
     ser.write(cmd.encode())
     ser.flush()
-    print("Ekrana bakin. Istenen goruntuyu gordugunuzde bir tusa basin.")
+    if cmd in ("c", "C"):
+        # Arayuz komutlari: bosluk/'n' ekran degistiriyor, baska tus cikiyor.
+        # Kaydirma dokunmatikle de calisiyor; bu onun yedegi (lastsession §9q).
+        print("Ekrana bakin. EKRANDA YATAY KAYDIRIN, ya da bosluk/'n' ile")
+        print("ekran degistirin. Cikmak icin baska bir tusa basin.")
+    else:
+        print("Ekrana bakin. Istenen goruntuyu gordugunuzde bir tusa basin.")
     print("Cikmak icin Ctrl+C.\n")
 
     last_data = time.time()
@@ -189,8 +195,8 @@ def main():
     ap.add_argument("--out", default="kayit.wav")
     ap.add_argument("--cmd", default="r",
                     choices=["r", "n", "e", "i", "l", "d", "s", "b", "v", "o",
-                             "t", "u", "m", "a", "c", "C", "x", "k", "K", "w",
-                             "y", "z", "j", "L", "S"],
+                             "t", "u", "m", "a", "c", "C", "F", "x", "k", "K",
+                             "w", "y", "z", "j", "L", "S"],
                     help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
                          "l=canli seviye, d=ekran testi, b=arka isik, "
                          "v=QSPI veri yolu teshisi, s=spektrogram (Ctrl+C ile cik), "

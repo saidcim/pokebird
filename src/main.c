@@ -41,12 +41,13 @@
 #include "dsp/gate.h"
 #include "ui/spectrogram.h"
 #include "ui/lv_port.h"
+#include "ui/tema.h"
 #include "ai/tur_agi.h"
 #include "ai/tanima.h"
 #include "ai/karar.h"
 #include "ai/siniflar.h"
 #include "ai/dogrulama_seti.h"
-#include "ui/sonuc_karti.h"
+#include "ui/arayuz.h"
 #include "lvgl.h"
 
 void pb_display_dma_init(void);   /* hal/display/dev_config.c */
@@ -945,8 +946,13 @@ static void cmd_full_demo(void) {
     lv_obj_set_style_text_color(sayilar, lv_color_hex(0x8090A0), LV_PART_MAIN);
     lv_obj_align(sayilar, LV_ALIGN_TOP_LEFT, 12, 76);
 
-    /* Kartı çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi tam
-     * ekran, spektrogram alanını da boyuyor — sıra ters olursa şerit silinir. */
+    /* Spektrogramın dilimlerini LVGL'e ÇİZDİRME: arayüz artık tam genişlik
+     * (640) ve LVGL varsayılan olarak beş dilimin de sahibi — bildirilmezse
+     * kart ile şerit aynı bölgeye yazıp birbirini siler (lv_port.c). */
+    pb_lv_dilim_sahibi_ayarla(PB_LVGL_DILIM_MASKE_DINLEME);
+
+    /* Kartı çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi kendi
+     * dilimlerinin tamamını boyuyor. */
     for (int i = 0; i < 4; i++) { pb_lv_tick(); sleep_ms(5); }
     pb_spec_init();
 
@@ -2472,12 +2478,14 @@ static void cmd_recognize(bool kapi_yoksay) {
 static void cmd_sonuc_ekrani(void) {
     printf("\n=== SONUC EKRANI (M7) ===\n");
     printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
-    printf("Solda tanima karti, sagda canli spektrogram.\n");
+    printf("EKRAN 0 dinleme (solda ilk 3 tur, sagda spektrogram)\n");
+    printf("EKRAN 1 gunluk  (tam genislik, taninan turlerin listesi)\n");
+    printf("Gecis: ekranda YATAY KAYDIRMA, ya da bosluk/'n' tusu.\n");
     printf("Karar kurali: girme %.2f / cikma %.2f, en az %u pencere, "
            "tutma %u ms\n", (double)PB_KARAR_GIRIS_ESIK,
            (double)PB_KARAR_CIKIS_ESIK, (unsigned)PB_KARAR_MIN_PENCERE,
            (unsigned)PB_KARAR_TUT_MS);
-    printf("Cikmak icin bir tusa basin.\n\n");
+    printf("Cikmak icin baska bir tusa basin.\n\n");
 
     backlight_set(true);
     /* `a` demosundaki gerekçe: fill, lcd_blit'in atlama şeridini bilinen bir
@@ -2486,10 +2494,10 @@ static void cmd_sonuc_ekrani(void) {
     pb_lv_flush_sayaclari_sifirla();
     pb_lv_init();
 
-    pb_sonuc_karti_olustur();
-    /* Kartı önce çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi
-     * kendi alanının tamamını boyuyor. */
-    for (int i = 0; i < 4; i++) { pb_lv_tick(); sleep_ms(5); }
+    pb_arayuz_olustur();
+    /* Arayüzü önce çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi
+     * sahip olduğu dilimlerin tamamını boyuyor. */
+    for (int i = 0; i < 4; i++) { pb_arayuz_tick(); sleep_ms(5); }
     pb_spec_init();
 
     pb_mel_init();   /* filtre bankası core 1 başlamadan hazır olsun */
@@ -2510,12 +2518,27 @@ static void cmd_sonuc_ekrani(void) {
     memset(&d, 0, sizeof(d));
 
     drain_stdin();
-    while (getchar_timeout_us(0) < 0) {
+    for (;;) {
+        /* Boşluk / 'n' ekran değiştiriyor, başka her tuş çıkıyor. Kaydırmanın
+         * yedeği bu: dokunmatik bir kareyi düşürse bile ekran değiştirilebilir
+         * kalıyor (arayuz.h'deki gerekçe). */
+        const int tus = getchar_timeout_us(0);
+        if (tus >= 0) {
+            if (tus == ' ' || tus == 'n' || tus == 'N') pb_arayuz_sonraki();
+            else break;
+        }
+
         /* 1) Spektrogram: core 1'in bıraktığı mel sütunlarını boşalt.
          *    Tur başına en fazla 8 sütun — çıkarım sonrası birikmiş kuyruk
          *    tek turda boşaltılmaya çalışılırsa arayüz o turda takılır. */
         int8_t mel_q[PB_MEL_BANDS];
         for (int i = 0; i < 8 && pb_tanima_mel_al(mel_q); i++) {
+            /* ⚠ Günlük ekranındayken spektrogram YAZMAMALI: o ekranda sağdaki
+             * iki dilim de LVGL'in (arayuz.c, dilim sahipliği) ve ikisi aynı
+             * bölgeye yazarsa birbirlerini siler. Kuyruk yine de boşaltılıyor,
+             * yoksa core 1 dolu kuyruğa kare atmaya başlar. */
+            if (pb_arayuz_ekran() != PB_EKRAN_DINLEME) continue;
+
             uint8_t bins[PB_MEL_BANDS];
             for (int b = 0; b < PB_MEL_BANDS; b++) {
                 /* `a` demosuyla AYNI gösterim penceresi: -75..-15 dB. */
@@ -2571,7 +2594,10 @@ static void cmd_sonuc_ekrani(void) {
             if (d.gecerli) {
                 for (int r = 0; r < 3; r++) {
                     const int c = d.ilk3[r];
-                    if (c >= 0 && c < PB_SINIF_SAYISI) gv.ilk3_ad[r] = pb_sinif_ad[c];
+                    if (c >= 0 && c < PB_SINIF_SAYISI) {
+                        gv.ilk3_ad[r]    = pb_sinif_ad[c];
+                        gv.ilk3_latin[r] = pb_sinif_latin[c];
+                    }
                     gv.ilk3_olasilik[r] = d.ilk3_olasilik[r];
                 }
             }
@@ -2580,11 +2606,11 @@ static void cmd_sonuc_ekrani(void) {
             gv.birlesen = d.birlesen;
             gv.overrun = d.overrun;
             gv.bant_db = d.bant_db;
-            pb_sonuc_karti_guncelle(&gv);
+            pb_arayuz_guncelle(&gv);
             sonraki_kart = make_timeout_time_ms(250);
         }
 
-        pb_lv_tick();
+        pb_arayuz_tick();
         sleep_ms(2);
     }
 
@@ -2597,10 +2623,21 @@ static void cmd_sonuc_ekrani(void) {
            (unsigned long)(d.kare ? d.kapi_acik * 100 / d.kare : 0),
            (unsigned long)d.cikarim, (unsigned long)d.atlanan,
            (unsigned long)d.overrun);
-    printf("  LVGL flush %lu, satir adimi != alan_w: %lu, panel_w %lu..%lu\n\n",
+    printf("  LVGL flush %lu, satir adimi != alan_w: %lu, panel_w %lu..%lu, "
+           "dilim basimi %lu\n",
            (unsigned long)pb_lv_flush_say,
            (unsigned long)pb_lv_flush_stride_farkli,
-           (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max);
+           (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max,
+           (unsigned long)pb_lv_dilim_basim);
+    /* Kaydırma teşhisi — GÖZ GEREKMEZ. Kaydırma çalışmıyorsa hangi aşamada
+     * durduğu buradan okunuyor: dokunma hiç gelmiyor mu, geliyor da hareket
+     * eşiği mi aşılmıyor, yoksa panel dışı kareler mi düşürülüyor. */
+    printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
+           "panel disi %lu, son dx %ld dy %ld\n\n",
+           (unsigned long)pb_kaydirma_dokunma, (unsigned long)pb_kaydirma_basla,
+           (unsigned long)pb_kaydirma_kabul, (unsigned long)pb_kaydirma_kisa,
+           (unsigned long)pb_lv_dokunma_gecersiz,
+           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy);
 }
 
 /* ── C: SONUÇ KARTI GÖSTERİM TESTİ (mikrofonsuz) ──────────────────────────
@@ -2638,9 +2675,15 @@ static void cmd_sonuc_karti_demo(void) {
     backlight_set(true);
     pb_lcd_fill(0x0000);
     pb_lv_init();
-    pb_sonuc_karti_olustur();
-    for (int i = 0; i < 4; i++) { pb_lv_tick(); sleep_ms(5); }
+    pb_arayuz_olustur();
+    for (int i = 0; i < 4; i++) { pb_arayuz_tick(); sleep_ms(5); }
     pb_spec_init();
+
+    /* Günlük ekranı da sınanabilsin: boş liste hiçbir çizim sorununu
+     * göstermez. Üç sahte kayıt, en uzun ad dâhil. */
+    pb_arayuz_gunluge_ekle(pb_sinif_ad[uzun],   pb_sinif_latin[uzun],   0.91f);
+    pb_arayuz_gunluge_ekle(pb_sinif_ad[ikinci], pb_sinif_latin[ikinci], 0.74f);
+    pb_arayuz_gunluge_ekle(pb_sinif_ad[ucuncu], pb_sinif_latin[ucuncu], 0.63f);
 
     const struct { pb_karar_kip_t kip; bool tur; float guven; const char *ne; }
     asama[] = {
@@ -2656,7 +2699,13 @@ static void cmd_sonuc_karti_demo(void) {
     absolute_time_t sonraki = make_timeout_time_ms(1);
     drain_stdin();
 
-    while (getchar_timeout_us(0) < 0) {
+    for (;;) {
+        const int tus = getchar_timeout_us(0);
+        if (tus >= 0) {
+            if (tus == ' ' || tus == 'n' || tus == 'N') pb_arayuz_sonraki();
+            else break;
+        }
+
         if (time_reached(sonraki)) {
             pb_sonuc_gorunum_t gv;
             memset(&gv, 0, sizeof(gv));
@@ -2666,6 +2715,9 @@ static void cmd_sonuc_karti_demo(void) {
             gv.ilk3_ad[0] = pb_sinif_ad[uzun];
             gv.ilk3_ad[1] = pb_sinif_ad[ikinci];
             gv.ilk3_ad[2] = pb_sinif_ad[ucuncu];
+            gv.ilk3_latin[0] = pb_sinif_latin[uzun];
+            gv.ilk3_latin[1] = pb_sinif_latin[ikinci];
+            gv.ilk3_latin[2] = pb_sinif_latin[ucuncu];
             gv.ilk3_olasilik[0] = asama[a].guven;
             gv.ilk3_olasilik[1] = 0.21f;
             gv.ilk3_olasilik[2] = 0.07f;
@@ -2674,28 +2726,115 @@ static void cmd_sonuc_karti_demo(void) {
             gv.birlesen = 8;
             gv.overrun = 0;
             gv.bant_db = -38.0f;
-            pb_sonuc_karti_guncelle(&gv);
+            pb_arayuz_guncelle(&gv);
 
-            printf("  asama %d/%d: %s\n", a + 1, adet, asama[a].ne);
+            printf("  asama %d/%d: %s  [ekran %d]\n", a + 1, adet, asama[a].ne,
+                   pb_arayuz_ekran());
             a = (a + 1) % adet;
             sonraki = make_timeout_time_ms(2500);
         }
 
-        /* Spektrogram şeridi: kayan bir tepe. Düz renk olmasın — düz blok
-         * satır kaymasını gizler, bir oturumu bu yüzden kaybettik (§9o). */
+        /* Spektrogram şeridi: gerçek bir ötüşe benzeyen desen — heceler,
+         * süpüren bir temel frekans, iki harmonik ve gürültü tabanı.
+         *
+         * Düz renk OLMAMASI şart (§9o): düz blok satır kaymasını gizler.
+         * Ama düz olmayan her desen de yetmiyor — tek bir hareketli tepe
+         * gerçek spektrograma benzemediği için "doğru görünüyor mu?"
+         * sorusuna cevap vermiyordu. Bu desen hem kaymayı gösteriyor hem de
+         * gerçek çıktının nasıl görüneceğini. */
         uint8_t bins[PB_MEL_BANDS];
+        const uint32_t faz = sutun % 48;             /* hece ~0,77 s        */
+        const bool sessiz = (faz >= 34);             /* heceler arası       */
+        const int temel = 13 + (int)(faz < 17 ? faz : 34 - faz);  /* süpürme */
         for (int b = 0; b < PB_MEL_BANDS; b++) {
-            const int d = b - (int)(sutun % PB_MEL_BANDS);
-            const int uzaklik = d < 0 ? -d : d;
-            bins[b] = (uint8_t)(uzaklik < 8 ? 255 - uzaklik * 28 : 20);
+            int v = 10 + (int)((sutun * 7u + (uint32_t)b * 13u) % 9u);  /* taban */
+            if (!sessiz) {
+                for (int h = 1; h <= 3; h++) {
+                    const int merkez = temel * h;
+                    if (merkez >= PB_MEL_BANDS) break;
+                    int d = b - merkez;
+                    if (d < 0) d = -d;
+                    if (d <= 2) {
+                        const int parlak = 255 - d * 70 - (h - 1) * 60;
+                        if (parlak > v) v = parlak;
+                    }
+                }
+            }
+            bins[b] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
         }
-        pb_spec_push_column(bins, PB_MEL_BANDS);
+        if (pb_arayuz_ekran() == PB_EKRAN_DINLEME) {
+            pb_spec_push_column(bins, PB_MEL_BANDS);
+        }
         sutun++;
 
-        pb_lv_tick();
+        pb_arayuz_tick();
         sleep_ms(16);
     }
-    printf("cikildi\n\n");
+    printf("cikildi\n");
+    printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
+           "panel disi %lu, son dx %ld dy %ld\n\n",
+           (unsigned long)pb_kaydirma_dokunma, (unsigned long)pb_kaydirma_basla,
+           (unsigned long)pb_kaydirma_kabul, (unsigned long)pb_kaydirma_kisa,
+           (unsigned long)pb_lv_dokunma_gecersiz,
+           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy);
+}
+
+/* ── F: KART FRAMEBUFFER DÖKÜMÜ — göz GEREKMEZ, teşhisi ikiye böler ───────
+ *
+ * `C` ekranında yazılar üst üste binmiş görünüyordu. İki ihtimal vardı ve
+ * fotoğraftan ayırt edilemiyordu:
+ *   (a) LVGL/yerleşim yanlış çiziyor  -> framebuffer'da da bozuk olur
+ *   (b) panele giden yol bozuyor      -> framebuffer TEMİZ, ekran bozuk
+ *
+ * Bu komut kartı iki kez kurup (a) hâlini seri porta ASCII döküyor. Terminalde
+ * yazı düzgün okunuyorsa suçlu (b), okunmuyorsa (a) — ve (a) panele hiç
+ * bakmadan düzeltilebilir.
+ *
+ * İKİ AŞAMA BİLEREK: önce kısa içerik ("dinliyor", tür yok), sonra en uzun
+ * tür adı. İkinci dökümde birinci aşamanın kalıntısı varsa sorun "eski yazı
+ * silinmiyor"dur; kalıntı yoksa ve satırlar üst üste biniyorsa sorun
+ * yerleşimdir (etiketler birbirinin alanına taşıyor).
+ */
+static void cmd_kart_fb_dok(void) {
+    int uzun = 0;
+    for (int i = 0; i < PB_SINIF_SAYISI; i++) {
+        if (strlen(pb_sinif_ad[i]) > strlen(pb_sinif_ad[uzun])) uzun = i;
+    }
+
+    printf("\n=== KART FRAMEBUFFER DOKUMU (goz GEREKMEZ) ===\n");
+    backlight_set(true);
+    pb_lcd_fill(0x0000);
+    pb_lv_init();
+    pb_arayuz_olustur();
+
+    for (int asama = 0; asama < 2; asama++) {
+        pb_sonuc_gorunum_t gv;
+        memset(&gv, 0, sizeof(gv));
+        if (asama == 0) {
+            gv.kip = PB_KARAR_DINLIYOR;
+            printf("\n--- asama 1: dinliyor, tur yok ---\n");
+        } else {
+            gv.kip = PB_KARAR_TUR;
+            gv.tur_ad = pb_sinif_ad[uzun];
+            gv.guven = 0.91f;
+            gv.ilk3_ad[0] = pb_sinif_ad[uzun];
+            gv.ilk3_ad[1] = pb_sinif_ad[(uzun + 1) % PB_SINIF_SAYISI];
+            gv.ilk3_ad[2] = pb_sinif_ad[(uzun + 2) % PB_SINIF_SAYISI];
+            gv.ilk3_olasilik[0] = 0.91f;
+            gv.ilk3_olasilik[1] = 0.21f;
+            gv.ilk3_olasilik[2] = 0.07f;
+            gv.kare_hiz = 62;
+            gv.cikarim = 6;
+            gv.birlesen = 8;
+            gv.bant_db = -38.0f;
+            printf("\n--- asama 2: en uzun tur adi (\"%s\") ---\n",
+                   pb_sinif_ad[uzun]);
+        }
+        pb_arayuz_guncelle(&gv);
+        for (int i = 0; i < 6; i++) { pb_arayuz_tick(); sleep_ms(5); }
+        pb_lv_kart_fb_dok();
+    }
+    printf("\n");
 }
 
 static void print_help(void) {
@@ -2722,8 +2861,10 @@ static void print_help(void) {
     printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
     printf("  k  gercek zamanli tanima (core 1, seri porta yazar)\n");
     printf("  K  aynisi ama kapi yoksayilir — olcum kipi\n");
-    printf("  c  SONUC EKRANI: tanima karti + spektrogram (goz gerekir)\n");
-    printf("  C  sonuc karti gosterim testi, mikrofonsuz (goz gerekir)\n");
+    printf("  c  ARAYUZ: dinleme + gunluk ekrani, canli tanima (goz gerekir)\n");
+    printf("  C  arayuz gosterim testi, mikrofonsuz (goz gerekir)\n");
+    printf("     c/C icinde: KAYDIR ya da bosluk/'n' = ekran degistir\n");
+    printf("  F  kart framebuffer dokumu: ASCII, goz GEREKMEZ\n");
     printf("  ?  bu yardim\n\n");
 }
 
@@ -2839,6 +2980,7 @@ int main(void) {
             case 'K': cmd_recognize(true);  break;
             case 'c': cmd_sonuc_ekrani();   break;
             case 'C': cmd_sonuc_karti_demo(); break;
+            case 'F': cmd_kart_fb_dok();    break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;

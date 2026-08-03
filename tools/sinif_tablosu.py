@@ -20,8 +20,10 @@ CIKTI = KOK / "src" / "ai" / "siniflar.h"
 
 
 def kacir(s: str) -> str:
-    """C string literali. Türkçe harfler UTF-8 bayt olarak kalıyor —
-    seri terminal UTF-8 okuyor, LVGL tarafı M7'de font seçerken bakacak."""
+    """C string literali. Türkçe harfler UTF-8 bayt olarak kalıyor — seri
+    terminal UTF-8 okuyor, arayüzün yazı tipleri de (tools/font_uret.py ile
+    üretiliyor) Türkçe harfleri içeriyor, yani ekrana da olduğu gibi
+    basılabiliyorlar."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
@@ -32,7 +34,8 @@ def main() -> None:
     satirlar = []
     with open(GIRDI, encoding="utf-8") as f:
         for s in csv.DictReader(f):
-            satirlar.append((int(s["sinif"]), s["ebird_kodu"], s["turkce_ad"]))
+            satirlar.append((int(s["sinif"]), s["ebird_kodu"], s["turkce_ad"],
+                             s.get("birdnet_bilimsel_ad", "")))
     satirlar.sort()
 
     beklenen = list(range(len(satirlar)))
@@ -53,11 +56,16 @@ def main() -> None:
 
 static const char *const pb_sinif_kod[PB_SINIF_SAYISI] = {{
 """)
-        for _, kod, _ad in satirlar:
+        for _, kod, _ad, _lat in satirlar:
             f.write(f'  "{kacir(kod)}",\n')
         f.write("};\n\nstatic const char *const pb_sinif_ad[PB_SINIF_SAYISI] = {\n")
-        for _, _kod, ad in satirlar:
+        for _, _kod, ad, _lat in satirlar:
             f.write(f'  "{kacir(ad)}",\n')
+        # Bilimsel adlar: arayüz tür adının altında gösteriyor (tasarımdaki
+        # italik satır). Flash'ta duruyor, RAM maliyeti sifir.
+        f.write("};\n\nstatic const char *const pb_sinif_latin[PB_SINIF_SAYISI] = {\n")
+        for _, _kod, _ad, lat in satirlar:
+            f.write(f'  "{kacir(lat)}",\n')
         f.write("};\n\n#endif /* POKEBIRD_SINIFLAR_H */\n")
 
     print(f"{CIKTI.relative_to(KOK)} yazildi — {len(satirlar)} sinif")

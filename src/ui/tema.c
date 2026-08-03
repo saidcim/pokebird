@@ -1,0 +1,71 @@
+#include "ui/tema.h"
+
+#include <stdbool.h>
+#include <string.h>
+
+lv_obj_t *pb_ekran_yeni(void)
+{
+    lv_obj_t *scr = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(PB_RENK_ZEMIN), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(scr, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(scr, 0, LV_PART_MAIN);
+    /* Kaydırma LVGL'in kendi scroll'u DEĞİL — ekran değişimini biz sürüyoruz
+     * (arayuz.c). Nesnelerin kayması yerleşimi bozar. */
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    return scr;
+}
+
+lv_obj_t *pb_etiket(lv_obj_t *par, const lv_font_t *f, uint32_t renk,
+                    int32_t x, int32_t y)
+{
+    lv_obj_t *l = lv_label_create(par);
+    lv_obj_set_style_text_font(l, f, LV_PART_MAIN);
+    lv_obj_set_style_text_color(l, lv_color_hex(renk), LV_PART_MAIN);
+    lv_obj_set_pos(l, x, y);
+    lv_label_set_text(l, "");
+    return l;
+}
+
+lv_obj_t *pb_kutu(lv_obj_t *par, int32_t x, int32_t y, int32_t w, int32_t h,
+                  uint32_t renk, int32_t yaricap)
+{
+    lv_obj_t *o = lv_obj_create(par);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_bg_color(o, lv_color_hex(renk), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(o, yaricap, LV_PART_MAIN);
+    return o;
+}
+
+bool pb_yaz(lv_obj_t *o, char *son, uint32_t n, const char *metin)
+{
+    if (!o || !son || n == 0) return false;
+    if (strncmp(son, metin, n - 1) == 0) return false;
+    /* strncpy yerine elle: sonlandırmayı garanti ediyoruz. */
+    uint32_t i = 0;
+    for (; i + 1 < n && metin[i]; i++) son[i] = metin[i];
+    son[i] = '\0';
+    lv_label_set_text(o, son);
+    return true;
+}
+
+void pb_sayfa_noktalari(lv_obj_t *par, int aktif)
+{
+    /* Cihazda başka hiçbir kumanda yok: kullanıcıya "ikinci bir ekran var"
+     * demenin tek yolu bu iki nokta. Tasarım bunları yalnızca günlük
+     * ekranında gösteriyor; ikisine de konuldu, yoksa dinleme ekranında
+     * kaydırılabildiği hiçbir yerden anlaşılmıyor. */
+    const int32_t w = 16, h = 3, ara = 6;
+    const int32_t toplam = 2 * w + ara;
+    const int32_t x0 = (PB_EKRAN_W - toplam) / 2;
+    const int32_t y  = PB_EKRAN_H - 10;
+
+    for (int i = 0; i < 2; i++) {
+        pb_kutu(par, x0 + i * (w + ara), y, w, h,
+                i == aktif ? PB_RENK_VURGU : PB_RENK_KENAR, 2);
+    }
+}

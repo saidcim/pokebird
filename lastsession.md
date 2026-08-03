@@ -5,15 +5,26 @@
 > içinde; burada onun özeti, şu ana kadar yapılanlar, **denenip işe yaramayanlar**
 > ve sıradaki adımlar var.
 >
-> Son güncelleme: 2 Ağustos 2026 (M6 kapanışı).
+> Son güncelleme: 3 Ağustos 2026 (M7 arayüz — §9q).
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
-**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · M2b 🔶 (dokunmatik park edildi) · M3 ✅ ·
-M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
-**M6 ✅ (§9m)**
+**Durum:** M0 ✅ · M1 ✅ · M2a ✅ · **M2b ✅ (dokunmatik ÇALIŞIYOR, §9q)** ·
+M3 ✅ · M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
+**M6 ✅ (§9m)** · M7 🔶 (adım 1-2 §9p, arayüz §9q — ikisi de gözle
+doğrulanmayı bekliyor)
 
 Çalışma ağacı temiz, her şey commit edildi (§10). **Dal `m6`**, `main` değil.
+
+> ### 🔶 SIRADAKİ İŞ — iki göz testi bekliyor (§9q sonu)
+>
+> İki ekranlı arayüz (dinleme + günlük) ve aralarında dokunmatik kaydırma
+> yazıldı, derlendi, 32 host testi geçti. **Ekrana bakılmadı.** Yeni oturumun
+> ilk işi §9q'nun sonundaki `--cmd C` testi olmalı — §9n'in bütün tarihçesi
+> "göz gerektiren ölçütü ertelemeyin" diyor ve bu üçüncü tekrar olurdu.
+>
+> **Dokunmatik artık park DEĞİL.** §9b'deki `0xDB` alarmı yanlış çıktı;
+> kullanıcı parmakla doğruladı. §9b'yi okurken bunu bilerek okuyun.
 
 > ### ✅ EKRAN ÇÖZÜLDÜ (§9n) — aşağısı hatanın tarihçesi
 >
@@ -826,7 +837,21 @@ birden** dönmeli: `write_ui_column`'daki ny ve bin eşlemesi.
 
 ---
 
-## 9b. M2b — LVGL + dokunmatik 🔶
+## 9b. M2b — LVGL + dokunmatik ✅
+
+> ### ✅ KAPANDI (§9q) — aşağısı tarihçe
+>
+> **Dokunmatik ÇALIŞIYOR**, kullanıcı `t` ile parmakla doğruladı. Aşağıdaki
+> "çözülmemiş: boşta paket sabit `0xDB`" maddesi **yanlış alarmdı**: çalışan
+> sürücü de parmak sayısı baytını `> 4` görünce "dokunma yok" deyip başarılı
+> okuma döndürüyor, yani boştaki çöp paket beklenen davranış. §5.11'in
+> (GPIO34) dokunmatikle ilgisi de yokmuş.
+>
+> Ama eşlemede **gerçek bir hata vardı** ve kimse ekrana dokunmadığı için
+> bugüne kadar görülmemişti — uzun eksen 199'a kırpılıyordu. Ayrıntı §9q.
+>
+> 4. madde (koordinat eşlemesi) ve 2. madde artık kapalı; **5. madde (LCD_TE
+> ile yırtılma önleme) hâlâ yapılmadı.**
 
 | # | İş | Durum |
 |---|---|---|
@@ -3203,6 +3228,233 @@ sorun var demektir.
 | Türkçe adları olduğu gibi basmak | Gömülü Montserrat'ta Türkçe harf yok, kutu çıkardı (denemeden önce yazı tipi tablosuna bakıldı) |
 | Kararı `tanima.c`'ye (core 1) koymak | Karar bir ARAYÜZ kararı; core 1'de olsaydı host testinde sınanamazdı ve gerçek zamanlı bütçeyi yerdi |
 | Kartı her yeni sonuçta yeniden çizmek | Her güncelleme 68,8 KB QSPI demek. Kart 4 Hz güncelleniyor ve etiketler yalnızca **metni değiştiyse** yazılıyor |
+
+---
+
+## 9q. 🔶 M7 — İKİ EKRANLI ARAYÜZ + KAYDIRMA (gözle doğrulanmadı)
+
+Kullanıcı tasarım verdi (`Kus Sesi Arayuz.dc.html`, claude.ai/design) ve iki
+ekran + aralarında dokunmatik kaydırma istedi. Yazıldı, derlendi, host
+testleri geçti. **Ekrandaki görüntü gözle doğrulanmadı** — bölümün sonundaki
+iki testi kullanıcı çalıştıracak.
+
+### ✅ DOKUNMATİK ÇALIŞIYOR — kullanıcı parmakla doğruladı
+
+§9b'nin park gerekçesi (**boşta sabit `0xDB`, "dokunma yok" mu hata mı
+belirlenemedi**) **yanlış alarmmış.** Önce kaynağa bakılarak elendi, sonra
+kullanıcı `t` ile parmakla doğruladı:
+
+- Protokol çalışan sürücüyle BİREBİR (`rsvpnano/.../axs15231b_touch.cpp`):
+  komut baytları, 7. bayttaki `0x08` uzunluk alanı, tekrarlı START, 8 baytlık
+  paket, bayt yerleşimi — hepsi aynı.
+- Çalışan sürücü de parmak sayısı baytını `> 4` görünce "dokunma yok" deyip
+  **başarılı okuma** döndürüyor. Yani boştaki çöp paket BEKLENEN davranış;
+  `0xDB` bir arıza belirtisi değil.
+
+**§5.11 (GPIO34 reset çekilemiyor) dokunmatiği etkilemiyor** — oradaki
+"dokunmatik motoru resetsiz uyanmıyor olabilir" tahmini de düştü.
+
+### ⚠ ESKİ EŞLEMEDE GERÇEK HATA VARDI — kimse dokunmadığı için görülmemiş
+
+`lv_port.c`'nin eski `indev_read_cb`'si uzun ekseni (0..639) `PB_LV_W - 1`e,
+yani **199'a kırpıyordu**: ekranın sağ üçte ikisine yapılan her dokunuş sol
+kenara yığılırdı. Aynalama da iki ekseni birden çeviriyordu; çalışan sürücü
+yalnızca uzun ekseni çeviriyor. Doğrusu (referanstan):
+
+```
+ui_x = 639 - ham_uzun     (bayt 2,3)
+ui_y = 171 - ham_kisa     (bayt 4,5)
+```
+
+### ⚠ ÖLÇÜLEN TUHAFLIK — koordinat ~300'den ~4000'e sıçrıyor
+
+Kullanıcı bildirdi: çift dokunuşta ve bazen kaydırma sırasında değerler
+~4000'e çıkıyor. Koordinat 12 bit (azami 4095), yani bu değer **panelin
+dışı** — bozuk ya da ikinci parmağa ait bir kare. 8 baytlık paket tek nokta
+taşıyor (çalışan sürücü de öyle), dolayısıyla doğru davranış o kareyi
+**düşürmek**.
+
+Kırpmak DEĞİL düşürmek seçildi; gerekçe çalışan sürücünün kendi yorumu:
+kenara kırpmak, bozulmayı "kenarda makul bir dokunuş"a çevirir ve sessizce
+yanlış davranış üretir. Sıklığı `pb_lv_dokunma_gecersiz` ile ölçülüyor ve
+kaydırma algılayıcısı düşen kareye dayanıklı (`PARMAK_BIRAKMA_MS` 80 ms).
+
+### ✅ ARAYÜZ TAM GENİŞLİĞE ÇIKTI — ve RAM AZALDI (ölçüldü)
+
+Tasarımın iki ekranı da 640x172; özellikle günlük ekranı tam genişlik.
+Ama §5/§9n'in reddettiği tam ekran framebuffer'ı hâlâ sığmıyor:
+
+```
+degisiklikten ONCE olculdu (arm-none-eabi-nm):
+  bss 360.436, tepe 0x2005f400 -> ana SRAM'de ~131 KB bos
+  tam ekran fb 640x172x2 = 220.160 bayt
+  kart fb (68.800) + cizim tamponu (8.000) geri verilse bile SIGMIYOR
+```
+
+**Çıkış yolu: panelin sözleşmesi §9n yazıldığından beri gevşedi.**
+`serit_ile_atla` konumlandırmayı genel amaçlı VE görünmez yaptı, yani
+panelin gerçek şartı artık yalnızca *"tam 172 sütun genişliğinde bas, satır
+başlangıcı serbest"*. Arayüz koordinatlarında bu, **tam yükseklikte DİKEY
+DİLİM** demek. Ekran beş dilime bölündü:
+
+```
+640 = 5 dilim x 128 piksel
+dilim framebuffer'i  128 x 172 x 2 = 44.032 bayt
+cizim tamponu        128 x  43 x 2 = 11.008 bayt   (172 = 4 x 43, tam bolunuyor)
+-----------------------------------------------
+toplam                               55.040 bayt   (eski yol 76.800 idi)
+```
+
+Dilimler ARTAN sırada basılıyor: panel imleci ileri yürüyor, geri atlama yok.
+
+```
+OLCULDU (derleme sonrasi):
+  bss 360.436 -> 340.560      = 19.876 bayt AZALDI
+  bss tepesi  0x2005a940      -> ~153 KB bos
+  text 964.032 -> 994.952     = +30.920 (yazi tipleri; flash 16 MB)
+  s_dilim_fb 0xac00 = 44.032  (beklenen deger)
+```
+
+Yani arayüz 200 sütundan 640 sütuna çıkarken RAM **azaldı**.
+
+### Dilim sahipliği — iki yazan aynı bölgeye girmemeli
+
+Spektrogram panele DOĞRUDAN yazıyor (62 Hz, kendi hızlı sütun yolu).
+LVGL bir dilimin TAMAMINI bastığı için aynı dilimi paylaşamazlar:
+
+| Ekran | LVGL | Spektrogram |
+|---|---|---|
+| 0 · dinleme | dilim 0,1,2 (ui x 0..383) | dilim 3,4 (384..639) |
+| 1 · günlük | beşi de | yok |
+
+`PB_SPEC_X0` **200 -> 384** oldu (şerit 440 -> 256 px). Tasarım 236 istiyordu;
+256 dilim sınırına oturan en yakın değer ve **sınıra oturmak şart**.
+Ekran 1'deyken `main.c` spektrogram sütunu basmıyor (kuyruğu yine de
+boşaltıyor, yoksa core 1 dolu kuyruğa kare atmaya başlar).
+
+### ✅ TÜRKÇE HARF BORCU KAPANDI (§9p'nin açık maddesi)
+
+`tools/font_uret.py` dört LVGL yazı tipi üretiyor; **indirme yok**, tasarımın
+Google Fonts ikilisi yerine Windows'un kendi yazı tiplerinden aynı role
+oturan ikisi seçildi:
+
+```
+Oswald      -> LiberationSansNarrow-Bold   (sikisik grotesk)
+Space Mono  -> DejaVuSansMono-Oblique      (bilimsel adlar)
+
+pb_font_ad_18  pb_font_kalin_13  pb_font_dar_11  pb_font_mono_10   (bpp 4)
+```
+
+Script üretimden sonra her Türkçe kod noktasının **gerçekten var olduğunu
+doğruluyor** (glif aralıklarını .c'den okuyup arıyor) ve eksikse hata verip
+çıkıyor — kutu karakterini ekranda görmek bir tur göz demek.
+
+`pb_ascii_tr` ve `sonuc_karti.c/h` **silindi**: tür adları artık ekrana tam
+Türkçe yazılıyor.
+
+⚠ **Türkçe büyütme dile özgü** ve host testinde sınanıyor
+(`src/ui/metin.c`, `test_turkce_buyut`, 10 test): `i -> İ` ve `ı -> I`.
+`toupper` ikisini de `I` yapar. Dönüşüm bayt uzunluğunu da değiştiriyor
+(i 1->2, ı 2->1), tampon sınırı gerçek risk — o da test ediliyor.
+
+### Yeni dosyalar
+
+| Dosya | Ne |
+|---|---|
+| `src/ui/arayuz.c` / `.h` | ekran yöneticisi + kaydırma algılayıcısı + genel API |
+| `src/ui/ekran_dinleme.c` / `.h` | EKRAN 0 — ilk 3 tür, ad + bilimsel ad + güven çubuğu |
+| `src/ui/ekran_gunluk.c` / `.h` | EKRAN 1 — tespit listesi (RAM'de 8'lik halka) |
+| `src/ui/tema.c` / `.h` | tasarımın renkleri, yazı tipleri, ortak çizim yardımcıları |
+| `src/ui/metin.c` / `.h` | Türkçe büyük harf (host testli) |
+| `src/ui/fonts/*.c` | ÜRETİLMİŞ — `tools/font_uret.py` |
+| `tools/font_uret.py` | yazı tipi üretimi + Türkçe kapsama doğrulaması |
+
+`tools/sinif_tablosu.py` artık **`pb_sinif_latin[]`** de üretiyor (bilimsel
+adlar CSV'de zaten vardı, tabloya girmemişti) — tasarımdaki italik satır.
+
+### Kaydırma — eşikler ve NEDEN LVGL'in kendi hareket algılaması değil
+
+```
+KAYDIRMA_ESIK_PX    90     ekranin ~1/7'si — kazayla asilmaz, bilerek asilir
+KAYDIRMA_DIKEY_PAY   2     |dx| > 2*|dy| olmali (listeye dokunup kaydiran
+                           kullanici ekran degistirmesin)
+KAYDIRMA_AZAMI_MS 1200
+PARMAK_BIRAKMA_MS   80     bu kadar okumasiz kalinca "parmak kalkti"
+```
+
+Algılama LVGL'in giriş katmanına değil **ham noktaya** bakıyor: dokunmatik
+yeni doğrulandı, çalışmadığında NEDEN çalışmadığını ekrana bakmadan
+görebilmek gerekiyor. Her aşama ayrı sayaçla ölçülüyor
+(`dokunma / basla / kabul / kisa / panel disi / son dx dy`, `c` ve `C`
+çıkışında basılıyor). Eşik parmak kalkmadan aşılırsa ekran **hemen**
+değişiyor; kalkmayı beklemek "tepki vermiyor" hissi veriyordu.
+
+**Yedek yol seri portta:** `c`/`C` içinde **boşluk** ya da **`n`** ekran
+değiştiriyor, başka her tuş çıkıyor. Kullanıcının kararı: dokunmatik ölü
+çıksaydı bile arayüz kullanılabilir kalsın.
+
+### Bu adımda ELENEN / SEÇİLMEYEN yollar
+
+| Ne | Neden seçilmedi |
+|---|---|
+| Tam ekran framebuffer (220 KB) | ÖLÇÜLDÜ: bss tepesi 0x2005f400, ~131 KB boş — kart fb ve çizim tamponu geri verilse bile sığmıyor |
+| 8 bit / RGB332 framebuffer | 110 KB'a inerdi ama koyu zeminde kenar yumuşatılmış yazı bantlanır; "güzel arayüz" isteğinin tam karşıtı |
+| LVGL'in kendi hareket algılaması (`LV_EVENT_GESTURE`) | Dokunmatik yeni doğrulandı; arıza hâlinde aşama aşama ölçebilmek için ham nokta üstünde kendi algılayıcımız duruyor |
+| Ekran geçiş animasyonu (`lv_screen_load_anim`) | Her kare, sahip olunan her dilimin panele yeniden basılması demek (dilim başına 44 KB). 60 Hz imkânsız, 10 Hz'de takılan animasyon anlık geçişten kötü görünürdü |
+| Uzun tür adında kayan yazı (`LONG_MODE_SCROLL`) | Her karede kendini geçersizleştirir, dilim 60 Hz panele basılırdı. Kesme (DOT) seçildi; tam ad seri portta |
+| Yanıp sönen kayıt noktası (animasyon) | Aynı gerekçe. Nokta rengi kiple değişiyor, o yeterli |
+| Tasarımın 236 px spektrogramı | Dilim sınırına oturmuyor; 256 seçildi. Sınırı paylaşan LVGL ve spektrogram birbirini siler |
+| Google Fonts'tan Oswald/Space Mono indirmek | Gerek yok: Windows'ta aynı role oturan (ve Türkçe kapsaması tam) yazı tipleri zaten var |
+| Sayaçları dinleme ekranında tutmak | Tasarımı kalabalıklaştırıyordu; §9p'deki göz gerektirmeyen değerleri kaybetmemek için günlük ekranının altına alındılar |
+
+### Günlük ekranının veri kaynağı — geçici, bilerek
+
+SD kart günlüğü M7 adım 5, RTC adım 4; ikisi de yok. Tespitler **RAM'de
+8 elemanlı bir halkada** duruyor (~800 bayt) ve satırlar saat yerine
+**açılıştan bu yana geçen süre** gösteriyor ("12 dk once"). RTC gelince
+değiştirilecek tek yer `ekran_gunluk.c`'deki `sure_yaz`.
+
+Aynı tür üst üste gelirse yeni satır açılmıyor, üstteki tazeleniyor: karar
+kuralı bir türü `PB_KARAR_TUT_MS` (5 s) ekranda tutuyor ve o süre boyunca
+aynı tespit tekrar tekrar düşerse günlük tek olayla dolardı.
+
+### Ölçülenler (göz gerektirmeyen)
+
+```
+derleme        text 994.952   bss 340.560   (bss 19.876 bayt AZALDI)
+host testleri  32 test, 0 kaldi   (22 eski + 10 yeni Turkce buyutme testi)
+yazi tipleri   4 font uretildi, Turkce kapsamasi script tarafindan dogrulandi
+```
+
+### ⛔ KULLANICININ ÇALIŞTIRACAĞI İKİ TEST (göz gerekiyor)
+
+**1) Arayüz gösterim testi — mikrofonsuz, önce bu.**
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd C
+```
+
+Dört aşamadan geçip başa dönüyor (2,5 s'de bir). **Ekranda yatay kaydırın**
+(ya da boşluk/`n` tuşu) — iki ekran arasında gidip gelmeli. Bakılacaklar:
+
+- Türkçe harfler DÜZGÜN mü (kutu yok): "İSKENDER PAPAĞANI", "BÜLBÜL"
+- Satır kayması var mı, dilim sınırlarında (x=128, 256, 384) dikey ek izi var mı
+- Sağdaki spektrogram şeridi akıyor mu, sol kenarı 384'te temiz mi
+- Günlük ekranı tam genişlik mi, üç kayıt da okunuyor mu
+- Kaydırma yönü doğru mu (sağdan sola = sonraki ekran)
+
+Çıkışta kaydırma sayaçları basılıyor: kaydırma çalışmadıysa hangi aşamada
+durduğu oradan okunuyor (dokunma hiç gelmiyor / hareket eşiği aşılmıyor /
+panel dışı kare düşüyor).
+
+**2) Gerçek tanıma — akustik test, kullanıcı elle yapacak (§5.5).**
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd c --sure 60
+```
+
+Cihazın mikrofonuna gerçek bir kuş sesi duyurulmalı (**PC'den ÇALMAYIN** —
+kulaklık takılı). Tanınan tür günlük ekranına da düşmeli.
 
 ---
 
