@@ -193,15 +193,18 @@ void pb_arayuz_guncelle(const pb_sonuc_gorunum_t *g)
 
     pb_ekran_dinleme_guncelle(g);
 
-    /* Karar "TANINDI" dediğinde günlüğe yaz. Aynı tür üst üste gelirse
-     * ekran_gunluk zaten üstteki satırı tazeliyor; buradaki kontrol o
-     * çağrıyı bile yapmamak için (her çağrı bir strncmp + zaman damgası). */
+    /* Karar "TANINDI" dediğinde günlüğe yaz — ama yalnızca tür DEĞİŞTİYSE.
+     * Karar kuralı bir türü PB_KARAR_TUT_MS (5 s) boyunca ekranda tutuyor ve
+     * bu fonksiyon 4 Hz çağrılıyor, yani aynı tespit ~20 kez düşüyor.
+     * `ekran_gunluk` aynı türü üst üste görünce zaten yeni satır açmıyor;
+     * buradaki kontrol o çağrıyı hiç yapmamak için. Kip TUR'dan çıkınca
+     * sıfırlanıyor ki aynı tür ikinci kez duyulduğunda yeniden yazılsın. */
     if (g->kip == PB_KARAR_TUR && g->tur_ad) {
         if (strncmp(s_son_gunluk_ad, g->tur_ad, sizeof(s_son_gunluk_ad) - 1) != 0) {
             snprintf(s_son_gunluk_ad, sizeof(s_son_gunluk_ad), "%s", g->tur_ad);
+            pb_ekran_gunluk_ekle(g->tur_ad, g->ilk3_latin[0], g->guven);
         }
-        pb_ekran_gunluk_ekle(g->tur_ad, g->ilk3_latin[0], g->guven);
-    } else if (g->kip != PB_KARAR_TUR) {
+    } else {
         s_son_gunluk_ad[0] = '\0';
     }
 }
