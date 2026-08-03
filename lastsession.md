@@ -16,7 +16,15 @@ doğrulanmayı bekliyor)
 
 Çalışma ağacı temiz, her şey commit edildi (§10). **Dal `m6`**, `main` değil.
 
-> ### 🔶 SIRADAKİ İŞ — iki göz testi bekliyor (§9q sonu)
+> ### 🔶 SIRADAKİ İŞ — kaydırma ekseni ÖLÇÜLECEK (§9r sonu)
+>
+> Arayüz host'ta render ediliyor artık (§9r, `tools/arayuz_onizle`) ve ilk
+> koşusu üç gerçek cihaz hatası yakaladı (LVGL yığını, yuvarlak köşeler,
+> etiket kesme). Üçü de düzeltildi. **Açık kalan tek şey kaydırma ekseni:**
+> kullanıcı dikey kaydırınca ekran değişiyor. `--cmd t` kalibrasyonu
+> çalıştırılmadan eksene DOKUNMAYIN.
+>
+> ### (geçmiş) iki göz testi bekliyordu (§9q sonu)
 >
 > İki ekranlı arayüz (dinleme + günlük) ve aralarında dokunmatik kaydırma
 > yazıldı, derlendi, 32 host testi geçti. **Ekrana bakılmadı.** Yeni oturumun
@@ -3455,6 +3463,125 @@ python tools/capture_wav.py --port COM13 --cmd c --sure 60
 
 Cihazın mikrofonuna gerçek bir kuş sesi duyurulmalı (**PC'den ÇALMAYIN** —
 kulaklık takılı). Tanınan tür günlük ekranına da düşmeli.
+
+---
+
+## 9r. ✅ ARAYÜZ ÖNİZLEMESİ (host render) — ve yakaladığı üç gerçek hata
+
+Kullanıcı ilk `C` denemesinden sonra şunu söyledi: *"arayüz hoş durmuyor çok
+kalitesiz. yaptığın tasarımı ilk önce emüle edip kendin görebilsen süper
+olur."* Haklıydı — arayüzün nasıl göründüğünü görmenin tek yolu karta yükleyip
+kullanıcıdan bakmasını istemekti ve tasarım iterasyonu öyle yapılamaz.
+
+### Ne yapıldı
+
+[`tools/arayuz_onizle/`](tools/arayuz_onizle/) — **cihazın ekran kodunu
+host'ta derleyip PNG üreten** ayrı bir CMake projesi.
+
+```
+ekran_dinleme.c  ekran_gunluk.c  tema.c  metin.c  spectrogram.c  fonts/*.c
+```
+
+Hepsi CİHAZDAKİ dosyaların TA KENDİSİ, taklit yok. `lv_conf.h` de aynı, yani
+yazı tipi/renk derinliği/çizim ayarları birebir. Fark yalnızca alt katmanda:
+
+| Cihazda | Önizlemede |
+|---|---|
+| QSPI panel, dilim dilim | bellekte 640x172 framebuffer |
+| Pico SDK saati | `shim/pico/stdlib.h` — saat ELLE sürülüyor |
+| `pb_lcd_blit` (panel) | `onizle.c`'deki karşılığı (aynı yön çevrimi) |
+
+Spektrogram LVGL'den geçmediği için sahte `pb_lcd_blit` şart oldu; onunla
+gerçek `spectrogram.c` derlenip aynı framebuffer'a çiziyor (renk eşlemesi ve
+imleç sütunu dâhil).
+
+```bash
+cmake -S tools/arayuz_onizle -B tools/arayuz_onizle/build -G Ninja
+cmake --build tools/arayuz_onizle/build
+(cd tools/arayuz_onizle/build && ./arayuz_onizle) && python tools/arayuz_onizle/ppm_png.py
+```
+
+⚠ **NE GÖSTERMEZ:** panele basma yolu — dilim sınırları, kayma, QSPI
+zamanlaması, dokunmatik. Onlar hâlâ kartta doğrulanmalı. Önizleme
+YERLEŞİMİ, YAZI TİPİNİ, RENKLERİ ve METİN SARMASINI gösterir.
+
+### ⚠ İLK KOŞUSUNDA ÜÇ GERÇEK CİHAZ HATASI ÇIKTI
+
+**1) LVGL yığını yetmiyordu — `LV_MEM_SIZE` 24 KB.**
+
+```
+tek ekran (dinleme) kurulunca:  16.384 / 20.624 bayt = %80 dolu
+ikinci ekran (gunluk) kurulurken:  havuz TUKENDI
+```
+
+(24 KB'ın ~20,6 KB'ı kullanılabilir.) Havuz tükenince `lv_obj_create` NULL
+dönüyor ve çağıran denetlemiyor: host'ta segfault, **kartta sessizce eksik
+çizilen bir ekran**. Kullanıcının "çok buglu" dediği davranışın kaynağı
+büyük olasılıkla buydu. **64 KB** yapıldı (ölçüldü: iki ekranla %41).
+
+**2) `LV_DRAW_SW_COMPLEX` 0 idi — yuvarlak köşeleri de kapatıyor.**
+
+Eski yorum yalnızca "gölge, degrade maskesi gerekmez" diyordu. Doğru ama
+eksik: bu bayrak yarıçapı sıfırdan büyük **her dikdörtgeni sessizce hiç
+çizmiyor.** Güven çubukları, sıra rozetleri ve sayfa noktalarının hepsi
+kayıptı — ayraç çizgileri (yarıçap 0) çizildiği için hata "eksik veri" gibi
+görünüyordu. Eski metin ağırlıklı kartta hiç yuvarlak nesne olmadığı için
+fark edilmemişti.
+
+**3) `LV_LABEL_LONG_MODE_DOTS` yalnızca genişlikle kesmiyor.**
+
+Kesmenin nerede olacağını **yükseklikten** öğreniyor. Yükseklik verilmeyince
+etiket içeriğe göre büyüyor: uzun tür adı iki satıra sarıp bilimsel adın ve
+ayracın üstüne biniyordu. Yükseklik verildi.
+
+Ayrıca sığmayan ad artık **kesilmiyor, bir kademe küçük yazı tipine düşüyor**
+(`lv_text_get_width` ile ölçülerek). "Uzun Kuyruklu Baştankara" büyük harfle
+~216 px, alan 232 px ama büyük harf daha geniş — 13 px'te tamamı okunuyor.
+
+### Görünüm — tasarıma yaklaştırıldı
+
+| Ne | Neden |
+|---|---|
+| Spektrogram renk rampası **sıcak** yapıldı | Eskisi siyah→mavi→camgöbeği→sarıydı. Sol taraf sıcak (kehribar/yeşil, zemin #0B0908), sağ taraf elektrik mavisiydi: yan yana iki ayrı ürün gibi duruyordu. Parlaklık rampası gerekçesi (§9c) DEĞİŞMEDİ, yalnızca renkler tasarımın kehribarına oturdu |
+| Rampanın TABANI = ekran zemini (#0B0908) | Sessizlik arayüzün zeminiyle aynı renk olunca **x=384'teki sert dikey dikiş kayboldu** |
+| İmleç sütunu 0x4208 → 0x3985 | Arayüzün ayraç rengi; eski koyu gri sıcak paletin içinde yabancıydı |
+| Boş durumda üç boş satır yerine tek satır | "ses bekleniyor". Ayrıca yer tutucu uzun tire (U+2014) **yazı tipinde yok**, kutu çıkıyordu — üretilen fontlar 0x20-0x7E + Türkçe + `·°` içeriyor |
+| Spektrogramla arasına ince ayraç | Tasarımdaki `border-left` |
+
+> **DERS:** yer tutucu ve süs karakterleri ASCII olmalı, ya da
+> `tools/font_uret.py`'deki `SIMGELER`e eklenmeli. Font üretimi Türkçe
+> kapsamasını doğruluyor ama tipografik işaretleri doğrulamıyor.
+
+### Ölçülenler
+
+```
+text 994.952 -> 1.015.660   (+20.708; LV_DRAW_SW_COMPLEX)
+bss  340.560 ->   382.684   (+42.124; LV_MEM_SIZE 24->64 KB)
+bss tepesi 0x20064dbc       -> ~111 KB bos
+host testleri 32, 0 kaldi
+```
+
+### ⛔ AÇIK İŞ — KAYDIRMA YANLIŞ EKSENDE
+
+Kullanıcı doğruladı: **dikey** kaydırınca (alttan yukarı) ekran değişiyor, ve
+aynı hareket iki yöne de gidiyor. İkisi birden şunu söylüyor: `raw_x`/`raw_y`
+eşlemesi yanlış ve dx işareti güvenilmez.
+
+§9q'daki eşleme çalışan sürücüden (rsvpnano) çıkarımla yazılmıştı; **ölçüm
+değildi.** Kullanıcının bildirdiği "~300 civarı değer" de o çıkarımla
+uyuşmuyor: kısa eksen 0..171 olmalıydı.
+
+`t` komutuna **yönlendirmeli kalibrasyon** eklendi: SOL/SAĞ/ALT/ÜST kenarlar
+tek tek, her birinde 2 saniye örnek toplanıp **ortanca** alınıyor (ortalama
+değil — çip ara sıra panel dışı ~4000 veriyor ve ortalamayı bozar). Çıktı
+hangi ham eksenin yatayda değiştiğini ve işaretini doğrudan yazıyor.
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd t
+```
+
+**Bu ölçüm gelmeden kaydırma eksenine dokunmayın** — tahminle çevirmek bir
+tur daha göz masrafı demek.
 
 ---
 
