@@ -16,7 +16,7 @@ doğrulanmayı bekliyor)
 
 Çalışma ağacı temiz, her şey commit edildi (§10). **Dal `m6`**, `main` değil.
 
-> ### 🔶 SIRADAKİ İŞ — kaydırma ekseni ÖLÇÜLECEK (§9r sonu)
+> ### 🔶 SIRADAKİ İŞ — yeni arayüzün GÖZLE doğrulanması (§9r)
 >
 > Arayüz host'ta render ediliyor artık (§9r, `tools/arayuz_onizle`) ve ilk
 > koşusu üç gerçek cihaz hatası yakaladı (LVGL yığını, yuvarlak köşeler,
