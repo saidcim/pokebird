@@ -2567,10 +2567,14 @@ static void cmd_sonuc_ekrani(void) {
 
     pb_mel_init();   /* filtre bankası core 1 başlamadan hazır olsun */
 
-    if (!pb_tanima_baslat(false)) {
-        printf("[!] tanima hatti baslatilamadi.\n");
-        return;
-    }
+    /* ⚠ HAT AÇILIŞTA ÇALIŞMIYOR — cihaz artık sürekli dinlemiyor
+     * (kullanıcının kararı). Dinlemeyi kayıt butonu başlatıyor; bu döngü her
+     * turda `pb_arayuz_kayitta()`ya bakıp core 1'i gerçekten başlatıp
+     * durduruyor. `pb_tanima_baslat`/`durdur` bu kullanıma uygun:
+     * ikisi de `s_calis` ile korumalı ve başlatma core 1'i sıfırdan kuruyor.
+     * ⚠ `pb_tanima_durdur` core 1'in döngüden çıkmasını beklemek için
+     * 400 ms bloklanıyor — butona basınca arayüz o kadar takılır. */
+    bool hat_calisiyor = false;
 
     pb_karar_t karar;
     pb_karar_sifirla(&karar, to_ms_since_boot(get_absolute_time()));
@@ -2590,7 +2594,44 @@ static void cmd_sonuc_ekrani(void) {
         const int tus = getchar_timeout_us(0);
         if (tus >= 0) {
             if (tus == ' ' || tus == 'n' || tus == 'N') pb_arayuz_sonraki();
+            else if (tus == 'r' || tus == 'R')
+                pb_arayuz_kayit_ayarla(!pb_arayuz_kayitta());
             else break;
+        }
+
+        /* 0) Kayıt durumu değiştiyse hattı gerçekten başlat/durdur. */
+        if (pb_arayuz_kayitta() != hat_calisiyor) {
+            if (pb_arayuz_kayitta()) {
+                if (pb_tanima_baslat(false)) {
+                    hat_calisiyor = true;
+                    pb_karar_sifirla(&karar, to_ms_since_boot(get_absolute_time()));
+                    karar_surum = karar.surum;
+                    gorulen = 0;
+                    printf("  [kayit BASLADI]\n");
+                } else {
+                    printf("[!] tanima hatti baslatilamadi.\n");
+                    pb_arayuz_kayit_ayarla(false);
+                }
+            } else {
+                pb_tanima_durdur();
+                hat_calisiyor = false;
+                memset(&d, 0, sizeof(d));
+                pb_karar_sifirla(&karar, to_ms_since_boot(get_absolute_time()));
+                karar_surum = karar.surum;
+                printf("  [kayit DURDU]\n");
+            }
+        }
+
+        if (!hat_calisiyor) {
+            /* Boştayken ekran yalnızca "BOŞTA" gösteriyor; sonuç alanı
+             * boşaltılıyor ki durmuş bir tahmin canlıymış gibi durmasın. */
+            pb_sonuc_gorunum_t bos;
+            memset(&bos, 0, sizeof(bos));
+            bos.kip = PB_KARAR_DINLIYOR;
+            pb_arayuz_guncelle(&bos);
+            pb_arayuz_tick();
+            sleep_ms(10);
+            continue;
         }
 
         /* 1) Spektrogram: core 1'in bıraktığı mel sütunlarını boşalt.
@@ -2698,11 +2739,13 @@ static void cmd_sonuc_ekrani(void) {
      * durduğu buradan okunuyor: dokunma hiç gelmiyor mu, geliyor da hareket
      * eşiği mi aşılmıyor, yoksa panel dışı kareler mi düşürülüyor. */
     printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
-           "panel disi %lu, son dx %ld dy %ld\n\n",
+           "panel disi %lu, son ham dx %ld (esik 200), ham_y %ld, "
+           "buton basim %lu\n\n",
            (unsigned long)pb_kaydirma_dokunma, (unsigned long)pb_kaydirma_basla,
            (unsigned long)pb_kaydirma_kabul, (unsigned long)pb_kaydirma_kisa,
            (unsigned long)pb_lv_dokunma_gecersiz,
-           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy);
+           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy,
+           (unsigned long)pb_buton_basim);
 }
 
 /* ── C: SONUÇ KARTI GÖSTERİM TESTİ (mikrofonsuz) ──────────────────────────

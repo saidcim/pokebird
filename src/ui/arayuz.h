@@ -80,6 +80,25 @@ void pb_arayuz_ekran_ayarla(int ekran);
 /** Bir sonraki ekrana geç (döngüsel) — seri porttaki yedek yol. */
 void pb_arayuz_sonraki(void);
 
+/* ── Kayıt (dinleme) durumu ───────────────────────────────────────────────
+ *
+ * Cihaz artık SÜREKLİ DİNLEMİYOR (kullanıcının kararı): dinlemeyi kayıt
+ * butonu başlatıp durduruyor ve açılışta kapalı. Butonun kendisi dinleme
+ * ekranının sol 96 pikselinde, TAM YÜKSEKLİKTE bir şerit — gerekçesi
+ * ekran_dinleme.c'de: dokunmatik kalibrasyonu kısa ekseni kullanılamaz
+ * gösterdi, bir dokunuşun yalnızca YATAY yerini biliyoruz.
+ *
+ * Hattı gerçekten durdurup başlatmak ÇAĞIRANIN işi: bu modül donanıma
+ * dokunmuyor, yalnızca durumu ve görünümü tutuyor. `main.c` her turda
+ * `pb_arayuz_kayitta()`ya bakıp `pb_tanima_baslat`/`pb_tanima_durdur`
+ * çağırıyor.
+ */
+bool pb_arayuz_kayitta(void);
+void pb_arayuz_kayit_ayarla(bool kayitta);
+
+/** Kayıt butonuna kaç kez basıldı — göz gerektirmeyen ölçüm. */
+extern uint32_t pb_buton_basim;
+
 /* ── Kaydırma teşhisi — GÖZ GEREKMEZ ──────────────────────────────────────
  * Dokunmatik doğrulanmadığı için kaydırmanın neden çalışmadığını ekrana
  * bakmadan anlayabilmek şart. Sayaçlar seri porta dökülüyor. */

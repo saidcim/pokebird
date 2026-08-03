@@ -18,4 +18,7 @@ lv_obj_t *pb_ekran_dinleme_olustur(void);
 /** İçeriği tazele — yalnızca değişen etiketler yeniden yazılıyor. */
 void pb_ekran_dinleme_guncelle(const pb_sonuc_gorunum_t *g);
 
+/** Kayıt butonunun görünümünü ayarla (dolu kare = dinliyor, daire = boşta). */
+void pb_ekran_dinleme_kayit_ayarla(bool kayitta);
+
 #endif /* POKEBIRD_EKRAN_DINLEME_H */

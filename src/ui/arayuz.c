@@ -61,12 +61,33 @@ static char s_son_gunluk_ad[48];
  * dışı); o kareler düşürülüyor. Ölçülen en büyük gerçek değer 560. */
 #define HAM_AZAMI          1000
 
+/* ── Kayıt butonu — dokunuşun YATAY yeri yeterli ──────────────────────────
+ *
+ * Buton ekranın sol 96 pikselinde ve TAM YÜKSEKLİKTE (ekran_dinleme.c'deki
+ * gerekçe: kalibrasyon kısa ekseni kullanılamaz gösterdi, bir dokunuşun
+ * dikey yerini bilemiyoruz). Dolayısıyla vuruş testi tek boyutlu.
+ *
+ * Kalibrasyon: sol kenar ham_x ~432, sağ kenar ~3, yani 640 piksel ~429 ham
+ * birim (piksel başına ~0,67). Buton ui_x 0..95 -> ham_x 432..~368.
+ * Eşik 370 seçildi; içerik 96'dan başlıyor ve ilk pikselleri zaten boşluk,
+ * yani sınırın birkaç piksel kayması bir şeyi bozmuyor.
+ *
+ * ⚠ Ölçek KABA. Ekrana ikinci bir dokunmatik hedef eklenirse bu yetmez;
+ * önce ham->piksel eşlemesi düzgün kalibre edilmeli. */
+#define BUTON_HAM_ESIK     370
+#define BASMA_AZAMI_MS     800     /* bundan uzun basış "basma" sayılmıyor */
+
 uint32_t pb_kaydirma_dokunma;
 uint32_t pb_kaydirma_basla;
 uint32_t pb_kaydirma_kabul;
 uint32_t pb_kaydirma_kisa;
+uint32_t pb_buton_basim;
 int32_t  pb_kaydirma_son_dx;
 int32_t  pb_kaydirma_son_dy;
+
+/* Cihaz artık SÜREKLİ DİNLEMİYOR — kullanıcının kararı. Dinlemeyi kayıt
+ * butonu başlatıyor; açılışta kapalı. */
+static bool s_kayitta;
 
 static bool     s_basili;
 static int32_t  s_bas_ham, s_son_ham;
@@ -94,8 +115,23 @@ static void kaydirma_bitir(uint32_t simdi)
     pb_kaydirma_son_dx = d;
 
     const int32_t ad = d < 0 ? -d : d;
-    if (simdi - s_bas_ms > KAYDIRMA_AZAMI_MS) { pb_kaydirma_kisa++; return; }
-    if (ad < KAYDIRMA_ESIK_HAM)               { pb_kaydirma_kisa++; return; }
+    const uint32_t sure = simdi - s_bas_ms;
+
+    /* Kaydırma mı, butona basma mı? Parmak fazla gezmediyse ve dokunuş
+     * butonun şeridinde başladıysa BASMA. Kaydırma testinden ÖNCE bakılıyor
+     * çünkü eşiği aşmayan her dokunuş zaten kaydırma değil. */
+    if (ad < KAYDIRMA_ESIK_HAM) {
+        if (s_aktif == PB_EKRAN_DINLEME && s_bas_ham >= BUTON_HAM_ESIK &&
+            sure <= BASMA_AZAMI_MS) {
+            pb_buton_basim++;
+            pb_arayuz_kayit_ayarla(!s_kayitta);
+        } else {
+            pb_kaydirma_kisa++;
+        }
+        return;
+    }
+
+    if (sure > KAYDIRMA_AZAMI_MS) { pb_kaydirma_kisa++; return; }
 
     kaydirmayi_uygula(d);
 }
@@ -161,10 +197,27 @@ void pb_arayuz_olustur(void)
     pb_lv_dilim_sahibi_ayarla(PB_LVGL_DILIM_MASKE_DINLEME);
     pb_lv_tumunu_kirlet();
 
+    /* Açılışta BOŞTA — cihaz sürekli dinlemiyor. */
+    s_kayitta = false;
+    pb_ekran_dinleme_kayit_ayarla(false);
+
     s_son_gunluk_ad[0] = '\0';
 }
 
 int pb_arayuz_ekran(void) { return s_aktif; }
+
+bool pb_arayuz_kayitta(void) { return s_kayitta; }
+
+void pb_arayuz_kayit_ayarla(bool kayitta)
+{
+    if (!s_kuruldu || kayitta == s_kayitta) return;
+    s_kayitta = kayitta;
+    pb_ekran_dinleme_kayit_ayarla(kayitta);
+
+    /* Kayıt durdurulunca şerit olduğu gibi kalıyor (son duyulanın kaydı) ama
+     * yeni kayıtta karışmasın diye başlarken temizleniyor. */
+    if (kayitta && s_aktif == PB_EKRAN_DINLEME) pb_spec_init();
+}
 
 void pb_arayuz_ekran_ayarla(int ekran)
 {

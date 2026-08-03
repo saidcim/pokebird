@@ -191,6 +191,7 @@ int main(void) {
     g.kare_hiz = 63;
     g.cikarim = 12;
     g.overrun = 0;
+    pb_ekran_dinleme_kayit_ayarla(true);
     pb_ekran_dinleme_guncelle(&g);
     ciz(dinleme, "ekran0_tanindi.ppm", true);
 
@@ -199,8 +200,14 @@ int main(void) {
     memset(&b, 0, sizeof(b));
     b.kip = PB_KARAR_DINLIYOR;
     b.kare_hiz = 63;
+    pb_ekran_dinleme_kayit_ayarla(true);
     pb_ekran_dinleme_guncelle(&b);
     ciz(dinleme, "ekran0_dinliyor.ppm", true);
+
+    /* BOSTA — cihaz acilista dinlemiyor, kullanici butona basacak. */
+    pb_ekran_dinleme_kayit_ayarla(false);
+    pb_ekran_dinleme_guncelle(&b);
+    ciz(dinleme, "ekran0_bosta.ppm", true);
 
     /* En UZUN tür adı — sarma/kesme en kötü durumu. */
     pb_sonuc_gorunum_t u;
@@ -217,6 +224,7 @@ int main(void) {
     u.ilk3_olasilik[0] = 0.42f;
     u.ilk3_olasilik[1] = 0.29f;
     u.ilk3_olasilik[2] = 0.11f;
+    pb_ekran_dinleme_kayit_ayarla(true);
     pb_ekran_dinleme_guncelle(&u);
     ciz(dinleme, "ekran0_uzun_ad.ppm", true);
 
