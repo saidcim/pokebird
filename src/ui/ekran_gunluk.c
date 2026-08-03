@@ -109,7 +109,7 @@ lv_obj_t *pb_ekran_gunluk_olustur(void)
     s_bos = pb_etiket(s_ekran, &pb_font_dar_11, PB_RENK_SILIK, SOL, 84);
     lv_obj_set_width(s_bos, SAG - SOL);
     lv_obj_set_style_text_align(s_bos, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_label_set_text(s_bos, "Henüz kayıt yok — dinleniyor");
+    lv_label_set_text(s_bos, "Henüz kayıt yok · dinleniyor");
 
     /* Sayaçlar tasarımda YOK; buraya konuldu çünkü §9p'de bilerek ekrana
      * yazılmışlardı (göz gerektirmeyen doğrulama). Dinleme ekranını

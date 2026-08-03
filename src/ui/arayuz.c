@@ -124,9 +124,20 @@ static void kaydirma_bitir(uint32_t simdi)
         if (s_aktif == PB_EKRAN_DINLEME && s_bas_ham >= BUTON_HAM_ESIK &&
             sure <= BASMA_AZAMI_MS) {
             pb_buton_basim++;
+            printf("  [buton] KABUL  bas_ham=%ld ad=%ld sure=%lums\n",
+                   (long)s_bas_ham, (long)ad, (unsigned long)sure);
             pb_arayuz_kayit_ayarla(!s_kayitta);
         } else {
             pb_kaydirma_kisa++;
+            /* Teşhis (§9s buton güvenilirliği ölçümü): reddedilen her
+             * dokunuşun ham başlangıç değerini yazdır. Eşik (370) ile
+             * butonun geometrik sağ kenarı (~368) arasında pay yalnızca
+             * ~2 ham birim; bu satır o payın gerçekten yetersiz mi yoksa
+             * başka bir sebep mi (süre, ekran) olduğunu ayırt ediyor. */
+            printf("  [buton] RED    bas_ham=%ld ad=%ld sure=%lums ekran=%d "
+                   "(esik ham>=%d, sure<=%dms)\n",
+                   (long)s_bas_ham, (long)ad, (unsigned long)sure, s_aktif,
+                   BUTON_HAM_ESIK, BASMA_AZAMI_MS);
         }
         return;
     }

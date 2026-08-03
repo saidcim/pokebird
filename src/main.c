@@ -2880,11 +2880,12 @@ static void cmd_sonuc_karti_demo(void) {
     }
     printf("cikildi\n");
     printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
-           "panel disi %lu, son dx %ld dy %ld\n\n",
+           "panel disi %lu, son dx %ld dy %ld, buton basim %lu\n\n",
            (unsigned long)pb_kaydirma_dokunma, (unsigned long)pb_kaydirma_basla,
            (unsigned long)pb_kaydirma_kabul, (unsigned long)pb_kaydirma_kisa,
            (unsigned long)pb_lv_dokunma_gecersiz,
-           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy);
+           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy,
+           (unsigned long)pb_buton_basim);
 }
 
 /* ── F: KART FRAMEBUFFER DÖKÜMÜ — göz GEREKMEZ, teşhisi ikiye böler ───────

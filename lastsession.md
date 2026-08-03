@@ -5,32 +5,40 @@
 > içinde; burada onun özeti, şu ana kadar yapılanlar, **denenip işe yaramayanlar**
 > ve sıradaki adımlar var.
 >
-> Son güncelleme: 3 Ağustos 2026 (M7 arayüz — §9q).
+> Son güncelleme: 3 Ağustos 2026 (M7 arayüz + buton GÖZLE DOĞRULANDI — §9t).
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
 **Durum:** M0 ✅ · M1 ✅ · M2a ✅ · **M2b ✅ (dokunmatik ÇALIŞIYOR, §9q)** ·
 M3 ✅ · M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
-**M6 ✅ (§9m)** · M7 🔶 (adım 1-2 §9p, arayüz §9q — ikisi de gözle
-doğrulanmayı bekliyor)
+**M6 ✅ (§9m)** · **M7 adım 1+2+arayüz ✅ GÖZLE VE KULAKLA DOĞRULANDI (§9t)**
 
-Çalışma ağacı temiz, her şey commit edildi (§10). **Dal `m6`**, `main` değil.
+Çalışma ağacı temiz değil — bu oturumun üç düzeltmesi (§9t) henüz commit
+edilmedi, bir sonraki adım commit'lemek. **Dal `m6`**, `main` değil.
 
-> ### 🔶 SIRADAKİ İŞ — arayüzü gözle doğrula, sonra §9o adım 3'e dön
+> ### 🔶 SIRADAKİ İŞ — §9o adım 3: Aşama-1 ikili ağ (kuş var/yok)
 >
-> **Görsel iş şimdilik KAPANDI** (kullanıcının kararı). İki ekran, dokunmatik
-> kaydırma ve kayıt butonu yazıldı; §9q, §9r, §9s.
+> **M7'nin görsel/etkileşim kısmı TAMAMEN KAPANDI.** Kullanıcı hem `--cmd C`
+> gösterim testinde hem de gerçek `--cmd c` akustik testinde doğruladı:
+> iki ekran, kaydırma, kayıt butonu, gerçek tanıma hattı hepsi çalışıyor
+> ("tamam çalışıyor doğru tamamen"). Ayrıntı ve bu turda düzeltilen üç hata
+> §9t'de.
 >
-> Cihaz artık **sürekli dinlemiyor**: açılışta BOŞTA, dinlemeyi kayıt butonu
-> başlatıyor ve buton core 1'i gerçekten durduruyor (§9s).
+> **Sıradaki iş §9o'nun tablosundaki 3. madde:** kapı şu an yalnızca enerji
+> tabanlı; Aşama-1 ikili ağ (kuş var/yok) onu güçlendirecek. Bu **göz/kulak
+> gerektirmeyen** bir iş — model eğitimi ve host tarafı, M5 Aşama-2'nin
+> (§9k) aynısı ama iki sınıflı. Sıradaki oturum (ya da bu oturumun devamı)
+> doğrudan oraya girebilir.
+>
+> Ondan sonrası sırayla: 4) mevsim tablosu + RTC, 5) SD günlük, 6) pil.
+> **7) Dokunmatik artık YOK** — §9o'nun tablosundaki bu madde eskidi,
+> dokunmatik §9q/§9s'de zaten bitti.
 >
 > Arayüz host'ta render edilebiliyor (`tools/arayuz_onizle`) — ilk koşusunda
 > üç gerçek cihaz hatası yakaladı (LVGL yığını, yuvarlak köşeler, etiket
-> kesme). **Arayüzde bir şey değiştirirseniz önce orada bakın**, kullanıcının
+> kesme), ikinci koşusunda (§9t) bir tane daha (kapsam dışı font karakteri).
+> **Arayüzde bir şey değiştirirseniz önce orada bakın**, kullanıcının
 > gözünü harcamayın.
->
-> **İlk iş:** §9s sonundaki `--cmd C` göz testi. Sonra plan §9o adım 3
-> (Aşama-1 ikili ağ) ile devam.
 >
 > ### (geçmiş) iki göz testi bekliyordu (§9q sonu)
 >
@@ -771,7 +779,7 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | M5 | Model eğitimi + damıtma + INT8 | 🔶 **Aşama-2 tür ağı ✅ (§9k)** · Aşama-1 ikili ağ ve Aşama-3 mevsim tablosu kaldı |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | ✅ (§9m) — arena 110 KB, çıkarım 190 ms, doğrulama 8/8 birebir |
 | **—** | **EKRAN HATASI** | **✅ ÇÖZÜLDÜ (§9n)** — RASET yok sayılıyor + dar bantta satır kayması; kart framebuffer'ı ile kapandı |
-| **M7** | **Sonradan işleme, sonuç ekranı, günlük, pil** | **🔶 adım 1+2 yazıldı ve derlendi (§9p); GÖZLE DOĞRULANMADI. Adım 3-7 duruyor (§9o)** |
+| **M7** | **Sonradan işleme, sonuç ekranı, günlük, pil** | **🔶 adım 1+2 + arayüz + buton GÖZLE VE KULAKLA DOĞRULANDI (§9t). Kalan: adım 3 (Aşama-1 ikili ağ) · 4 (mevsim+RTC) · 5 (SD günlük) · 6 (pil). Adım 7 (dokunmatik) eskidi, zaten bitti** |
 | M8 | Saha kalibrasyonu | |
 
 ---
@@ -3709,6 +3717,68 @@ python tools/capture_wav.py --port COM13 --cmd c --sure 60
 ```
 
 Butona basıp kuş sesi duyurun (**PC'den ÇALMAYIN**, kulaklık takılı).
+
+---
+
+## 9t. ✅ M7 ARAYÜZ + BUTON GÖZLE VE KULAKLA DOĞRULANDI — üç hata düzeltildi
+
+§9s'in sonundaki iki test bu oturumda çalıştırıldı. **İkisi de geçti**:
+`--cmd C` gösterim testinde ekran, kaydırma, buton görüntüsü doğru; gerçek
+`--cmd c` testinde kullanıcı gerçek bir kuş sesi duyurdu ve tanıma **"tamam
+çalışıyor doğru tamamen"** dedi — tür ekrana doğru yazıldı, buton kip
+değiştirdi, günlük ekranına düştü.
+
+### Göze sunmadan ÖNCE kendi kendine elenen bir hata (kural 3'ün örneği)
+
+Kullanıcıdan `--cmd C` istemeden önce `tools/arayuz_onizle` host önizlemesi
+bu oturumda yeniden çalıştırılıp altı ekran durumunun PNG'si incelendi
+(BOŞTA, DİNLİYOR, TANINDI, uzun ad sarma, günlük boş, günlük dolu).
+**Günlük ekranının boş durumunda bir kutu karakteri** yakalandı:
+
+```
+"Henüz kayıt yok — dinleniyor"   <- em-dash (U+2014)
+```
+
+`tools/font_uret.py`'deki `SIMGELER` yalnızca Türkçe harfler + `·°` üretiyor;
+em-dash kapsam dışı, font onu hiç içermiyor. Aynı satırdaki "BUGÜN · TODAY"
+başlığı çalışıyordu çünkü o orta nokta (`·`) kullanıyordu, SIMGELER'de var.
+**Düzeltme:** [`src/ui/ekran_gunluk.c:112`](src/ui/ekran_gunluk.c#L112) da
+aynı orta noktaya çevrildi, tutarlı hâle geldi. Font yeniden üretilmedi —
+gerek yoktu, yalnızca metin değişti.
+
+Bu, kullanıcının gözünü hiç harcamadan (yalnızca benim host PNG'ye bakmamla)
+yakalanan üçüncü tür cihaz hatasıydı (ilk ikisi §9r'de).
+
+### Buton güvenilirliği — ÖLÇÜLDÜ, tahmin edilmedi
+
+Kullanıcı `C` demosunda **15 kez bilerek dokundu, 9'u algılandı (%60)**.
+Kaynağa bakılınca zayıf bir aday görüldü: buton şeridinin sağ kenarı
+geometrik olarak `ham_x ≈ 368`'de bitiyor (`BUTON_HAM_ESIK = 370`); pay
+yalnızca ~2 ham birim. Ama bu **tahmindi**, sınanmadı — o yüzden her
+dokunuşun ham başlangıç değerini KABUL/RED ayrımıyla yazdıran bir teşhis
+satırı eklendi ([`src/ui/arayuz.c`](src/ui/arayuz.c), `kaydirma_bitir`).
+Ayrıca `C` demosunun çıkış özetine eksik olan `buton basim` sayacı eklendi
+(`c`'de zaten vardı, `C`'de yoktu — [`src/main.c`](src/main.c)).
+
+**Bu turda tekrar sınanmadı** — kullanıcı ikinci bir 15-dokunuşluk turu
+atlayıp doğrudan gerçek akustik teste geçti ve o geçti. Buton **kullanılabilir
+durumda** (gerçek test boyunca kip doğru değişti) ama **%60 ret oranı ölçülü
+kaldı, kapanmadı**. Yeni oturumda buton üstünde çalışılırsa önce bu teşhis
+satırının çıktısını isteyin — eşik mi dar, süre mi (`BASMA_AZAMI_MS` 800 ms)
+yoksa başka bir şey mi, tahmin etmeden görün.
+
+### Bu turun üç kod değişikliği (commit edilmedi, sıradaki iş)
+
+| Dosya | Değişiklik |
+|---|---|
+| `src/ui/ekran_gunluk.c` | em-dash → orta nokta (kutu karakteri düzeltmesi) |
+| `src/main.c` | `C` demosunun çıkış özetine `buton basim` sayacı eklendi |
+| `src/ui/arayuz.c` | her buton dokunuşu için KABUL/RED teşhis satırı (`bas_ham`, `ad`, `sure`, `ekran`) |
+
+Üçü de host testleriyle (32/32) ve firmware derlemesiyle doğrulandı, karta
+iki kez yüklendi (ilk ikisi + üçüncüsü ayrı turlarda). **HEAD karta yüklü
+değil** — yukarıdaki üç değişiklik commit edilmemiş durumda, sıradaki iş
+onları commit'lemek.
 
 ---
 
