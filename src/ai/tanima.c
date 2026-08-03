@@ -21,10 +21,19 @@
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 
+#include "ai/ikili_agi.h"
 #include "dsp/fft.h"
 #include "dsp/gate.h"
 #include "dsp/mel.h"
 #include "hal/audio_i2s.h"
+
+/* Aşama-1 ikili ağın karar eşiği. tools/ikili_egit.py'de ÖLÇÜLDÜ: eşik 0.5'te
+ * test kümesinde kuş-geri-çağırma %97,90, negatif-özgüllük %86,58 (§9o).
+ * Kaçırma (yanlış "değil") pahalı — gerçek bir tespiti sessizce kaybediyor;
+ * geçirme (yanlış "kuş") ucuz — tür ağı zaten kendi negatif sınıfıyla eliyor.
+ * Bu yüzden eşik 0.5'ten AŞAĞI çekilmedi: ölçülen nokta zaten geri-çağırmayı
+ * önceliklendiriyor (model seçimi de bu ölçütle yapıldı, bkz. ikili_egit.py). */
+#define IKILI_ESIK  0.5f
 
 /* Çıkarım adımı: kaç mel karesinde bir pencere değerlendirilsin.
  * 63 kare × 16 ms = 1,008 s — plandaki 1 saniyelik pencere adımı (§7). */
@@ -146,6 +155,9 @@ static void core1_dongu(void) {
 
     uint32_t adim = 0;            /* son çıkarımdan beri geçen kare        */
     uint32_t adim_kapi = 0;       /* o karelerin kaçında kapı açıktı       */
+    /* bir önceki pencerede ikili ağ "kuş" dedi, tür ağı BU pencereye ayrılı
+     * (aynı pencerede ikisi birden çalışmıyor — bkz. aşağıdaki uyarı) */
+    bool ikili_beklemede = false;
     absolute_time_t son_cikarim = get_absolute_time();
 
     while (s_calis) {
@@ -190,14 +202,48 @@ static void core1_dongu(void) {
             s_olasilik_yaz = 0;
         }
 
-        /* Aşama-0 kapısı: sessizlikte ağır iş HİÇ çalışmıyor. */
-        if (!s_kapi_yoksay && kapi_sayisi < KAPI_ESIK) {
+        /* Aşama-0 kapısı: sessizlikte ağır iş HİÇ çalışmıyor. `ikili_beklemede`
+         * iken kapı bu turu iptal ETMİYOR — bir önceki pencerede ikili ağ
+         * "kuş" dedi ve tür ağı bu tura AYRILDI, geri çekilmiyor. */
+        if (!s_kapi_yoksay && !ikili_beklemede && kapi_sayisi < KAPI_ESIK) {
             s_durum.atlanan++;
             continue;
         }
 
         /* 3 saniye dolmadıysa pencere yok. */
         if (!pb_mel_window(pencere)) continue;
+
+        /* ⚠ İKİLİ AĞ VE TÜR AĞI AYNI PENCEREDE ASLA İKİSİ BİRDEN ÇALIŞMAZ.
+         *
+         * Denendi: ikisi art arda (ikili ~69 ms + tür ağı 190 ms = ~259 ms)
+         * ses halkasının 256 ms'lik toleransını aştı ve KARTI KİLİTLEDİ
+         * (§9o adım 3) — donanımın DMA ring alanı 4 bit, azami 32 KB
+         * (audio_i2s.h), büyütülemiyor. Çözüm: ikisini AYRI pencerelere
+         * bölmek. Bir turda en kötü durum hâlâ 190 ms — ring'in zaten
+         * doğrulanmış toleransı.
+         *
+         * ikili_beklemede: bir önceki pencerede ikili ağ "kuş" dedi, bu
+         * turda SADECE tür ağı çalışır (daha taze bir 3 s pencereyle —
+         * bariz bir dezavantaj değil, tam tersi). Aksi hâlde SADECE ikili
+         * ağ çalışır. */
+        if (ikili_beklemede) {
+            ikili_beklemede = false;
+        } else {
+            /* Aynı cihaz sözleşmesi: ölçek 1.0, sıfır 0 (ikili_agi.cc'de
+             * assert ediliyor). */
+            memcpy(pb_ikili_agi_girdi(), pencere, sizeof(pencere));
+            if (!pb_ikili_agi_calistir()) continue;
+            s_durum.ikili_calisti++;
+            s_durum.ikili_son_p = pb_ikili_agi_olasilik();
+            if (s_durum.ikili_son_p < IKILI_ESIK) {
+                s_durum.ikili_red++;
+                continue;
+            }
+            /* "Kuş" dedi: tür ağını BU TURDA ÇALIŞTIRMA (zaman bütçesini
+             * aşar), bir sonraki pencereye ayır. */
+            ikili_beklemede = true;
+            continue;
+        }
 
         /* Cihaz sözleşmesi: girdi ölçeği 1.0, sıfır noktası 0 —
          * dönüşüm YOK, doğrudan kopya (§9k, tur_agi.cc'de assert ediliyor). */
@@ -231,6 +277,7 @@ static void core1_dongu(void) {
 
 bool pb_tanima_baslat(bool kapi_yoksay) {
     if (s_calis) return true;
+    if (!pb_ikili_agi_baslat()) return false;
     if (!pb_tur_agi_baslat()) return false;
 
     s_kapi_yoksay = kapi_yoksay;

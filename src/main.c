@@ -43,10 +43,12 @@
 #include "ui/lv_port.h"
 #include "ui/tema.h"
 #include "ai/tur_agi.h"
+#include "ai/ikili_agi.h"
 #include "ai/tanima.h"
 #include "ai/karar.h"
 #include "ai/siniflar.h"
 #include "ai/dogrulama_seti.h"
+#include "ai/ikili_dogrulama_seti.h"
 #include "ui/arayuz.h"
 #include "lvgl.h"
 
@@ -2449,6 +2451,85 @@ static void cmd_ai_verify(void) {
     }
 }
 
+/* ── X: IKILI AG — cihaz ici dogrulama (M7, §9o adim 3) ───────────────────
+ *
+ * `x`'in Asama-1 ikili ag karsiligi: ayni pencereleri PC (BUILTIN_REF) ve
+ * cihazda modelden gecirip ham int8 logit'i BIREBIR karsilastirir. Ses yolu
+ * (mikrofon, mel) bu teste hic girmiyor — fark cikarsa sorun TFLM/CMSIS-NN
+ * veya nicelestirme tarafinda demektir.
+ */
+static void cmd_ikili_ai_verify(void) {
+    printf("\n=== IKILI AG — cihaz ici dogrulama ===\n");
+
+    const uint32_t t_init0 = time_us_32();
+    if (!pb_ikili_agi_baslat()) {
+        printf("[!] model baslatilamadi.\n");
+        return;
+    }
+    const uint32_t t_init = time_us_32() - t_init0;
+
+    printf("baslatma      %lu us\n", (unsigned long)t_init);
+    printf("arena         %u / %u bayt kullanildi  (%.1f%%)\n",
+           (unsigned)pb_ikili_agi_arena_kullanilan(),
+           (unsigned)pb_ikili_agi_arena_toplam(),
+           100.0 * pb_ikili_agi_arena_kullanilan() / pb_ikili_agi_arena_toplam());
+    printf("cikti nicel.  olcek %.9f  sifir %d\n",
+           (double)pb_ikili_agi_cikti_olcek(), pb_ikili_agi_cikti_sifir());
+
+    int8_t *girdi = pb_ikili_agi_girdi();
+
+    uint32_t sure_min = 0xFFFFFFFFu, sure_max = 0, sure_top = 0;
+    int birebir = 0, tahmin_ayni = 0, en_buyuk_fark = 0;
+
+    for (int k = 0; k < PB_IKILI_DOGRULAMA_ADET; k++) {
+        memcpy(girdi, pb_ikili_dogrulama_girdi[k],
+               (size_t)PB_IKILI_DOGRULAMA_KARE * PB_IKILI_DOGRULAMA_BANT);
+        if (!pb_ikili_agi_calistir()) {
+            printf("[!] pencere %d: Invoke basarisiz\n", k);
+            return;
+        }
+        const uint32_t us = pb_ikili_agi_son_sure_us();
+        if (us < sure_min) sure_min = us;
+        if (us > sure_max) sure_max = us;
+        sure_top += us;
+
+        const int8_t cihaz_logit = pb_ikili_agi_cikti();
+        int fark = (int)cihaz_logit - (int)pb_ikili_dogrulama_logit[k];
+        if (fark < 0) fark = -fark;
+        if (fark == 0) birebir++;
+        if (fark > en_buyuk_fark) en_buyuk_fark = fark;
+
+        const bool cihaz_tahmin = pb_ikili_agi_olasilik() >= 0.5f;
+        const bool pc_tahmin = pb_ikili_dogrulama_logit[k] >=
+                               pb_ikili_agi_cikti_sifir();  /* logit>=0 esdeger */
+        if (cihaz_tahmin == pc_tahmin) tahmin_ayni++;
+
+        printf("  pencere %d  gercek %-5s  cihaz-logit %4d  PC-logit %4d  "
+               "fark %d  p=%.4f  %lu us\n",
+               k, pb_ikili_dogrulama_gercek[k] ? "KUS" : "DEGIL",
+               cihaz_logit, pb_ikili_dogrulama_logit[k], fark,
+               (double)pb_ikili_agi_olasilik(), (unsigned long)us);
+    }
+
+    printf("\nsure          min %lu  ort %lu  max %lu us\n",
+           (unsigned long)sure_min,
+           (unsigned long)(sure_top / PB_IKILI_DOGRULAMA_ADET),
+           (unsigned long)sure_max);
+    printf("logit         %d/%d pencere BIREBIR ayni, en buyuk fark %d\n",
+           birebir, PB_IKILI_DOGRULAMA_ADET, en_buyuk_fark);
+    printf("karar         %d/%d pencere PC ile ayni yonde (>=0.5 esigi)\n",
+           tahmin_ayni, PB_IKILI_DOGRULAMA_ADET);
+
+    if (birebir == PB_IKILI_DOGRULAMA_ADET) {
+        printf("\nSONUC: cihaz PC ile BIREBIR ayni. TFLM hatti dogru.\n");
+    } else if (tahmin_ayni == PB_IKILI_DOGRULAMA_ADET) {
+        printf("\nSONUC: logit'te kucuk sapma var ama karar ayni.\n");
+    } else {
+        printf("\n[!] SONUC: cihaz PC'den FARKLI karar uretti. TFLM/CMSIS-NN\n"
+               "    veya nicelestirme tarafinda sorun var.\n");
+    }
+}
+
 /* ── k: gerçek zamanlı tanıma (core 1) ────────────────────────────────────
  *
  * M6'nın asıl teslimi. Core 1 sesi okuyup mel çıkarıyor, kapı açılınca
@@ -2496,10 +2577,13 @@ static void cmd_recognize(bool kapi_yoksay) {
         }
 
         if (time_reached(sonraki)) {
-            printf("  kare %lu  kapi %%%lu  cikarim %lu  atlanan %lu  "
-                   "bant %.1f dB  taban %.1f dB  overrun %lu\n",
+            printf("  kare %lu  kapi %%%lu  ikili %lu (red %lu, son p=%.2f)  "
+                   "cikarim %lu  atlanan %lu  bant %.1f dB  taban %.1f dB  "
+                   "overrun %lu\n",
                    (unsigned long)d.kare,
                    (unsigned long)(d.kare ? d.kapi_acik * 100 / d.kare : 0),
+                   (unsigned long)d.ikili_calisti, (unsigned long)d.ikili_red,
+                   (double)d.ikili_son_p,
                    (unsigned long)d.cikarim, (unsigned long)d.atlanan,
                    (double)d.bant_db, (double)d.taban_db,
                    (unsigned long)d.overrun);
@@ -2517,6 +2601,8 @@ static void cmd_recognize(bool kapi_yoksay) {
            (unsigned long)(d.kare ? d.kapi_acik * 100 / d.kare : 0));
     printf("  cikarim %lu, kapi kapali diye atlanan pencere %lu\n",
            (unsigned long)d.cikarim, (unsigned long)d.atlanan);
+    printf("  ikili ag calisti %lu, \"kus degil\" dedigi (tur agi atlandi) %lu\n",
+           (unsigned long)d.ikili_calisti, (unsigned long)d.ikili_red);
     printf("  ses halkasi overrun %lu  (0 olmali — degilse cikarim halkadan\n"
            "                            uzun suruyor, audio_i2s.h'ye bakin)\n\n",
            (unsigned long)d.overrun);
@@ -2968,6 +3054,7 @@ static void print_help(void) {
     printf("  S  dar pencere kayma testi: cizgiler duz mu (goz gerekir)\n");
     printf("  s  canli spektrogram\n");
     printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
+    printf("  X  IKILI AGI (Asama-1): cihaz ici dogrulama + arena + cikarim suresi\n");
     printf("  k  gercek zamanli tanima (core 1, seri porta yazar)\n");
     printf("  K  aynisi ama kapi yoksayilir — olcum kipi\n");
     printf("  c  ARAYUZ: dinleme + gunluk ekrani, canli tanima (goz gerekir)\n");
@@ -3085,6 +3172,7 @@ int main(void) {
             case 'm': cmd_mel_pipeline(); break;
             case 'a': cmd_full_demo(); break;
             case 'x': cmd_ai_verify(); break;
+            case 'X': cmd_ikili_ai_verify(); break;
             case 'k': cmd_recognize(false); break;
             case 'K': cmd_recognize(true);  break;
             case 'c': cmd_sonuc_ekrani();   break;

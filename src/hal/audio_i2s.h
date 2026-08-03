@@ -34,16 +34,20 @@ typedef struct {
 /**
  * Halka tamponunun kapasitesi (örnek). 24 kHz'de ~341 ms.
  *
- * M6'DA 4096'DAN (170 ms) BÜYÜTÜLDÜ — ÖLÇÜME DAYALI KARAR.
- * Tür ağının tek çıkarımı kartta **190 ms** sürüyor ve o süre boyunca core1
- * halkayı hiç okumuyor. Okuma yolu, birikmiş miktar halkanın 3/4'ünü aşınca
- * en tazeye atlıyor (aşağıdaki `fifo_overrun`), yani eski 4096'lık halkanın
- * gerçek toleransı 170 değil **128 ms**'ti: her çıkarımda ses hattı kopardı
- * ve 3 saniyelik pencerenin ortasında süreksizlik olurdu.
+ * M6'DA 4096'DAN BÜYÜTÜLDÜ — ÖLÇÜME DAYALI KARAR (170 ms -> 256 ms tolerans,
+ * tür ağının 190 ms'lik çıkarımına 1,35× pay).
  *
- * 8192 örnek = 32 KB, tolerans 3/4 × 341 = **256 ms**. Çıkarımın 1,35 katı.
- * Aşama-1 ikili ağı eklendiğinde toplam çıkarım süresi artacak; o zaman bu
- * sayı yeniden ölçülmeli (`k` komutu düşen pencereyi ve overrun'ı basıyor).
+ * ⛔ 8192 (32 KB) DONANIMIN KESİN TAVANI — BÜYÜTMEYİ DENEMEYİN.
+ * M7'de Aşama-1 ikili ağ eklenince (§9o adım 3) toplam çıkarım süresi 259 ms
+ * oldu ve 256 ms eşiğini aştı; "ring'i 16384'e büyüt" denendi ve KARTI
+ * TAMAMEN KİLİTLEDİ. Kök neden: RP2350'nin DMA `RING_SIZE` alanı 4 bit
+ * (dma.h: `DMA_CHx_CTRL_TRIG_RING_SIZE_BITS`, MSB 11 LSB 8) — azami temsil
+ * edilebilir değer 15, yani azami ring **2^15 = 32.768 bayt = 8192 örnek**.
+ * `PB_RING_ADDR_BITS 16` verilince donanım kaydı sessizce yanlış/bozuk bir
+ * değer aldı ve DMA çöktü. Doğru çözüm: ikili ağ ile tür ağını AYNI
+ * pencerede asla ikisini birden çalıştırmama (bkz. tanima.c,
+ * s_ikili_beklemede) — worst-case çıkarım süresi hâlâ 190 ms'de kalıyor,
+ * bu halka hiç büyümeden yetiyor.
  */
 #define PB_AUDIO_RING_SAMPLES  8192
 

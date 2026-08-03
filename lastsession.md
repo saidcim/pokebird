@@ -5,40 +5,45 @@
 > içinde; burada onun özeti, şu ana kadar yapılanlar, **denenip işe yaramayanlar**
 > ve sıradaki adımlar var.
 >
-> Son güncelleme: 3 Ağustos 2026 (M7 arayüz + buton GÖZLE DOĞRULANDI — §9t).
+> Son güncelleme: 3/4 Ağustos 2026 (M7 Aşama-1 ikili ağ — §9u — cihazda
+> doğrulandı, bir kart-kilitleme atlatıldı).
 
 ## ⚠ ÖNCE BUNU OKUYUN
 
 **Durum:** M0 ✅ · M1 ✅ · M2a ✅ · **M2b ✅ (dokunmatik ÇALIŞIYOR, §9q)** ·
-M3 ✅ · M4 ✅ · M5 🔶 (Aşama-2 tür ağı bitti; Aşama-1 ve Aşama-3 kaldı) ·
-**M6 ✅ (§9m)** · **M7 adım 1+2+arayüz ✅ GÖZLE VE KULAKLA DOĞRULANDI (§9t)**
+M3 ✅ · M4 ✅ · M5 🔶 (**Aşama-1 ✅ + Aşama-2 ✅**; Aşama-3 kaldı) ·
+**M6 ✅ (§9m)** · **M7 adım 1+2+3+arayüz ✅ GÖZLE/KULAKLA/CİHAZDA DOĞRULANDI**
 
-Çalışma ağacı temiz değil — bu oturumun üç düzeltmesi (§9t) henüz commit
-edilmedi, bir sonraki adım commit'lemek. **Dal `m6`**, `main` değil.
+Çalışma ağacı temiz değil, bu oturumun işi (§9u) henüz commit edilmedi.
+**Dal `m6`**, `main` değil.
 
-> ### 🔶 SIRADAKİ İŞ — §9o adım 3: Aşama-1 ikili ağ (kuş var/yok)
+> ### ⛔ DMA RING BOYUTU 8192 ÖRNEKTEN (32 KB) BÜYÜTÜLEMEZ — DONANIM SINIRI
 >
-> **M7'nin görsel/etkileşim kısmı TAMAMEN KAPANDI.** Kullanıcı hem `--cmd C`
-> gösterim testinde hem de gerçek `--cmd c` akustik testinde doğruladı:
-> iki ekran, kaydırma, kayıt butonu, gerçek tanıma hattı hepsi çalışıyor
-> ("tamam çalışıyor doğru tamamen"). Ayrıntı ve bu turda düzeltilen üç hata
-> §9t'de.
+> RP2350'nin DMA `RING_SIZE` alanı **4 bit** (`dma.h`,
+> `DMA_CHx_CTRL_TRIG_RING_SIZE_BITS`, MSB 11 LSB 8) — azami temsil edilebilir
+> değer 15, yani azami ring **2^15 = 32.768 bayt**. `audio_i2s.h`'deki
+> `PB_AUDIO_RING_SAMPLES`'ı bunun üstüne çıkarmayın; deneyip **kartı tamamen
+> kilitledik** (§9u), kurtarmak için kullanıcının elle BOOTSEL'e alması
+> gerekti. Ses/çıkarım zamanlama bütçesi sıkışırsa çözüm ring'i büyütmek
+> DEĞİL, çıkarımları zamanda ayırmak (bkz. `tanima.c`'deki
+> `ikili_beklemede` deseni).
 >
-> **Sıradaki iş §9o'nun tablosundaki 3. madde:** kapı şu an yalnızca enerji
-> tabanlı; Aşama-1 ikili ağ (kuş var/yok) onu güçlendirecek. Bu **göz/kulak
-> gerektirmeyen** bir iş — model eğitimi ve host tarafı, M5 Aşama-2'nin
-> (§9k) aynısı ama iki sınıflı. Sıradaki oturum (ya da bu oturumun devamı)
-> doğrudan oraya girebilir.
+> ### ✅ SIRADAKİ İŞ TAMAMLANDI — §9o adım 3: Aşama-1 ikili ağ (kuş var/yok)
 >
-> Ondan sonrası sırayla: 4) mevsim tablosu + RTC, 5) SD günlük, 6) pil.
-> **7) Dokunmatik artık YOK** — §9o'nun tablosundaki bu madde eskidi,
-> dokunmatik §9q/§9s'de zaten bitti.
+> Eğitildi, cihaza entegre edildi, **8/8 pencere PC ile birebir aynı**,
+> gerçek zamanlı hatta **overrun 0** (bir donanım sınırına çarpıp
+> düzeltildikten sonra). Ayrıntı §9u.
 >
-> Arayüz host'ta render edilebiliyor (`tools/arayuz_onizle`) — ilk koşusunda
-> üç gerçek cihaz hatası yakaladı (LVGL yığını, yuvarlak köşeler, etiket
-> kesme), ikinci koşusunda (§9t) bir tane daha (kapsam dışı font karakteri).
-> **Arayüzde bir şey değiştirirseniz önce orada bakın**, kullanıcının
-> gözünü harcamayın.
+> **Sıradaki iş §9o'nun tablosundaki 4. madde: Aşama-3 mevsim tablosu +
+> RTC.** Ondan sonra 5) SD günlük, 6) pil. **7) Dokunmatik artık YOK.**
+>
+> Arayüz host'ta render edilebiliyor (`tools/arayuz_onizle`) — üç gerçek
+> cihaz hatası + bir font kutu karakteri hatası bu yolla yakalandı (§9r,
+> §9t). **Arayüzde bir şey değiştirirseniz önce orada bakın.**
+>
+> M7'nin görsel/etkileşim kısmı (§9t) hem gösterim testinde hem gerçek
+> akustik testte kullanıcı tarafından doğrulandı ("tamam çalışıyor doğru
+> tamamen").
 >
 > ### (geçmiş) iki göz testi bekliyordu (§9q sonu)
 >
@@ -361,6 +366,7 @@ Kart USB seri olarak görünüyor: **COM13** (`VID_2E8A PID_0009`).
 | `m` | **mel + kapı hattı (M3)** | hayır |
 | `a` | **TAM DEMO**: LVGL kart + canlı mel spektrogramı + kapı | **evet** |
 | `x` | **tür ağı cihaz-içi doğrulama** + arena + çıkarım süresi (M6) | hayır |
+| `X` | **Aşama-1 ikili ağ cihaz-içi doğrulama** + arena + çıkarım süresi (M7) | hayır |
 | `k` | **gerçek zamanlı tanıma** (core 1, mikrofon) | hayır |
 | `K` | aynısı ama kapı yoksayılır — ölçüm kipi | hayır |
 | `c` | **SONUÇ EKRANI (M7)**: tanıma kartı + karar kuralı + spektrogram | **evet** |
@@ -681,6 +687,34 @@ Teşhis yolu da kayda değer: üç koşuluk A/B (eski / yeni / **yeni mantık +
 eski yerleşim**) mantığı yerleşimden ayırdı ve tek başına "hata mantıkta
 değil" sonucunu verdi. Bunu bir kez daha kullanın — ucuz ve kesin.
 
+### 5.18 DMA halka tamponunu donanım sınırının üstüne büyütmek — KARTI KİLİTLEDİ
+
+M7'de (§9u) Aşama-1 ikili ağ eklenince ses halkasının (`audio_i2s.h`)
+zamanlama toleransı (256 ms) aşıldı. M6'da aynı sınıf sorun ring'i
+4096'dan 8192'ye büyüterek çözülmüştü; aynı tarifi 8192'den 16384'e
+uygulamak "işe yarayan bir yöntemi tekrarlamak" gibi görünüyordu.
+
+**SRAM'e sığmadı** (ilk denemede 30 KB taşma), LVGL havuzu küçültülüp yer
+açıldı, derlendi — **ama kartı TAMAMEN KİLİTLEDİ.** Seri port hiçbir şeye
+yanıt vermedi, yazılım resetleri (1200 baud dokunuşu) işe yaramadı çünkü
+USB tarafı da donmuştu. **Kullanıcının elle BOOTSEL'e alması gerekti.**
+
+**Kök neden ÖLÇÜLMEDEN önce çözüm denenmişti** (bu projenin kural 1'inin
+tam ihlali): RP2350'nin DMA ring-sarma özelliği donanımda yalnızca **4
+bit** (`hardware/regs/dma.h`: `DMA_CHx_CTRL_TRIG_RING_SIZE_BITS`, bit
+8-11). Azami temsil edilebilir değer 15 → azami ring **32.768 bayt = 8192
+örnek**. Kod `PB_RING_ADDR_BITS 16` verince donanım kaydı sessizce yanlış
+bir değer aldı ve DMA belleği bozdu.
+
+**Ders:** "önceden işe yaramış bir yöntem" bile SDK belgesine/donanım
+kaydına bakmadan büyütülmemeli — bir önceki büyütme (4096→8192) donanımın
+temsil edebileceği aralığın İÇİNDEYDİ, bu yenisi (8192→16384) DIŞINDAYDI ve
+aradaki fark yalnızca kaydın bit genişliğine (`hardware/regs/dma.h`)
+bakılarak önceden görülebilirdi. **Gerçek çözüm RAM ya da ring boyutu
+değildi:** ikili ağ ile tür ağını AYNI pencerede birlikte çalıştırmamak
+(`tanima.c`'deki `ikili_beklemede` deseni) — worst-case çıkarım süresi
+zaten doğrulanmış 190 ms sınırının içinde kaldı, ring hiç büyütülmeden.
+
 ---
 
 ## 6. Açık konular / borçlar
@@ -776,10 +810,10 @@ TFLM arena'sı (180 KB) eklendiğinde 127.084 + 184.320 = **311.404 bayt**,
 | **M2b** | **LVGL entegrasyonu + dokunmatik** | **🔶 LVGL + spektrogram birlikte çalışıyor (demo); dokunmatik park, TE yapılmadı (§9b)** |
 | M3 | DSP hattı: mel + kapı + sürekli yakalama | ✅ (§9c) |
 | M4 | Veri boru hattı + tür listesi (PC tarafı) | ✅ veri (178 tür, 7.111 WAV) · segmentasyon (§9e) · **eğitim kümesi (§9j)** · negatif saha turu M8'e ertelendi (§9f-4) |
-| M5 | Model eğitimi + damıtma + INT8 | 🔶 **Aşama-2 tür ağı ✅ (§9k)** · Aşama-1 ikili ağ ve Aşama-3 mevsim tablosu kaldı |
+| M5 | Model eğitimi + damıtma + INT8 | 🔶 **Aşama-2 tür ağı ✅ (§9k)** · **Aşama-1 ikili ağ ✅ (§9u)** · Aşama-3 mevsim tablosu kaldı |
 | M6 | TFLM entegrasyonu, gerçek zamanlı çıkarım (core1) | ✅ (§9m) — arena 110 KB, çıkarım 190 ms, doğrulama 8/8 birebir |
 | **—** | **EKRAN HATASI** | **✅ ÇÖZÜLDÜ (§9n)** — RASET yok sayılıyor + dar bantta satır kayması; kart framebuffer'ı ile kapandı |
-| **M7** | **Sonradan işleme, sonuç ekranı, günlük, pil** | **🔶 adım 1+2 + arayüz + buton GÖZLE VE KULAKLA DOĞRULANDI (§9t). Kalan: adım 3 (Aşama-1 ikili ağ) · 4 (mevsim+RTC) · 5 (SD günlük) · 6 (pil). Adım 7 (dokunmatik) eskidi, zaten bitti** |
+| **M7** | **Sonradan işleme, sonuç ekranı, günlük, pil** | **🔶 adım 1+2+3 + arayüz + buton GÖZLE/KULAKLA/CİHAZDA DOĞRULANDI (§9t, §9u). Kalan: 4 (mevsim+RTC) · 5 (SD günlük) · 6 (pil). Adım 7 (dokunmatik) eskidi, zaten bitti** |
 | M8 | Saha kalibrasyonu | |
 
 ---
@@ -3782,6 +3816,174 @@ onları commit'lemek.
 
 ---
 
+## 9u. ✅ M7 ADIM 3 — AŞAMA-1 İKİLİ AĞ (kuş var/yok) — cihazda doğrulandı
+
+§9o'nun 3. maddesi: kapı (Aşama-0) yalnızca enerji tabanlı, şehir
+gürültüsünde seçiciliğini kaybediyor. Aşama-1, kapı ile Aşama-2 (tür ağı,
+300+ KB) arasına giren ucuz bir ikinci süzgeç — "kuş sesi mi değil mi".
+
+### Veri — YENİ TOPLAMAYA GEREK YOKTU
+
+`data/egitim/etiket.npy` zaten 179 sınıflıydı: 0..177 tür, 178 =
+`__negatif__` (ESC-50, §9j). İkili etiket doğrudan türetildi:
+`sinif != 178 -> KUŞ`. Aynı `pencereler.npy` (64×187 int8 mel) girdi olarak
+kullanıldı — cihazın `pb_mel_window()` çıktısıyla aynı sözleşme.
+
+```
+57.622 kus penceresi / 3.489 negatif = 16,5:1 dengesizlik  (agirlikli BCE ile duzeltildi)
+```
+
+Bulaşık pencereler (BirdNET'in en iyi tahmini hedeften farklı) tür ağı için
+sorunluydu ama burada değil: bulaşık pencere hâlâ KUŞ'tur, sadece tür
+tahmini farklı. Tam ağırlıkla eğitime girdi.
+
+### Model ve sonuçlar — ÖLÇÜLDÜ
+
+`tools/ikili_egit.py` (yeni betik, `tools/egit.py`'den uyarlandı — daha
+küçük 3 bloklu derinlemesine ayrılabilir CNN, damıtma YOK, düz ağırlıklı
+BCE):
+
+```
+7.217 parametre (~7 KB int8)   MAC/pencere 1,44 M (butce 5 M)
+en iyi kontrol noktasi: devir 21/40 (dogrulama kus-geri-cagirma %97,84)
+
+TEST (int8, esik 0,5, 6.267 pencere):
+  dogruluk %96,65   kus-geri-cagirma %97,90   negatif-ozgulluk %86,58
+  nicelestirme bedeli +0,05 puan (neredeyse sifir)
+```
+
+Eşik 0,5'te bırakıldı (tahmin değil, tam bu noktada ölçüldü) — kaçırma
+(yanlış "değil") pahalı: gerçek bir kuş tespitini sessizce kaybeder. Geçirme
+(yanlış "kuş") ucuz: Aşama-2 zaten kendi negatif sınıfıyla eler. Model
+seçimi de bu yüzden **doğruluk değil kuş-geri-çağırma** ile yapıldı.
+
+### Canlı eğitim panosu — çalışan eğitimi bozmadan
+
+Kullanıcı eğitim sürerken pano istedi ("eğitim taskini bozmadan"). Çözüm:
+[`tools/egitim_pano.py`](tools/egitim_pano.py) — eğitim script'inin
+**dışında**, ayrı bir süreç, stdout'un yönlendirildiği log dosyasını 5 sn'de
+bir okuyup `tools/egitim_pano.html`'i yeniden yazıyor. Eğitim script'inin
+kendi `pano_yaz()`'ı (egit.py/ikili_egit.py içinde) yalnızca script YENİDEN
+BAŞLATILIRSA işler; zaten çalışan bir süreci etkilemenin tek yolu dışarıdan
+log'u izlemekti. İki formatı da (tür ağı top-1/top-3, ikili ağ
+geri-çağırma/özgüllük) otomatik ayırt ediyor, yeniden kullanılabilir.
+
+### Cihaz entegrasyonu — TFLM sarmalayıcısı
+
+[`src/ai/ikili_agi.h`](src/ai/ikili_agi.h) / [`.cc`](src/ai/ikili_agi.cc):
+`tur_agi.cc`'nin (M6) aynı deseni — statik BSS arena, malloc yok, aynı dört
+op (CONV_2D, DEPTHWISE_CONV_2D, FULLY_CONNECTED, MEAN). Aynı cihaz
+sözleşmesi: girdi ölçek 1.0 / sıfır 0, `pb_mel_window()` doğrudan kopyalanır.
+
+**Arena ÖLÇÜLDÜ, tahmin edilmedi** (tur_agi.cc'deki gibi): ilk tahmin 32 KB
+yetmedi (TFLM "60.160 bayt istiyorum" dedi), 96 KB'a geçici büyütülüp `X`
+komutuyla ölçüldü: `arena_used_bytes() = 63.876 bayt`. 72 KB'a sabitlendi
+(%15 pay).
+
+**`X` komutu eklendi** (`x`'in ikili ağ karşılığı): 8 pencere (4 kuş + 4
+negatif, `tools/ikili_dogrulama_seti.py` üretiyor, BUILTIN_REF referans
+çekirdek) — **8/8 pencere cihaz-PC BİREBİR AYNI**, çıkarım 69,3-69,6 ms
+(tür ağının 190 ms'inin çok altında, beklenen: model 29 kat küçük).
+
+`tanima.c`'ye kablolama: kapı açıksa Aşama-1 çalışır; "değil" derse Aşama-2
+hiç çağrılmaz (`ikili_red` sayacı). "Kuş" derse... aşağıdaki olaya bakın.
+
+### ⛔ KART TAMAMEN KİLİTLENDİ — DMA ring donanım sınırı
+
+İlk entegrasyonda ikili ağ ve tür ağı **AYNI** pencerede art arda
+çalıştırıldı: ikili (~69 ms) + tür ağı (190 ms) = ~259 ms. Ses halkasının
+(`audio_i2s.h`) 256 ms'lik toleransı (8192 örnek × 3/4) aşıldı — `K` yük
+testinde **10/10 çıkarımda overrun** çıktı (önceki ölçüm, ikili ağdan önce:
+overrun 0).
+
+**Çözüm sanılan ama İŞE YARAMAYAN yol:** M6'da aynı sınıf sorun ring'i
+4096'dan 8192'ye büyüterek çözülmüştü (§9m); aynı tarifi 8192'den 16384'e
+uygulamak mantıklı görünüyordu. **SRAM'e sığmadı** (ilk denemede 30.304
+bayt taşma) — LVGL havuzunu 64 KB'dan 32 KB'a indirip (gerçek kullanım
+`arayuz_onizle` ile ölçüldü: 22.112/60.512 bayt, %37) yer açıldı ve bu sefer
+derlendi. **Ama kartta TAMAMEN KİLİTLENDİ** — seri port hiçbir komuta yanıt
+vermedi, yazılımla (1200 baud) resetlenemedi.
+
+**Kök neden:** RP2350'nin DMA ring-sarma özelliği donanımda yalnızca **4
+bit** (`dma.h`: `DMA_CHx_CTRL_TRIG_RING_SIZE_BITS`, bit 8-11). Azami temsil
+edilebilir değer 15 → azami ring **32.768 bayt = 8192 örnek**. Kodun
+`PB_RING_ADDR_BITS 16` vermesi bu 4 bitlik alana sığmıyordu; donanım kaydı
+sessizce yanlış bir değer aldı, DMA muhtemelen aynı adrese yazmaya devam
+edip belleği bozdu. **Bu bir SRAM sorunu değil, kesin bir donanım tavanıydı**
+— 30 KB'lık taşmayı gidermiş olsak bile aynı şekilde kilitlenecekti.
+
+**Kurtarma:** yazılım resetleri (1200 baud dokunuşu) yanıt vermedi —
+cihazın USB tarafı da donmuştu. Kullanıcıdan **elle BOOTSEL**'e almasını
+istedik (RESET+BOOT birlikte, RESET bırak, BOOT bırak); `RPI-RP2` sürücüsü
+görününce düzeltilmiş `.uf2` kopyalandı ve kart geri geldi.
+
+**Gerçek çözüm — çıkarımları AYNI pencerede birleştirmemek:**
+`tanima.c`'de `ikili_beklemede` durumu eklendi. Bir pencerede **YA ikili ağ
+YA tür ağı** çalışır, ikisi asla birlikte değil:
+
+```
+ikili ag "kus" dedi  ->  bu pencerede tur agi CALISTIRILMIYOR
+                          bayrak kaldiriliyor (ikili_beklemede = true)
+bir sonraki pencere   ->  ikili ag ATLANIYOR, tur agi DOGRUDAN calisiyor
+                          (daha TAZE bir 3 s pencereyle — dezavantaj degil)
+```
+
+Bir turdaki en kötü durum hâlâ **190 ms** — ring'in zaten doğrulanmış
+toleransı, hiç büyütülmesi gerekmedi. Kapı bu bekleyen turu iptal etmiyor
+(`!ikili_beklemede` koşulu): ikili ağ "kuş" dedikten sonra kapı anlık
+kapansa bile tür ağı o turu kaçırmıyor.
+
+**Yeniden ölçüldü, düzeldi:**
+
+```
+X (bit-birebir)   8/8 pencere BIREBIR ayni  (arena 63.876/73.728, degismedi)
+K --sure 15       937 kare, cikarim 6, ikili calisti 6, overrun 0
+```
+
+⚠ **Bilinen sonuç — henüz cihazda süre ölçülmedi:** ikili ve tür ağı artık
+sırayla çalıştığı için, sürekli bir ötüşte tür ağı eskisi gibi ~1 sn'de bir
+değil **~2 sn'de bir** çalışıyor. `PB_KARAR_MIN_PENCERE 3`'e ulaşmak artık
+~3 sn yerine ~6 sn sürer. `BAYAT_MS 6000` bunu hâlâ karşılıyor (2 sn < 6 sn)
+ama ilk tepki süresi yavaşladı — gerçek akustik testte fark edilebilir,
+kullanıcıya söylenmedi henüz.
+
+### LVGL havuzu 64→32 KB — kalıcı, bağımsız kazanç
+
+Ring büyütme denemesi geri alındı ama LVGL küçültmesi **geçerliliğini
+korudu** (host'ta doğrulandı, kutu/kesik çizim yok): 64 KB'ın yalnızca %37'si
+kullanılıyordu. 32 KB'a inince kalan 32 KB **boşta** — gelecek aşamalar
+(mevsim tablosu, SD günlük, pil) için pay. Net SRAM kazancı: **+32 KB**.
+
+### ⛔ AÇIK — buton güvenilirliği hâlâ ölçülü kaldı (§9t'den devam)
+
+15 dokunuşta 9 algılama (%60) ölçülmüştü, teşhis satırı eklenmişti
+(`[buton] KABUL/RED bas_ham=...`). Bu oturumda ikinci bir 15-dokunuşluk tur
+yapılmadı — kullanıcı doğrudan gerçek akustik teste geçti ve o geçti. Buton
+**kullanılabilir durumda** ama sayı doğrulanıp kapanmadı.
+
+### Bu adımda ELENEN / SEÇİLMEYEN yollar
+
+| Ne | Neden seçilmedi |
+|---|---|
+| Ses halkasını 16384'e büyütmek | DONANIM SINIRI: DMA ring alanı 4 bit, azami 32 KB. Denendi, kartı kilitledi |
+| İkili + tür ağını aynı pencerede art arda çalıştırmak | Ölçülen 259 ms > halkanın 256 ms toleransı. Overrun'a yol açtı |
+| Eşiği 0,5'ten aşağı çekmek (recall'u zorlamak) | Ölçülen nokta zaten model seçiminde (kus-geri-cagirma) önceliklendirildi; ek bir tahmin gerekmedi |
+| Damıtma (BirdNET öğretmen sinyali) | Aşama-1 ikili soru soruyor, BirdNET'in tür bazlı sigmoid'i buna doğrudan taşınmıyor |
+| LVGL havuzunu eski 64 KB'da bırakmak | Ölçülen gerçek kullanım %37 — 32 KB'ın büyük kısmı hiç dokunulmuyordu |
+
+### Yeni dosyalar
+
+| Dosya | Ne |
+|---|---|
+| `tools/ikili_egit.py` | Aşama-1 eğitimi (küçük CNN, ağırlıklı BCE) |
+| `tools/ikili_dogrulama_seti.py` | cihaz-içi doğrulama seti üretici (`X` komutu için) |
+| `tools/egitim_pano.py` | çalışan bir eğitim log'unu izleyip HTML pano üreten bağımsız araç |
+| `src/ai/ikili_agi.h` / `.cc` | Aşama-1 TFLM sarmalayıcısı |
+| `src/ai/ikili_dogrulama_seti.h` | ÜRETİLMİŞ — 8 pencere + PC referans logit |
+| `models/ikili_agi_int8.h` / `ikili_rapor.txt` | ÜRETİLMİŞ, GİRİYOR |
+
+---
+
 ## 10. Depo düzeni ve git durumu
 
 ```
@@ -3797,11 +3999,13 @@ src/
     display/  qspi.pio, qspi_pio(.c/.h), LCD_3in49(.c/.h),
               DEV_Config.h, dev_config.c, lcd_blit(.c/.h)
   dsp/        fft(.c/.h), mel(.c/.h), gate(.c/.h)
-  ai/         tur_agi(.cc/.h)     ← TFLM sarmalayicisi + arena
+  ai/         tur_agi(.cc/.h)     ← Asama-2 TFLM sarmalayicisi + arena
+              ikili_agi(.cc/.h)   ← M7: Asama-1 ikili ag TFLM sarmalayicisi (§9u)
               tflm_port.cc        ← DebugLog / micro_time / abort() ezmesi
               tanima(.c/.h)       ← core1 gercek zamanli hat + birlestirme
               karar(.c/.h)        ← M7: esik + histerezis + tutma (donanimsiz)
-              dogrulama_seti.h    ← URETILMIS (GIRIYOR, 94 KB flash)
+              dogrulama_seti.h    ← URETILMIS (GIRIYOR, tur agi, 94 KB flash)
+              ikili_dogrulama_seti.h ← URETILMIS (GIRIYOR, ikili ag, §9u)
               siniflar.h          ← URETILMIS (GIRIYOR)
   ui/         spectrogram(.c/.h), lv_conf.h, lv_port(.c/.h)
               sonuc_karti(.c/.h)  ← M7: tanima karti + Turkce->ASCII
@@ -3813,15 +4017,20 @@ tools/      capture_wav.py, mel_reference.py,
             birdnet_ozet.py, segment_kes.py ← M4 adım 3: segmentasyon
             esc50_indir.py, egitim_kumesi.py ← M4 adım 4: eğitim kümesi
             egit.py, birlestirme_olc.py     ← M5: eğitim + değerlendirme
-            dogrulama_seti.py               ← M6: cihaz-içi doğrulama seti
+            dogrulama_seti.py               ← M6: cihaz-içi doğrulama seti (tür ağı)
             sinif_tablosu.py                ← M6: sınıf adları -> siniflar.h
             esik_olc.py                     ← M7: karar eşiği ölçümü (numpy yeter)
+            ikili_egit.py                   ← M7: Aşama-1 ikili ağ eğitimi (§9u)
+            ikili_dogrulama_seti.py         ← M7: cihaz-içi doğrulama seti (ikili ağ)
+            egitim_pano.py                  ← çalışan eğitimi izleyip HTML pano üretir (§9u)
 models/     tur_agi_int8.h                  ← C dizisi (GİRİYOR, firmware derliyor)
+            ikili_agi_int8.h                ← Aşama-1 C dizisi (GİRİYOR, §9u)
             rapor.txt, birlestirme.txt      ← doğruluk kayıtları (GİRİYOR)
+            ikili_rapor.txt                 ← Aşama-1 doğruluk kaydı (GİRİYOR, §9u)
             esik.txt                        ← eşik ölçümü (GİRİYOR, §9p)
             test_olasilik.npy               ← test kümesi softmax önbelleği (girmiyor)
-            tur_agi.keras, *.tflite         ← girmiyor, üretilebilir
-            ilerleme.html                   ← canlı eğitim panosu (girmiyor)
+            tur_agi.keras, ikili_agi.keras, *.tflite ← girmiyor, üretilebilir
+            ilerleme.html, egitim_pano.html (tools/) ← canlı eğitim panoları (girmiyor)
 data/       species_istanbul.csv            ← tür tablosu (git'e giriyor)
             birdnet_ad_haritasi.csv         ← kod→BirdNET adı (GİRİYOR, §5.16)
             .xc_key                         ← XC API anahtarı (GİRMİYOR)

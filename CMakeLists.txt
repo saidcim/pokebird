@@ -51,6 +51,7 @@ add_executable(pokebird
     src/ui/fonts/pb_font_dar_11.c
     src/ui/fonts/pb_font_mono_10.c
     src/ai/tur_agi.cc
+    src/ai/ikili_agi.cc
     src/ai/tanima.c
     src/ai/karar.c
     src/ai/tflm_port.cc
@@ -121,4 +122,11 @@ set(PB_TFLM_ARENA_BAYT "" CACHE STRING "TFLM tensor arena boyutu (bayt)")
 if(PB_TFLM_ARENA_BAYT)
     target_compile_definitions(pokebird PRIVATE
         PB_TFLM_ARENA_BAYT=${PB_TFLM_ARENA_BAYT})
+endif()
+
+# Asama-1 ikili ag arena'si — ayni gerekce, src/ai/ikili_agi.cc'de.
+set(PB_IKILI_ARENA_BAYT "" CACHE STRING "Ikili ag TFLM tensor arena boyutu (bayt)")
+if(PB_IKILI_ARENA_BAYT)
+    target_compile_definitions(pokebird PRIVATE
+        PB_IKILI_ARENA_BAYT=${PB_IKILI_ARENA_BAYT})
 endif()

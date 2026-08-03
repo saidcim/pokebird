@@ -195,8 +195,8 @@ def main():
     ap.add_argument("--out", default="kayit.wav")
     ap.add_argument("--cmd", default="r",
                     choices=["r", "n", "e", "i", "l", "d", "s", "b", "v", "o",
-                             "t", "u", "m", "a", "c", "C", "F", "x", "k", "K",
-                             "w", "y", "z", "j", "L", "S"],
+                             "t", "u", "m", "a", "c", "C", "F", "x", "X", "k",
+                             "K", "w", "y", "z", "j", "L", "S"],
                     help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
                          "l=canli seviye, d=ekran testi, b=arka isik, "
                          "v=QSPI veri yolu teshisi, s=spektrogram (Ctrl+C ile cik), "

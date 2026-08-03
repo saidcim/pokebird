@@ -33,14 +33,21 @@
  * Havuz tükenince `lv_obj_create` NULL dönüyor ve çağıran onu denetlemiyor —
  * host'ta segfault, kartta ise sessizce eksik/bozuk çizilen bir ekran.
  *
- * 64 KB seçildi: iki ekran ~33 KB, kalanı etiket metni değiştikçe oluşan
- * parçalanma ve ileride eklenecek ekranlar için pay. Bedeli karşılanabilir —
- * arayüzün dilim yoluna geçmesi bss'ten 19,9 KB kazandırmıştı ve ana SRAM'de
- * ~153 KB boş var. */
+ * 64 KB SEÇİLMİŞTİ ama M7'de (Aşama-1 ikili ağ eklenirken, §9o adım 3)
+ * SRAM'e ihtiyaç çıkınca bu havuzun gerçek kullanımı `tools/arayuz_onizle`
+ * ile YENİDEN ÖLÇÜLDÜ: iki ekran birlikte kurulunca **22.112 / 60.512 bayt
+ * (%37)**. Eski "iki ekran ~33 KB" tahminiydi, ölçülen daha düşük çıktı —
+ * 64 KB'ın büyük kısmı hiç kullanılmıyordu.
+ *
+ * 32 KB'a indirildi: ölçülenin üstünde ~10,6 KB (%48) pay — parçalanma ve
+ * küçük büyümeler için yeterli, gereksiz büyük değil. Kazanılan 32 KB
+ * boşta kaldı (ses halkasını büyütme denemesi donanım sınırına çarpıp geri
+ * alındı, bkz. audio_i2s.h) — gelecek aşamalar (mevsim tablosu, SD günlük,
+ * pil) için pay. */
 #define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING    LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF   LV_STDLIB_BUILTIN
-#define LV_MEM_SIZE             (64 * 1024)
+#define LV_MEM_SIZE             (32 * 1024)
 
 /* Zaman tabanı: v9'da makro yok, çalışma anında `lv_tick_set_cb()` ile
  * veriliyor (bkz. ui/lv_port.c). v8'deki LV_TICK_CUSTOM burada işe yaramaz. */

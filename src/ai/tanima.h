@@ -30,8 +30,11 @@ typedef struct {
 
     uint32_t kare;           /* toplam mel karesi                            */
     uint32_t kapi_acik;      /* kapısı açık kare sayısı                      */
-    uint32_t cikarim;        /* çalıştırılan çıkarım sayısı                  */
+    uint32_t cikarim;        /* çalıştırılan çıkarım sayısı (tür ağı)        */
     uint32_t atlanan;        /* kapı kapalı olduğu için atlanan pencere      */
+    uint32_t ikili_calisti;  /* Aşama-1 ikili ağın çalıştığı pencere sayısı  */
+    uint32_t ikili_red;      /* ikili ağın "kuş değil" dediği (tür ağı atlandı) */
+    float    ikili_son_p;    /* son ikili ağ çıktısı — "kuş" olasılığı (0..1) */
     uint32_t overrun;        /* ses halkası taştı — süreklilik koptu         */
     uint32_t son_sure_us;    /* son Invoke() süresi                          */
     uint32_t birlesen;       /* kaç pencere birleştirildi (≤ 8)              */

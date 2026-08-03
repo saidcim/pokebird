@@ -65,6 +65,10 @@ models/*.keras
 models/ilerleme.html
 models/test_olasilik.npy
 
+# M7 Asama-1 ikili ag — ayni gerekce
+# ikili_agi_int8.h ve ikili_rapor.txt GIRER.
+tools/egitim_pano.html
+
 # M6 — TFLM ve bagimliliklari. Hepsi vendor edilmis ucuncu taraf, surumler
 # cmake/tflm.cmake'te sabitlenmis; kurulum README'de.
 third_party/tflite-micro/

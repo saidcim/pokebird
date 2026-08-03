@@ -35,13 +35,11 @@ static_assert(PB_PIN_I2S_LRCK == 5, "audio_i2s.pio 'wait gpio 5' ile LRCK'yi bek
  * kendi boyutuna hizalı olmalı.
  *
  * 8192 örnek = 32 KB = 24 kHz'de 341 ms (M6'da 4096'dan büyütüldü; gerekçe
- * audio_i2s.h'de, kısaca: tür ağının çıkarımı 190 ms sürüyor ve o süre
- * boyunca halka okunmuyor). Mel hattının bir karesi 16 ms; yani tüketici
- * yirmi kare geri kalsa bile örnek kaybolmuyor. USB üzerinden ham kayıt
- * aktarırken (`r` komutu) yaşanan duraklamalar için de pay bu. */
+ * audio_i2s.h'de). ⛔ BÜYÜTMEYİN — donanımın DMA ring alanı 4 bit, azami
+ * 32 KB (audio_i2s.h'deki M7 uyarısı, §9o adım 3). */
 #define PB_RING_WORDS       PB_AUDIO_RING_SAMPLES
 #define PB_RING_MASK        (PB_RING_WORDS - 1)
-#define PB_RING_ADDR_BITS   15                      /* 1<<15 = 32768 bayt */
+#define PB_RING_ADDR_BITS   15                      /* 1<<15 = 32768 bayt — DONANIM TAVANI */
 
 static_assert((PB_RING_WORDS & PB_RING_MASK) == 0, "halka boyutu ikinin kuvveti olmali");
 static_assert((1u << PB_RING_ADDR_BITS) == PB_RING_WORDS * sizeof(uint32_t),
