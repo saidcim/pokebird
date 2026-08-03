@@ -16,12 +16,21 @@ doğrulanmayı bekliyor)
 
 Çalışma ağacı temiz, her şey commit edildi (§10). **Dal `m6`**, `main` değil.
 
-> ### 🔶 SIRADAKİ İŞ — yeni arayüzün GÖZLE doğrulanması (§9r)
+> ### 🔶 SIRADAKİ İŞ — arayüzü gözle doğrula, sonra §9o adım 3'e dön
 >
-> Arayüz host'ta render ediliyor artık (§9r, `tools/arayuz_onizle`) ve ilk
-> koşusu üç gerçek cihaz hatası yakaladı (LVGL yığını, yuvarlak köşeler,
-> etiket kesme). Üçü de düzeltildi. Kaydırma ekseni de ÖLÇÜLDÜ ve
-> düzeltildi (§9r sonu). **Kalan: yeni hâlin gözle doğrulanması.**
+> **Görsel iş şimdilik KAPANDI** (kullanıcının kararı). İki ekran, dokunmatik
+> kaydırma ve kayıt butonu yazıldı; §9q, §9r, §9s.
+>
+> Cihaz artık **sürekli dinlemiyor**: açılışta BOŞTA, dinlemeyi kayıt butonu
+> başlatıyor ve buton core 1'i gerçekten durduruyor (§9s).
+>
+> Arayüz host'ta render edilebiliyor (`tools/arayuz_onizle`) — ilk koşusunda
+> üç gerçek cihaz hatası yakaladı (LVGL yığını, yuvarlak köşeler, etiket
+> kesme). **Arayüzde bir şey değiştirirseniz önce orada bakın**, kullanıcının
+> gözünü harcamayın.
+>
+> **İlk iş:** §9s sonundaki `--cmd C` göz testi. Sonra plan §9o adım 3
+> (Aşama-1 ikili ağ) ile devam.
 >
 > ### (geçmiş) iki göz testi bekliyordu (§9q sonu)
 >
@@ -3615,6 +3624,91 @@ yon: ham_x ARTIYORSA sonraki ekran (sagdan sola = sayfa cevirme yonu)
 Gerekmiyor: ekranda dokunulacak bir şey yok, yalnızca kaydırma var. LVGL'in
 işaretçi eşlemesi (`pb_lv_dokunma_al`) duruyor ama **kullanılmıyor**;
 ekranda tıklanabilir bir nesne eklenirse önce o kalibre edilmeli.
+
+---
+
+## 9s. 🔶 KAYIT BUTONU — cihaz artık sürekli dinlemiyor (gözle doğrulanmadı)
+
+**Kullanıcının kararı:** *"sürekli dinlemesi iyi değil, o yüzden bir kaydetme
+butonu koy ve arayüzü yeniden şekillendir."* Görsel iş bu adımla **şimdilik
+kapandı**; sıradaki oturum plana (§9o adım 3+) dönecek.
+
+### ⛔ BUTON NEDEN TAM YÜKSEKLİKTE BİR ŞERİT — ölçüme dayalı
+
+§9r kalibrasyonu **kısa eksenin kullanılamaz** olduğunu gösterdi: ekranın
+tamamı boyunca yalnızca 14 ham birim değişiyor (kasanın çıkıntısı üst/alt
+kenara gerçekten dokunmayı engelliyor olmalı). Yani **bir dokunuşun DİKEY
+yerini bilmiyoruz, yalnızca YATAY yerini.**
+
+Bundan çıkan tasarım kısıtı: tam yükseklikte bir dikey şerit, yalnızca yatay
+konumla güvenle vurulabilen tek buton biçimi. Serbestçe yerleştirilmiş
+kutu/ikon butonlar bu donanımda güvenilir değil.
+
+```
+vurus testi:  ham_x >= 370        (BUTON_HAM_ESIK, arayuz.c)
+kalibrasyon:  sol kenar ~432, sag kenar ~3  ->  piksel basina ~0,67 ham
+buton ui_x 0..95  ->  ham_x 432..~368
+```
+
+⚠ **Ölçek KABA.** Ekrana ikinci bir dokunmatik hedef eklenirse bu yetmez;
+önce ham→piksel eşlemesi düzgün kalibre edilmeli.
+
+### Yeni yerleşim — üç eşit satır yerine hiyerarşi
+
+```
+x   0..95    BUTON        daire = KAYIT, kare = DUR
+x  96..383   icerik       1. tahmin BUYUK + tam genislik cubuk
+                          2. ve 3. tahmin tek satir, kompakt
+x 384..639   spektrogram  (LVGL dokunmuyor)
+```
+
+Eski hâl üç adayı da aynı ağırlıkta gösteriyordu; ekran "hangisi?" diye
+sorduruyordu. Yeni hâl bir cevap veriyor, diğer ikisini bilgi olarak
+bırakıyor. §9k'nın sayıları da bunu destekliyor: top-1 %70,4 ama top-3
+%82,2 — ikinci ve üçüncü satır gerçekten bilgi taşıyor ama birinciyle aynı
+ağırlıkta değil.
+
+Buton göstergesi **her iki durumda da kırmızı**; ayrımı şekil (daire/kare) ve
+çerçeve taşıyor. Önce boştaki daire soluk griydi ve buton **devre dışı** gibi
+görünüyordu (önizlemede yakalandı).
+
+### Hattı gerçekten durduruyor — sahte bir kip değil
+
+`pb_arayuz_kayitta()` yalnızca durumu tutuyor; **`main.c` her turda ona bakıp
+`pb_tanima_baslat`/`pb_tanima_durdur` çağırıyor**, yani core 1 gerçekten
+duruyor. İkisi de bu kullanıma uygun: `s_calis` ile korumalılar ve başlatma
+core 1'i sıfırdan kuruyor (`multicore_reset_core1`).
+
+⚠ **`pb_tanima_durdur` 400 ms bloklanıyor** (core 1'in döngüden çıkmasını
+bekliyor). Butona basınca arayüz o kadar takılır — beklenen, hata değil.
+
+Seri porttan yedek: **`r`** tuşu kayıt açıp kapatıyor (boşluk/`n` ekran
+değiştiriyor, başka tuş çıkıyor).
+
+### Ölçülenler
+
+```
+text 1.014.116   bss 382.440   bss tepesi 0x20064cd8  -> ~112 KB bos
+host testleri 32, 0 kaldi
+```
+
+### ⛔ GÖZLE DOĞRULANMADI — sıradaki oturumun ilk işi
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd C
+```
+
+Bakılacaklar: buton okunuyor mu, **butona dokununca kip değişiyor mu**
+(daire↔kare, BOŞTA↔DİNLİYOR), yatay kaydırma günlük ekranına geçiyor mu,
+dilim sınırlarında (x = 128, 256, 384) kayma var mı.
+
+Sonra gerçek ses:
+
+```bash
+python tools/capture_wav.py --port COM13 --cmd c --sure 60
+```
+
+Butona basıp kuş sesi duyurun (**PC'den ÇALMAYIN**, kulaklık takılı).
 
 ---
 
