@@ -3581,30 +3581,39 @@ python tools/capture_wav.py --port COM13 --cmd t
 
 ### ✅ ÖLÇÜLDÜ VE DÜZELTİLDİ — kaydırma artık HAM EKSENDE
 
-Kullanıcı kalibrasyonu çalıştırdı:
+Kullanıcı kalibrasyonu çalıştırdı (dört kenar, her birinde ortanca):
 
-
+```
+SOL -> SAG (yatay):   ham_x 432 -> 3     degisim -429
+                      ham_y  70 -> 94    degisim  +24
+ALT -> UST (dikey):   ham_x 560 -> 449   degisim -111
+                      ham_y 107 -> 93    degisim  -14
+```
 
 Üç sonuç:
 
-1. **Yatay eksen ** ve soldan sağa **AZALIYOR**. §9q'daki yön çıkarımı
+1. **Yatay eksen `ham_x`** ve soldan sağa **AZALIYOR**. §9q'daki yön çıkarımı
    doğruymuş.
-2. ** KULLANILAMAZ:** ekranın tamamı boyunca yalnızca 14 birim
+2. **`ham_y` KULLANILAMAZ:** ekranın tamamı boyunca yalnızca 14 birim
    değişiyor. Kasanın çıkıntısı üst/alt kenara gerçekten dokunmayı
-   engelliyor olmalı. Dikey oran kısıtı () bu yüzden
+   engelliyor olmalı. Dikey oran kısıtı (`|dx| > 2*|dy|`) bu yüzden
    **kaldırıldı** — güvenilmeyen bir sayıyla bölmek, elemekten kötü.
-3. **Asıl hata:** dikey kaydırmada  **111 birim** kayıyor ve eski eşik
+3. **Asıl hata:** dikey kaydırmada `ham_x` **111 birim** kayıyor ve eski eşik
    90 pikseldi. Yani dikey hareket yatay kaydırma sayılıyordu — kullanıcının
    gördüğü davranışın birebir açıklaması.
 
 Kaydırma artık türetilmiş pikselde değil **ham eksende** ölçülüyor ve eşik
 ölçülen iki sayının ARASINA konuldu:
 
-
+```
+KAYDIRMA_ESIK_HAM  200     kazara kayma 111, bilincli kaydirma ~429
+HAM_AZAMI         1000     panel disi (~4000) kareler dusuruluyor
+yon: ham_x ARTIYORSA sonraki ekran (sagdan sola = sayfa cevirme yonu)
+```
 
 ⚠ **Ham→piksel ölçeği KALİBRE EDİLMEDİ** (sol kenar 432 okuyor, 639 değil).
 Gerekmiyor: ekranda dokunulacak bir şey yok, yalnızca kaydırma var. LVGL'in
-işaretçi eşlemesi () duruyor ama **kullanılmıyor**;
+işaretçi eşlemesi (`pb_lv_dokunma_al`) duruyor ama **kullanılmıyor**;
 ekranda tıklanabilir bir nesne eklenirse önce o kalibre edilmeli.
 
 ---
