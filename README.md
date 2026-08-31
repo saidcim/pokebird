@@ -5,6 +5,12 @@ Waveshare **RP2350-Touch-LCD-3.49**. It listens through the board's onboard
 microphone and names the bird on its own screen — no phone, no internet, no
 cloud. Scoped to the ~178 bird species of Istanbul.
 
+**Status: complete.** All eight milestones are done, the full pipeline runs on
+the device, and it was taken to Belgrad Forest on 31 August 2026, where it
+correctly named Common Chaffinch, Hooded Crow, European Robin and woodpeckers by
+ear alone. What was left undone, and why, is in
+[Honest limitations](#honest-limitations).
+
 Full architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (Turkish) · Turkish README: [`README.tr.md`](README.tr.md)
 
 ## Why it is interesting
@@ -121,9 +127,10 @@ setup differs.
 2. Recordings from the Xeno-canto API (CC-licensed, quality A/B first)
 3. **BirdNET as segmenter and teacher** — finds which 3 s slices actually contain
    the target species, and its output probabilities are kept as soft labels
-4. **Istanbul-specific negative mining** — traffic, horns, the call to prayer,
-   ferry horns, speech, dogs, wind, rain, construction. Skip this and the device
-   is unusable in a real city.
+4. **Negative class** — 3,489 windows of non-bird audio from ESC-50 (traffic,
+   engines, speech, dogs, wind, rain, construction). Istanbul-specific negatives
+   (the call to prayer, ferry horns, street vendors) were planned but **not
+   collected**; see Limitations.
 5. Augmentation: time shift, pitch/tempo, noise mixing at varied SNR, SpecAugment
 6. Distillation training against hard labels + BirdNET soft outputs, focal loss
 7. INT8 post-training quantisation, accuracy reported before and after
@@ -131,6 +138,49 @@ setup differs.
 9. **On-device verification set** — labelled windows and the PC's reference logits
    are compiled into the firmware, so the device proves its inference matches the
    PC. This catches every "works on my laptop, not on the board" bug.
+
+## The finished pipeline
+
+```
+Stage 0  energy + spectral flux gate      ~0 KB, always on
+Stage 1  bird / not-bird                  7,217 params,   20.9 KB
+Stage 2  178 species + "unknown"          209,107 params, 270 KB
+Stage 3  temporal voting + hysteresis     ~0 KB
+```
+
+Every stage exists to avoid paying for the next one. The gate costs nothing and
+rejects silence; the binary net costs 1.44 MMAC and rejects city noise before the
+270 KB species net is ever loaded with a window. On device, 8 of 8 verification
+windows are **bit-identical to the PC reference** — that check is compiled into
+the firmware on purpose, because it catches the entire class of "works on my
+laptop, not on the board" bugs.
+
+## Field test — Belgrad Forest, 31 August 2026
+
+The device was taken out of the lab and run in Belgrad Forest, north of Istanbul.
+It powered up, listened, and printed species names on its own screen for the
+whole outing. It correctly identified **Common Chaffinch, Hooded Crow, European
+Robin and woodpeckers**, all four inside the 178-species list. The Hooded Crow
+result is a good sign in particular: its closest relative, the Carrion Crow, was
+deliberately excluded when the list was built, so confusion between the two was
+unlikely by construction.
+
+**This was an observational test, not a measurement.** No serial log was kept, no
+parallel audio was recorded, and the device stores nothing itself. So there is no
+number here for agreement, false-alarm rate or misses, and none can be
+reconstructed after the fact. Seeing no wrong species means none were *observed*.
+The four correct calls rest on a judgement by ear — a signal worth measuring, not
+a claim of accuracy.
+
+The tooling to turn a repeat outing into numbers is in the repository:
+[`tools/saha_kayit.py`](tools/saha_kayit.py) timestamps every decision the device
+prints to its serial port against the wall clock, and
+[`tools/saha_karsilastir.py`](tools/saha_karsilastir.py) aligns that log against a
+BirdNET analysis of audio recorded in parallel, the two tied to a common time
+axis by a hand clap at each end of the walk. The protocol is
+[`docs/M8_SAHA_PROTOKOLU.md`](docs/M8_SAHA_PROTOKOLU.md) (Turkish). Notably this
+needed **no firmware change**: the results screen already prints every decision
+change to the serial port.
 
 ## Status
 
@@ -143,16 +193,34 @@ setup differs.
 | M4 — data pipeline, species list | ✅ |
 | M5 — model training + distillation + INT8 | ✅ |
 | M6 — TFLM integration, real-time inference on core 1 | ✅ |
-| M7 — post-processing, full UI, logging | in progress |
-| M8 — field calibration in Istanbul | |
+| M7 — post-processing, decision rule, full UI | ✅ |
+| M8 — field test in Belgrad Forest | ✅ observational |
 
-The device currently listens, recognises, and writes the species name on screen
-in real time.
+The device listens, gates, recognises, and writes the species name on its own
+screen in real time, with no network of any kind. **This is the final state of
+the project as built.** Three M7 sub-items were deliberately left undone and are
+listed under Limitations: SD-card logging, the real-time clock and the seasonal
+prior, and battery monitoring. None of them are on the recognition path.
 
 ## Honest limitations
 
-- Test-set accuracy is not field accuracy. Real city noise will lower it; M8 is
-  the field-calibration milestone.
+I would rather state these than have them found.
+
+- **Test-set accuracy is not field accuracy.** The one field outing was
+  observational, so the gap between the two is still unquantified. Real city
+  noise will widen it.
+- **The negative class is entirely ESC-50**, a foreign dataset of household and
+  street sounds. Istanbul's own noise — the call to prayer, ferry horns, street
+  vendors, local traffic — was planned and never recorded. This is the single
+  highest-value piece of remaining work, and it costs one morning with a phone.
+  ESC-50 is also CC BY-NC, which is what bars commercial use alongside BirdNET.
+- **Touch acceptance is about 60%.** Measured at the desk: fifteen deliberate
+  touches, nine registered. The field outing independently confirmed it. The
+  button strip ends near raw coordinate 368 while the threshold sits at 370,
+  leaving roughly two raw units of margin; the diagnostic that would settle it is
+  compiled into the firmware and has not been run.
+- **No SD logging, no clock, no battery gauge.** Detections exist only while they
+  are on screen. This is why field measurement needs a laptop.
 - Some species are near-indistinguishable (certain warblers, certain gulls). The
   plan is to merge these into species *groups* rather than give false precision.
 - The UI shows top-3 with confidence and says "not sure" below threshold. That is
@@ -166,8 +234,10 @@ boards/     Pico SDK board definition (no RP2350B header ships with the SDK)
 cmake/      Toolchain helpers
 src/        Device code — board_config.h, hal/, dsp/, ai/, ui/
 models/     Quantised INT8 models as C arrays + accuracy records
-tools/      PC side: data collection, training, conversion (Python)
+tools/      PC side: data collection, training, conversion, field logging (Python)
 test/       Host-side DSP unit tests
+docs/       Architecture plan and the M8 field-test protocol
+saha/       Field outing records (workbook + report)
 ```
 
 Source identifiers and comments are in Turkish. The Turkish README is kept at
