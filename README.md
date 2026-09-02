@@ -5,11 +5,11 @@ a rp2350 microcontroller with no internet connection. and it knows the 178 bird
 species that live and can be heard in istanbul
 
 ## What it does
-You press the button, hold it up, and it listens. When it is reasonably sure, the
-species name appears. When it isn't, it says so instead of guessing
+You press the button, hold it up, and it listens. If it is a bird sound, the possible
+species name appears
 
-## How it works
-I could not run BirdNET—which serves the same purpose—on this device, so I used it
+## Main problem
+I could not run BirdNET which serves the same purpose on this device, so I used it
 only as a reference; I narrowed the scope from approximately 6,000 species down to
 the 178 species found in my city(Istanbul/Turkey). By reducing the number of species,
 I was able to increase the training data used for each one, resulting in a system 
@@ -29,8 +29,8 @@ The second one decides which bird:
     top-1 70.40%, top-3 82.20% when 8 windows vote together
     270 KB
 
-Listening for eight seconds instead of three is worth twelve points, and it costs
-nothing extra in memory.
+Listening for 8 seconds instead of 3 seconds did not result in excessive 
+memory usage, so we increased the duration to improve accuracy.
 
 
 ## Hardware
@@ -55,7 +55,7 @@ I achieved a division of labor by assigning different tasks to two processor cor
 It was necessary to handle screen and audio capture on separate cores because the 
 screen was generating noise.
 
-### The memory trick
+### freeing up memory
 
 Audio comes every 3 seconds of it becomes one analysis window, Three seconds of
 raw audio is 144 KB. On a chip with 520 KB and no PSRAM, that is most of the memory
@@ -72,7 +72,7 @@ The screen is 172x640. A full RGB565 framebuffer would be 220 KB, over 40% of
 SRAM. LVGL is cheaper it runs in partial render mode over two small
 buffers, pushed out through a QSPI PIO driver I wrote by hand.
 
-### The recognition pyramid
+### The recognition
 
 Asking "is that a bird" is much cheaper than asking "which bird," so the algorithm
 asks the cheap question first.
@@ -84,7 +84,7 @@ asks the cheap question first.
 | 2. Species net | Which bird? | 6.6 MMAC, 270 KB |
 | 3. Voting | Am I sure enough to say it? | free |
 
-Each stage exists so the next one does not have to run. 
+Each stage exists to ensure the next one doesn't work in vain.
 
 ## How the model was trained
 
