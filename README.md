@@ -2,7 +2,7 @@
 
 A portable device that listens bird sounds and identifies their species. It runs on
 a rp2350 microcontroller with no internet connection. and it knows the 178 bird 
-species that live and can be heard in istanbul
+species that live and can be heard in Istanbul
 
 ## What it does
 You press the button, hold it up, and it listens. If it is a bird sound, the possible
@@ -29,17 +29,18 @@ The second one decides which bird:
     top-1 70.40%, top-3 82.20% when 8 windows vote together
     270 KB
 
-Listening for 8 seconds instead of 3 seconds did not result in excessive 
-memory usage, so we increased the duration to improve accuracy.
+Listening for 8 seconds instead of 3 seconds raises top-1 from 58% to 70% and costs no extra memory, so I use 8 seconds of listening duration.
 
 
 ## Hardware
-I used Waveshare [RP2350-Touch-LCD-3.49](https://www.waveshare.com/rp2350-touch-lcd-3.49.htm?srsltid=AfmBOopNxvXnEowwXBLtuLvmao28l89tuNQRQi_HE1xzq5fKwh1gDy0S) 
+I used Waveshare [RP2350-Touch-LCD-3.49](https://www.waveshare.com/rp2350-touch-lcd-3.49.htm) 
 module for this project since it has a Built-in LCD, Onboard ES8311 audio codec, Microphone and TF card slot.
 
 ## How it works
 
-I achieved a division of labor by assigning different tasks to two processor cores.
+I achieved a division of labor by assigning different tasks to two processor cores. 
+It was necessary to handle screen and audio capture on separate cores because the 
+screen was generating noise.
 
 ### Core 1 - Real time
 
@@ -47,13 +48,9 @@ I achieved a division of labor by assigning different tasks to two processor cor
                -> gate -> binary net -> species net -> voting
 
 
-### Core 2 - Not real tine
+### Core 2 - Not real time
 
     LVGL screen · touch · SD card · battery
-
-I achieved a division of labor by assigning different tasks to two processor cores. 
-It was necessary to handle screen and audio capture on separate cores because the 
-screen was generating noise.
 
 ### freeing up memory
 
@@ -77,7 +74,7 @@ buffers, pushed out through a QSPI PIO driver I wrote by hand.
 Asking "is that a bird" is much cheaper than asking "which bird," so the algorithm
 asks the cheap question first.
 
-| Stage | What it asks | Cost | Runs when |
+| Stage | What it asks | Cost |
 |---|---|---|---|
 | 0. Gate | Is anything happening? | free, plain DSP |
 | 1. Binary net | Is it a bird? | 1.44 MMAC, 20.9 KB |
@@ -93,13 +90,13 @@ All of this happens on my PC, in `tools/`. None of it ships to the device.
 The species list comes from eBird's Istanbul records, filtered down to species
 that have enough recordings to learn from. The recordings come from Xeno-canto.
 Xeno-canto files are mostly silence and background birds, so BirdNet is used to
-find which three second slices actually contain the target species,I used BirdNet's own
+find which three second slices actually contain the target species, I used BirdNet's own
 output and used as a teacher
 
 ## Field test
 
 I took it to Belgrad Forest, north of Istanbul, on 31 August 2026. I kept it on for the
-whole walk and It succesfully named Common Chaffinch, Hooded Crow, European Robin and
+whole walk and it succesfully named Common Chaffinch, Hooded Crow, European Robin and
 woodpeckers correctly
 
 ## Setup
@@ -112,8 +109,8 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 1. After That "pokebird.uf2" file in /build folder will be created
-2. To flash it, hold "boot" and "reset" button and release "reset" first, a drive
-3. will show up copy the file onto the drive and thats it
+2. To flash it, hold "boot" and "reset" button and release "reset" first,
+3.  a drive will show up copy the file onto the drive and thats it
 
 ## Licence
 
