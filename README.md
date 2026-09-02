@@ -6,7 +6,7 @@ species that live and can be heard in Istanbul
 
 ## What it does
 You press the button, hold it up, and it listens. If it is a bird sound, the possible
-species name appears
+species name appears. Here is a [demo](https://youtu.be/FgNcmsRgFls)
 
 ## Main problem
 I could not run BirdNET which serves the same purpose on this device, so I used it
