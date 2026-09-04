@@ -4,6 +4,8 @@ A portable device that listens bird sounds and identifies their species. It runs
 a rp2350 microcontroller with no internet connection. and it knows the 178 bird 
 species that live and can be heard in Istanbul
 
+I used AI for multiple parts of the project, but the ideas, architectural design, and choices that influenced the project's progress were all my own.
+
 ## What it does
 You press the button, hold it up, and it listens. If it is a bird sound, the possible
 species name appears. Here is a [demo](https://youtu.be/FgNcmsRgFls)
