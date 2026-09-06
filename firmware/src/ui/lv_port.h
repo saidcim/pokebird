@@ -1,13 +1,15 @@
 /**
- * lv_port.h — LVGL'i PokeBird donanımına bağlayan katman
+ * lv_port.h — the layer binding LVGL to PokeBird's hardware
  *
- * Ekran (QSPI panel) ve giriş (kapasitif dokunmatik) sürücülerini LVGL'e
- * tanıtır. Arayüz YATAY (640x172), panel DİKEY (172x640); aradaki 90°
- * çevrim flush sırasında yapılıyor — ayrıntı lv_port.c.
+ * Registers the display (QSPI panel) and input (capacitive touch) drivers
+ * with LVGL. The UI is LANDSCAPE (640x172) and the panel is PORTRAIT
+ * (172x640); the 90-degree rotation between them happens during flush — see
+ * lv_port.c for the details.
  *
- * Arayüz TAM GENİŞLİK (640) ve ekran beş DİKEY DİLİM hâlinde basılıyor;
- * gerekçesi ve ölçümleri lv_port.c'nin başında. Tam ekran framebuffer'ı
- * (220 KB) hâlâ SIĞMIYOR — dilim yolu onun yerine geçiyor ve daha ucuz.
+ * The UI is FULL WIDTH (640) and the screen is pushed as five VERTICAL
+ * SLICES; the reasoning and the measurements are at the top of lv_port.c. A
+ * full-screen framebuffer (220 KB) still does NOT FIT — the slice path
+ * replaces it and is cheaper.
  */
 #ifndef POKEBIRD_LV_PORT_H
 #define POKEBIRD_LV_PORT_H
@@ -16,82 +18,89 @@
 #include <stdint.h>
 
 /**
- * LVGL'i, ekranı ve dokunmatiği başlat.
+ * Start LVGL, the display and touch.
  *
- * Ekran donanımı (QSPI + panel) BU ÇAĞRIDAN ÖNCE başlatılmış olmalı.
- * @return dokunmatik yanıt veriyorsa true; false dönse de ekran çalışır.
+ * The display hardware (QSPI + panel) must already be initialised BEFORE this
+ * call.
+ * @return true if touch responds; the display works even when it returns
+ *         false.
  */
 bool pb_lv_init(void);
 
-/** LVGL'in zamanlayıcısını çevir. Ana döngüden düzenli çağrılmalı. */
+/** Turn LVGL's timer over. Must be called regularly from the main loop. */
 void pb_lv_tick(void);
 
-/* Flush sayaçları — panel sütun hizalaması gerçekten tutuyor mu (§9n).
- * Panel sütun aralığını 2 piksele yuvarlıyor; sütun sayısı tek olursa veri
- * her satırda bir piksel kayar ve yazı yatay sürüklenmiş görünür.
- * Göz gerektirmeyen ölçüm: `a` ve `u` çıkışında basılıyor. */
+/* Flush counters — does the panel's column alignment actually hold?
+ * The panel rounds a column range to 2 pixels; with an odd column count the
+ * data shifts by one pixel on every row and text looks horizontally smeared.
+ * A measurement that needs no eyes: printed when `a` and `u` exit. */
 extern uint32_t pb_lv_flush_count;
 extern uint32_t pb_lv_flush_unaligned;
 extern uint32_t pb_lv_flush_stride_differs;
 extern uint32_t pb_lv_flush_w_min, pb_lv_flush_w_max;
 extern int32_t  pb_lv_last_x1, pb_lv_last_x2, pb_lv_last_y1, pb_lv_last_y2;
 extern int32_t  pb_lv_last_stride_px, pb_lv_last_area_w;
-extern uint32_t pb_lv_slice_press;      /* panele basılan dilim sayısı */
+extern uint32_t pb_lv_slice_press;      /* slices pushed to the panel */
 void pb_lv_flush_counters_reset(void);
 
 /**
- * LVGL'in hangi dikey dilimleri çizdiğini bildir (bit d = dilim d, 128 px).
+ * Declare which vertical slices LVGL draws (bit d = slice d, 128 px).
  *
- * Spektrogram panele DOĞRUDAN yazıyor (62 Hz, kendi hızlı sütun yolu). Onun
- * bölgesini LVGL de basarsa ikisi birbirini siler. Ekranlar bu yüzden kendi
- * yerleşimlerine göre sahipliği bildiriyor: dinleme ekranı sağdaki iki dilimi
- * spektrograma bırakıyor, günlük ekranı beşini de kendi alıyor.
+ * The spectrogram writes to the panel DIRECTLY (62 Hz, its own fast column
+ * path). If LVGL also pushed that region the two would erase each other. So
+ * each screen declares ownership according to its own layout: the listening
+ * screen leaves the two right-hand slices to the spectrogram, and the log
+ * screen takes all five.
  */
-void pb_lv_set_slice_owner(uint32_t maske);
+void pb_lv_set_slice_owner(uint32_t mask);
 
-/** Bütün dilimleri kirlet — ekran değişiminde tam yeniden çizim için. */
+/** Dirty every slice — for a full redraw when switching screens. */
 void pb_lv_invalidate_all(void);
 
 /**
- * Ham dokunma noktasını ARAYÜZ koordinatlarında oku (0..639, 0..171).
+ * Read the raw touch point in UI coordinates (0..639, 0..171).
  *
- * Eşleme çalışan sürücüden alındı (rsvpnano axs15231b_touch.cpp); ayrıntı ve
- * eski koddaki kırpma hatası lv_port.c'de yazılı. Kaydırma algılayıcısı
- * (`kaydirma.c`) LVGL'in giriş katmanına değil doğrudan buna bakıyor:
- * dokunmatik hiç parmakla doğrulanmadığı için (§9b) ham veriyi seri porta
- * dökebilmek gerekiyor.
+ * The mapping was taken from a working driver (rsvpnano's
+ * axs15231b_touch.cpp); the details, and the clipping bug in the old code,
+ * are written up in lv_port.c. The swipe detector reads this directly rather
+ * than going through LVGL's input layer: because touch went unverified for so
+ * long, being able to dump the raw data to the serial console was essential.
  *
- * @return dokunma varsa true ve `ux`/`uy` yazılır; yoksa false.
+ * @return true if there is a touch, writing `ux`/`uy`; false otherwise.
  */
 bool pb_lv_touch_get(int32_t *ux, int32_t *uy);
 
-/** Panel dışına düşüp reddedilen dokunma karesi sayısı — kullanıcının
- *  gözlediği "~4000'e sıçrama" bunun içinde. Göz gerektirmeyen ölçüm. */
+/** Touch frames rejected for falling outside the panel — the observed "jump
+ *  to ~4000" is counted here. A measurement that needs no eyes. */
 extern uint32_t pb_lv_touch_invalidate;
 
 /**
- * Sonraki `adet` flush alanını seri porta ASCII olarak dök — GÖZ GEREKMEZ.
+ * Dump the next `count` flush areas to the serial console as ASCII — NO EYES
+ * NEEDED.
  *
- * Dökümü sürücünün OKUDUĞU indislemeyle üretiyor, yani hem LVGL'in çizimini
- * hem 90° devrik okumayı aynı anda sınıyor. Terminalde yazı düzgün
- * okunuyorsa bozulma daha aşağıda (panel/hat); okunmuyorsa LVGL tarafında.
+ * The dump is produced with the same indexing the driver READS with, so it
+ * exercises both LVGL's drawing and the 90-degree transposed read at once. If
+ * the text is legible in the terminal, the corruption is further down (panel
+ * or bus); if it is not, the problem is on the LVGL side.
  */
 void pb_lv_request_dump(int count);
 
 /**
- * Kart framebuffer'ının TAMAMINI seri porta ASCII dök — GÖZ GEREKMEZ.
+ * Dump the ENTIRE card framebuffer to the serial console as ASCII — NO EYES
+ * NEEDED.
  *
- * `pb_lv_request_dump` yalnızca tek bir flush ALANINI gösteriyor; bu, kartın o
- * anki tam hâlini gösteriyor. İkisinin farkı teşhiste belirleyici:
+ * `pb_lv_request_dump` shows a single flush AREA; this shows the card's full
+ * current state. The difference between the two is decisive in diagnosis:
  *
- *   döküm okunuyor  -> LVGL, yerleşim ve devrik yazım DOĞRU; bozulma panele
- *                      giden yolda (imleç, pencere, DMA) demektir
- *   döküm okunmuyor -> bozulma LVGL/yerleşim tarafında; panele hiç bakmadan
- *                      düzeltilebilir
+ *   dump is legible     -> LVGL, the layout and the transposed write are all
+ *                          CORRECT, so the corruption is on the path to the
+ *                          panel (cursor, window, DMA)
+ *   dump is illegible   -> the corruption is on the LVGL/layout side and can
+ *                          be fixed without looking at the panel at all
  *
- * Çıktı ARAYÜZ yöneliminde ve DİLİM DİLİM: LVGL'e ait her dilim için 172
- * satır x 128 sütun, soldan sağa ve yukarıdan aşağıya — yani ekrana bakınca
- * görülmesi gerekenle aynı düzen, beş parça hâlinde.
+ * The output is in UI orientation and SLICE BY SLICE: for each slice LVGL
+ * owns, 172 rows x 128 columns, left to right and top to bottom — the same
+ * arrangement you should see looking at the screen, in five pieces.
  */
 void pb_lv_dump_card_fb(void);
 

@@ -16,66 +16,73 @@ static lv_obj_t *s_screen[PB_SCREEN_COUNT];
 static int       s_active = PB_SCREEN_LISTEN;
 static bool      s_built;
 
-/* Günlük satırlarının ("3 dk önce") ve sayaçların tazelenme sıklığı. */
+/* How often the log rows ("3 min ago") and the counters are refreshed. */
 #define REFRESH_MS 1000
 static uint32_t s_last_refresh;
 
-/* Son görünüm — günlük ekranının sayaç satırı buradan besleniyor. */
+/* The last view — the log screen's counter row is fed from here. */
 static uint32_t s_frame_rate, s_inference, s_overrun;
 
-/* Günlüğe aynı türü tekrar tekrar yazmamak için. */
+/* Stops the same species being written to the log over and over. */
 static char s_last_log_name[48];
 
-/* ── Kaydırma algılayıcısı ────────────────────────────────────────────────
+/* ── Swipe detection ──────────────────────────────────────────────────────
  *
- * NEDEN LVGL'İN KENDİ HAREKET ALGILAMASI DEĞİL: çalışmadığında NEDEN
- * çalışmadığını ekrana bakmadan görebilmek gerekiyor. Algılama ham noktanın
- * üstünde duruyor ve her aşaması ayrı sayaçla ölçülüyor.
+ * WHY NOT LVGL'S OWN GESTURE DETECTION: when it does not work, we need to see
+ * WHY without looking at the screen. This detector sits directly on the raw
+ * point and every stage of it is counted separately.
  *
- * ⚠ HAM EKSENDE ÖLÇÜLÜYOR, TÜRETİLMİŞ PİKSELDE DEĞİL — ve bu ölçüme dayalı
- * bir karar. `t` kalibrasyonu (kullanıcı, dört kenar, ortanca):
+ * IT IS MEASURED ON THE RAW AXIS, NOT IN DERIVED PIXELS — and that is a
+ * measurement-driven decision. The `t` calibration (by hand, four edges,
+ * median):
  *
- *     SOL -> SAG (yatay):   ham_x 432 -> 3     degisim -429
- *     ALT -> UST (dikey):   ham_x 560 -> 449   degisim -111
- *                           ham_y 107 -> 93    degisim  -14
+ *     LEFT -> RIGHT (horizontal):  raw_x 432 -> 3     change -429
+ *     BOTTOM -> TOP (vertical):    raw_x 560 -> 449   change -111
+ *                                  raw_y 107 -> 93    change  -14
  *
- * Buradan çıkan üç şey:
- *   1. Yatay eksen ham_x ve SOLDAN SAĞA AZALIYOR.
- *   2. ham_y kullanılamaz: ekranın tamamı boyunca yalnızca 14 birim
- *      değişiyor (kasanın çıkıntısı üst/alt kenara dokunmayı engelliyor
- *      olmalı). Bu yüzden DİKEY ORAN KISITI KALDIRILDI — güvenilmeyen bir
- *      sayıyla bölmek, elemekten daha kötü.
- *   3. Asıl hata buydu: dikey kaydırmada ham_x 111 birim kayıyor ve eski
- *      eşik 90'dı, yani dikey hareket yatay kaydırma sayılıyordu.
+ * Three things follow:
+ *   1. The horizontal axis is raw_x, and it DECREASES from left to right.
+ *   2. raw_y is unusable: it moves by only 14 units across the whole screen
+ *      (the case lip presumably blocks touches near the top and bottom
+ *      edges). So the VERTICAL RATIO CONSTRAINT WAS REMOVED — dividing by a
+ *      number you do not trust is worse than dropping it.
+ *   3. This was the actual bug: a vertical swipe moves raw_x by 111 units and
+ *      the old threshold was 90, so vertical movement counted as a horizontal
+ *      swipe.
  *
- * Eşik ikisinin ARASINA konuldu: kazara kayma 111, bilinçli kaydırma ~429.
- * 200 ikisinden de rahat uzakta.
+ * The threshold now sits BETWEEN the two: accidental drift is 111, a
+ * deliberate swipe about 429. 200 is comfortably clear of both.
  *
- * Ham->piksel ölçeği KALİBRE EDİLMEDİ (sol kenar 432 okuyor, 639 değil) ama
- * gerekmiyor: ekranda dokunulacak bir şey yok, yalnızca kaydırma var.       */
+ * The raw->pixel scale is NOT calibrated (the left edge reads 432, not 639),
+ * and it does not need to be: there is nothing on screen to touch, only the
+ * swipe. */
 #define SWIPE_THRESHOLD_RAW  200
 #define SWIPE_MAX_MS  1200
-#define PARMAK_BIRAKMA_MS    80    /* bu kadar okumasız kalınca "kalktı"    */
+#define FINGER_RELEASE_MS    80    /* this long without a read = lifted     */
 
-/* Uzun eksenin makul üst sınırı. Çip ara sıra ~4000 veriyor (12 bit, panel
- * dışı); o kareler düşürülüyor. Ölçülen en büyük gerçek değer 560. */
+/* A sane upper bound for the long axis. The chip occasionally returns ~4000
+ * (12-bit, off-panel); those frames are dropped. The largest real value
+ * measured is 560. */
 #define RAW_MAX          1000
 
-/* ── Kayıt butonu — dokunuşun YATAY yeri yeterli ──────────────────────────
+/* ── The record button — the HORIZONTAL position of a touch is enough ─────
  *
- * Buton ekranın sol 96 pikselinde ve TAM YÜKSEKLİKTE (ekran_dinleme.c'deki
- * gerekçe: kalibrasyon kısa ekseni kullanılamaz gösterdi, bir dokunuşun
- * dikey yerini bilemiyoruz). Dolayısıyla vuruş testi tek boyutlu.
+ * The button occupies the left 96 pixels of the screen at FULL HEIGHT (the
+ * reasoning is in screen_listen.c: calibration showed the short axis to be
+ * unusable, so we cannot know the vertical position of a touch). The hit test
+ * is therefore one-dimensional.
  *
- * Kalibrasyon: sol kenar ham_x ~432, sağ kenar ~3, yani 640 piksel ~429 ham
- * birim (piksel başına ~0,67). Buton ui_x 0..95 -> ham_x 432..~368.
- * Eşik 370 seçildi; içerik 96'dan başlıyor ve ilk pikselleri zaten boşluk,
- * yani sınırın birkaç piksel kayması bir şeyi bozmuyor.
+ * Calibration: the left edge reads raw_x ~432 and the right edge ~3, so 640
+ * pixels span ~429 raw units (about 0.67 per pixel). The button, ui_x 0..95,
+ * maps to raw_x 432..~368. The threshold was set at 370; the content starts
+ * at 96 and its first pixels are padding anyway, so the boundary shifting by
+ * a few pixels breaks nothing.
  *
- * ⚠ Ölçek KABA. Ekrana ikinci bir dokunmatik hedef eklenirse bu yetmez;
- * önce ham->piksel eşlemesi düzgün kalibre edilmeli. */
+ * WARNING: this scale is COARSE. It will not do if a second touch target is
+ * ever added to the screen; the raw->pixel mapping would need calibrating
+ * properly first. */
 #define BUTTON_RAW_THRESHOLD     370
-#define PRESS_MAX_MS     800     /* bundan uzun basış "basma" sayılmıyor */
+#define PRESS_MAX_MS     800     /* a press longer than this does not count */
 
 uint32_t pb_swipe_touch;
 uint32_t pb_swipe_begin;
@@ -85,20 +92,20 @@ uint32_t pb_button_press;
 int32_t  pb_swipe_last_dx;
 int32_t  pb_swipe_last_dy;
 
-/* Cihaz artık SÜREKLİ DİNLEMİYOR — kullanıcının kararı. Dinlemeyi kayıt
- * butonu başlatıyor; açılışta kapalı. */
+/* The device does NOT listen continuously. The record button starts
+ * listening; it is off at boot. */
 static bool s_recording;
 
 static bool     s_pressed;
 static int32_t  s_head_raw, s_last_raw;
 static uint32_t s_head_ms, s_last_touch_ms;
-static bool     s_bu_touch_swiped;
+static bool     s_swiped_this_touch;
 
-/** Kaydırmayı uygula. `d` ham eksendeki değişim.
+/** Apply a swipe. `d` is the change along the raw axis.
  *
- * ham_x soldan sağa AZALDIĞI için (kalibrasyon), sağdan sola kaydırma —
- * yani sayfa çevirme yönü, "sonraki ekran" — ham_x'i ARTIRIYOR. */
-static void kaydirmayi_uygula(int32_t d)
+ * Because raw_x DECREASES from left to right (see the calibration), swiping
+ * right to left — the page-turn direction, "next screen" — INCREASES raw_x. */
+static void apply_swipe(int32_t d)
 {
     pb_swipe_accept++;
     pb_ui_set_screen(d > 0 ? s_active + 1 : s_active - 1);
@@ -109,62 +116,64 @@ static void swipe_finish(uint32_t now)
     if (!s_pressed) return;
     s_pressed = false;
 
-    if (s_bu_touch_swiped) return;
+    if (s_swiped_this_touch) return;
 
     const int32_t d = s_last_raw - s_head_raw;
     pb_swipe_last_dx = d;
 
-    const int32_t name = d < 0 ? -d : d;
-    const uint32_t time = now - s_head_ms;
+    const int32_t dist = d < 0 ? -d : d;
+    const uint32_t held = now - s_head_ms;
 
-    /* Kaydırma mı, butona basma mı? Parmak fazla gezmediyse ve dokunuş
-     * butonun şeridinde başladıysa BASMA. Kaydırma testinden ÖNCE bakılıyor
-     * çünkü eşiği aşmayan her dokunuş zaten kaydırma değil. */
-    if (name < SWIPE_THRESHOLD_RAW) {
+    /* Swipe or button press? If the finger barely moved and the touch began
+     * inside the button's strip, it is a PRESS. This is checked BEFORE the
+     * swipe test, because any touch that fails the threshold is not a swipe
+     * anyway. */
+    if (dist < SWIPE_THRESHOLD_RAW) {
         if (s_active == PB_SCREEN_LISTEN && s_head_raw >= BUTTON_RAW_THRESHOLD &&
-            time <= PRESS_MAX_MS) {
+            held <= PRESS_MAX_MS) {
             pb_button_press++;
-            printf("  [buton] KABUL  bas_ham=%ld ad=%ld sure=%lums\n",
-                   (long)s_head_raw, (long)name, (unsigned long)time);
+            printf("  [button] ACCEPT start_raw=%ld dist=%ld held=%lums\n",
+                   (long)s_head_raw, (long)dist, (unsigned long)held);
             pb_ui_set_recording(!s_recording);
         } else {
             pb_swipe_short++;
-            /* Teşhis (§9s buton güvenilirliği ölçümü): reddedilen her
-             * dokunuşun ham başlangıç değerini yazdır. Eşik (370) ile
-             * butonun geometrik sağ kenarı (~368) arasında pay yalnızca
-             * ~2 ham birim; bu satır o payın gerçekten yetersiz mi yoksa
-             * başka bir sebep mi (süre, ekran) olduğunu ayırt ediyor. */
-            printf("  [buton] RED    bas_ham=%ld ad=%ld sure=%lums ekran=%d "
-                   "(esik ham>=%d, sure<=%dms)\n",
-                   (long)s_head_raw, (long)name, (unsigned long)time, s_active,
+            /* Diagnostic for the button-reliability measurement: print the
+             * raw start value of every rejected touch. The margin between the
+             * threshold (370) and the button's geometric right edge (~368) is
+             * only about 2 raw units; this line separates "the margin really
+             * is too tight" from some other cause (duration, wrong screen). */
+            printf("  [button] REJECT start_raw=%ld dist=%ld held=%lums screen=%d "
+                   "(needs raw>=%d, held<=%dms)\n",
+                   (long)s_head_raw, (long)dist, (unsigned long)held, s_active,
                    BUTTON_RAW_THRESHOLD, PRESS_MAX_MS);
         }
         return;
     }
 
-    if (time > SWIPE_MAX_MS) { pb_swipe_short++; return; }
+    if (held > SWIPE_MAX_MS) { pb_swipe_short++; return; }
 
-    kaydirmayi_uygula(d);
+    apply_swipe(d);
 }
 
-static void swipe_yokla(void)
+static void poll_swipe(void)
 {
     const uint32_t now = to_ms_since_boot(get_absolute_time());
 
-    /* Ham noktayı doğrudan okuyoruz: eşik ham eksende ölçüldü (yukarıdaki
-     * kalibrasyon) ve ham->piksel ölçeği kalibre edilmiş değil. */
+    /* We read the raw point directly: the threshold was measured on the raw
+     * axis (see the calibration above) and the raw->pixel scale is not
+     * calibrated. */
     pb_touch_state_t st = pb_touch_read();
     const bool valid = st.ok && st.fingers > 0 && st.p.raw_x < RAW_MAX;
 
     if (valid) {
         const int32_t raw = (int32_t)st.p.raw_x;
         pb_swipe_touch++;
-        pb_swipe_last_dy = (int32_t)st.p.raw_y;   /* teşhis için ham kısa eksen */
+        pb_swipe_last_dy = (int32_t)st.p.raw_y;   /* raw short axis, for diagnostics */
         s_last_touch_ms = now;
 
         if (!s_pressed) {
             s_pressed = true;
-            s_bu_touch_swiped = false;
+            s_swiped_this_touch = false;
             s_head_raw = s_last_raw = raw;
             s_head_ms = now;
             pb_swipe_begin++;
@@ -173,24 +182,24 @@ static void swipe_yokla(void)
 
         s_last_raw = raw;
 
-        /* Parmak henüz kalkmadan eşiği aştıysa hemen geç: kullanıcı
-         * parmağını kaldırana kadar beklemek "tepki vermiyor" hissi veriyor. */
-        if (!s_bu_touch_swiped) {
+        /* If the threshold is crossed before the finger lifts, switch
+         * immediately: waiting for the lift feels unresponsive. */
+        if (!s_swiped_this_touch) {
             const int32_t d = s_last_raw - s_head_raw;
-            const int32_t name = d < 0 ? -d : d;
-            if (name >= SWIPE_THRESHOLD_RAW && now - s_head_ms <= SWIPE_MAX_MS) {
+            const int32_t dist = d < 0 ? -d : d;
+            if (dist >= SWIPE_THRESHOLD_RAW && now - s_head_ms <= SWIPE_MAX_MS) {
                 pb_swipe_last_dx = d;
-                s_bu_touch_swiped = true;
-                kaydirmayi_uygula(d);
+                s_swiped_this_touch = true;
+                apply_swipe(d);
             }
         }
         return;
     }
 
-    /* Okuma yok (ya da panel dışı kare). Dokunmatik ara ara kare düşürüyor;
-     * hemen "kalktı" demeden kısa bir pencere bekleniyor, yoksa tek kayıp
-     * kare kaydırmayı böler. */
-    if (s_pressed && (now - s_last_touch_ms) > PARMAK_BIRAKMA_MS) {
+    /* No reading (or an off-panel frame). The touch controller drops the odd
+     * frame, so rather than declaring a lift immediately we wait a short
+     * window; otherwise a single lost frame would cut a swipe in half. */
+    if (s_pressed && (now - s_last_touch_ms) > FINGER_RELEASE_MS) {
         swipe_finish(now);
     }
 }
@@ -208,7 +217,7 @@ void pb_ui_create(void)
     pb_lv_set_slice_owner(PB_LVGL_SLICE_MASK_LISTEN);
     pb_lv_invalidate_all();
 
-    /* Açılışta BOŞTA — cihaz sürekli dinlemiyor. */
+    /* IDLE at boot — the device does not listen continuously. */
     s_recording = false;
     pb_screen_listen_set_recording(false);
 
@@ -225,8 +234,9 @@ void pb_ui_set_recording(bool recording)
     s_recording = recording;
     pb_screen_listen_set_recording(recording);
 
-    /* Kayıt durdurulunca şerit olduğu gibi kalıyor (son duyulanın kaydı) ama
-     * yeni kayıtta karışmasın diye başlarken temizleniyor. */
+    /* When recording stops the strip is left as it is (a record of what was
+     * last heard), but it is cleared when starting so a new recording is not
+     * confused with the old one. */
     if (recording && s_active == PB_SCREEN_LISTEN) pb_spec_init();
 }
 
@@ -238,21 +248,22 @@ void pb_ui_set_screen(int screen)
 
     s_active = screen;
 
-    /* ⚠ GEÇİŞ ANİMASYONU YOK — bilerek. `lv_screen_load_anim` her karede tüm
-     * ekranı geçersizleştirir; bizde bir kare, sahip olunan her dilimin
-     * panele yeniden basılması (dilim başına 44 KB QSPI) demek. 60 Hz'de
-     * imkânsız, 10 Hz'de de takılarak akan bir animasyon anlık geçişten
-     * kötü görünürdü. */
+    /* NO TRANSITION ANIMATION, deliberately. `lv_screen_load_anim`
+     * invalidates the whole screen every frame, and for us one frame means
+     * re-pushing every owned slice to the panel (44 KB of QSPI per slice).
+     * That is impossible at 60 Hz, and a stuttering animation at 10 Hz would
+     * look worse than an instant switch. */
     lv_screen_load(s_screen[s_active]);
 
     if (s_active == PB_SCREEN_LOG) {
-        /* Günlük tam genişlik: sağdaki iki dilim de LVGL'in oluyor. */
+        /* The log is full width: the two right-hand slices become LVGL's. */
         pb_lv_set_slice_owner(PB_LVGL_SLICE_MASK_ALL);
         pb_screen_log_refresh(s_frame_rate, s_inference, s_overrun);
     } else {
         pb_lv_set_slice_owner(PB_LVGL_SLICE_MASK_LISTEN);
-        /* Spektrogram bölgesini günlük ekranı boyamıştı; şeridi sıfırla ki
-         * altında eski yazı kalmasın. Sütunlar akmaya devam edip dolduracak. */
+        /* The log screen painted over the spectrogram region; reset the
+         * strip so no old text shows through. The columns will scroll back in
+         * and fill it. */
         pb_spec_init();
     }
 
@@ -269,26 +280,27 @@ void pb_ui_log_add(const char *name, const char *latin, float confidence)
     pb_screen_log_add(name, latin, confidence);
 }
 
-void pb_ui_update(const pb_result_view_t *g)
+void pb_ui_update(const pb_result_view_t *view)
 {
-    if (!g || !s_built) return;
+    if (!view || !s_built) return;
 
-    s_frame_rate = g->frame_rate;
-    s_inference  = g->inference;
-    s_overrun  = g->overrun;
+    s_frame_rate = view->frame_rate;
+    s_inference  = view->inference;
+    s_overrun    = view->overrun;
 
-    pb_screen_listen_update(g);
+    pb_screen_listen_update(view);
 
-    /* Karar "TANINDI" dediğinde günlüğe yaz — ama yalnızca tür DEĞİŞTİYSE.
-     * Karar kuralı bir türü PB_DECISION_HOLD_MS (5 s) boyunca ekranda tutuyor ve
-     * bu fonksiyon 4 Hz çağrılıyor, yani aynı tespit ~20 kez düşüyor.
-     * `ekran_gunluk` aynı türü üst üste görünce zaten yeni satır açmıyor;
-     * buradaki kontrol o çağrıyı hiç yapmamak için. Kip TUR'dan çıkınca
-     * sıfırlanıyor ki aynı tür ikinci kez duyulduğunda yeniden yazılsın. */
-    if (g->mode == PB_DECISION_SPECIES && g->species_name) {
-        if (strncmp(s_last_log_name, g->species_name, sizeof(s_last_log_name) - 1) != 0) {
-            snprintf(s_last_log_name, sizeof(s_last_log_name), "%s", g->species_name);
-            pb_screen_log_add(g->species_name, g->top3_latin[0], g->confidence);
+    /* Write to the log when the decision says IDENTIFIED — but only if the
+     * species CHANGED. The decision rule holds a species on screen for
+     * PB_DECISION_HOLD_MS (5 s) and this function is called at 4 Hz, so the
+     * same detection arrives about 20 times. screen_log already refuses to
+     * open a new row for a repeated species; this check is here to avoid
+     * making the call at all. It resets when the mode leaves SPECIES, so the
+     * same species is logged again if it is heard a second time. */
+    if (view->mode == PB_DECISION_SPECIES && view->species_name) {
+        if (strncmp(s_last_log_name, view->species_name, sizeof(s_last_log_name) - 1) != 0) {
+            snprintf(s_last_log_name, sizeof(s_last_log_name), "%s", view->species_name);
+            pb_screen_log_add(view->species_name, view->top3_latin[0], view->confidence);
         }
     } else {
         s_last_log_name[0] = '\0';
@@ -299,7 +311,7 @@ void pb_ui_tick(void)
 {
     if (!s_built) { pb_lv_tick(); return; }
 
-    swipe_yokla();
+    poll_swipe();
 
     const uint32_t now = to_ms_since_boot(get_absolute_time());
     if (s_active == PB_SCREEN_LOG && (now - s_last_refresh) >= REFRESH_MS) {
