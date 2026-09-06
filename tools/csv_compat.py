@@ -63,14 +63,28 @@ def rename(fieldnames):
     return [LEGACY.get(h, h) for h in (fieldnames or [])]
 
 
+# legacy value -> current value, for the `split` column. Unlike the headers
+# above these are DATA, so they cannot be fixed by renaming a field; `reader()`
+# rewrites them as it reads.
+LEGACY_SPLIT = {
+    "egitim": "train",
+    "dogrulama": "val",
+    "test": "test",
+}
+
+
 def reader(f):
     """csv.DictReader that accepts either naming.
 
     Pass an already-open text file, exactly as you would to csv.DictReader.
+    Legacy `split` values are normalised to train/val/test on the way out.
     """
     inner = csv.DictReader(f)
     inner.fieldnames = rename(inner.fieldnames)
-    return inner
+    for row in inner:
+        if "split" in row:
+            row["split"] = LEGACY_SPLIT.get(row["split"], row["split"])
+        yield row
 
 
 def rows(path, encoding="utf-8"):
@@ -81,10 +95,10 @@ def rows(path, encoding="utf-8"):
 
 # ── Generated artifact names ──────────────────────────────────────────────
 #
-# The pipeline's generated files were named in Turkish. They now have English
-# names, but an existing data/ or models/ directory from an earlier run still
-# holds the old ones, so `resolve()` falls back to the legacy name when the
-# current one is absent. Writers always use the current name.
+# The pipeline's generated files and directories were named in Turkish. They
+# now have English names, but an existing data/ or models/ directory from an
+# earlier run still holds the old ones, so `resolve()` falls back to the legacy
+# name when the current one is absent. Writers always use the current name.
 
 import os as _os
 
@@ -102,6 +116,11 @@ LEGACY_FILES = {
     "binary_net_int8.tflite": "ikili_agi_int8.tflite",
     "species_net.keras": "tur_agi.keras",
     "binary_net.keras": "ikili_agi.keras",
+    # directories, resolved the same way
+    "dataset": "egitim",
+    "negative": "negatif",
+    "birdnet_result": "birdnet_sonuc",
+    "segment_samples": "segment_ornek",
 }
 
 

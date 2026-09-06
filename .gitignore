@@ -45,29 +45,39 @@ data/convert.log
 
 # BirdNET segmentation stage.
 # .venv-birdnet: a Python 3.11 virtualenv plus a 260 MB model checkpoint.
-# birdnet_sonuc/: one CSV per recording, 7,111 files.
-# segmentler.csv and birdnet_slist.txt are regenerable outputs.
+# birdnet_result/: one CSV per recording, 7,111 files.
+# segments.csv and birdnet_slist.txt are regenerable outputs.
+# The Turkish names next to them are what an older run produced; the tools
+# still read those, so they are ignored too.
 .venv-birdnet/
+data/birdnet_result/
 data/birdnet_sonuc/
 data/birdnet_log/
+data/segments.csv
 data/segmentler.csv
 data/birdnet_slist.txt
+data/segment_samples/
 data/segment_ornek/
 
 # Training set — all regenerable output.
-# egitim/: 62k windows, 739 MB (pencereler.npy)
-# negatif/: ESC-50 (879 MB zip + 1,840 converted clips)
+# dataset/: 62k windows, 739 MB (windows.npy)
+# negative/: ESC-50 (879 MB zip + 1,840 converted clips)
+data/dataset/
 data/egitim/
+data/negative/
 data/negatif/
 
 # Training outputs.
-# tur_agi_int8.h, ikili_agi_int8.h and the .txt reports ARE committed: the
-# firmware compiles the headers in, and the reports are the record.
+# species_net_int8.h, binary_net_int8.h and the .txt reports ARE committed:
+# the firmware compiles the headers in, and the reports are the record.
 # The .keras files are regenerated on every run and are large;
-# ilerleme.html is a scratch dashboard.
+# progress.html is a scratch dashboard.
 models/*.keras
+models/progress.html
 models/ilerleme.html
+models/test_probs.npy
 models/test_olasilik.npy
+tools/training_dashboard.html
 tools/egitim_pano.html
 
 # UI preview (host) — build output and the images it renders

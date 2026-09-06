@@ -1,30 +1,30 @@
-ZAMANSAL BIRLESTIRME — kac ardisik pencere oylanirsa ne oluyor
-(secim yok, olcum test kumesinde; ust sinir tahmini, bkz. betik basligi)
+TEMPORAL VOTING — what happens as more consecutive windows vote
+(no selection; measured on the test set. An upper bound — see the header of this script)
 
- pencere   ornek    top-1     top-3
-       1    6267   %58.07   %74.82
-       2    2872   %64.21   %79.63
-       3    2184   %67.58   %81.18
-       5    1654   %69.29   %81.98
-       8    1365   %70.40   %82.20
-      12    1228   %69.71   %82.33
+ windows  samples    top-1     top-3
+       1     6267   58.07%   74.82%
+       2     2872   64.21%   79.63%
+       3     2184   67.58%   81.18%
+       5     1654   69.29%   81.98%
+       8     1365   70.40%   82.20%
+      12     1228   69.71%   82.33%
 
-negatifi kus sanma orani (pencere basina): %8.37
-kusu negatif sanma orani  (pencere basina): %1.40
+negative mistaken for a bird (per window): 8.37%
+bird mistaken for negative   (per window): 1.40%
 
-En cok karisan 15 cift (pencere basina, test):
-  Serçe                      -> Ağaç Serçesi                 20
-  Büyük Baştankara           -> Ağaç İncirkuşu               15
-  İbibik                     -> Guguk                        15
-  Kayın Baştankarası         -> Ağaç İncirkuşu               15
-  Dağ İspinozu               -> Halkalı Sinekkapan           14
-  Çalıkuşu                   -> Sürmeli Çalıkuşu             13
-  Bahçe Tırmaşıkkuşu         -> Yalıçapkını                  12
-  Turna                      -> Ötücü Kuğu                   11
-  Ev Kırlangıcı              -> Ağaç Serçesi                 11
-  Boz Ötleğen                -> Bülbül                       11
-  Benekli Sinekkapan         -> Küçük Sinekkapan             11
-  Saka                       -> Çayır Taşkuşu                10
-  Ökse Ardıcı                -> Mavi Baştankara              10
-  Benekli Bülbül             -> Bülbül                       10
-  Sutavuğu                   -> Sakarmeke                     9
+The 15 most confused pairs (per window, test set):
+  House Sparrow              -> Eurasian Tree Sparrow        20
+  Great Tit                  -> Tree Pipit                   15
+  Common Hoopoe              -> Common Cuckoo                15
+  Marsh Tit                  -> Tree Pipit                   15
+  Brambling                  -> Collared Flycatcher          14
+  Goldcrest                  -> Common Firecrest             13
+  Short-toed Treecreeper     -> Common Kingfisher            12
+  Common Crane               -> Whooper Swan                 11
+  Western House-Martin       -> Eurasian Tree Sparrow        11
+  Garden Warbler             -> Common Nightingale           11
+  Spotted Flycatcher         -> Red-breasted Flycatcher      11
+  European Goldfinch         -> Whinchat                     10
+  Mistle Thrush              -> Eurasian Blue Tit            10
+  Thrush Nightingale         -> Common Nightingale           10
+  Eurasian Moorhen           -> Eurasian Coot                 9

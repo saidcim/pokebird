@@ -1,54 +1,58 @@
 #!/usr/bin/env python3
 """
-ikili_egit.py — Asama-1 ikili ag (kus var/yok): egitim + INT8 nicelestirme. (M7)
+train_binary.py — stage-1 binary net (bird / no bird): training + INT8
+quantisation.
 
-    .venv-birdnet\\Scripts\\python -u tools/train_binary.py --duman     # once bu
+    .venv-birdnet\\Scripts\\python -u tools/train_binary.py --smoke   # this first
     .venv-birdnet\\Scripts\\python -u tools/train_binary.py
 
-Girdi : data/egitim/  (tools/build_dataset.py ciktisi — tur agiyla AYNI veri)
-Cikti : models/ikili_agi.keras
-        models/ikili_agi_int8.tflite
+Input : data/dataset/  (the output of tools/build_dataset.py — the SAME data
+        the species net uses)
+Output: models/binary_net.keras
+        models/binary_net_int8.tflite
         models/binary_net_int8.h
         models/binary_net_report.txt
 
 ==========================================================================
-NEDEN AYRI VERI KUMESI YOK
+WHY THERE IS NO SEPARATE DATA SET
 ==========================================================================
-data/egitim/etiket.npy zaten 179 sinifli: 0..177 kus turleri, 178 =
-"__negatif__" (ESC-50, kus siniflari cikarilmis — §9j). Asama-1'in ihtiyaci
-olan tek sey bu etiketin ikiliye indirgenmesi: sinif != 178 -> KUS (1),
-sinif == 178 -> DEGIL (0). Ayni pencereler.npy (64x187 int8 mel) GIRDI
-olarak kullaniliyor, cihazdaki pb_mel_window() ciktisiyla ayni sozlesme.
+data/dataset/labels.npy already has 179 classes: 0..177 are bird species and
+178 is "__negative__" (ESC-50 with the bird classes removed). All stage 1
+needs is that label reduced to a binary one: class != 178 -> BIRD (1),
+class == 178 -> NOT (0). The same windows.npy (64x187 int8 mel) is used as
+the INPUT, under the same contract as the device's pb_mel_window() output.
 
-BULASIK PENCERELER (en_iyi_tur != hedef) tur agi icin sorunluydu (yanlis
-sert etiket) ama BURADA SORUN DEGIL: bulasik bir pencere hala KUS SESI,
-sadece BirdNET'in en iyi tahmini farkli bir tur. Asama-1 "kus mu degil mi"
-sorusuna bakiyor, TUR'e degil — o yuzden bulasik pencereler de tam agirlikla
-egitime giriyor (tur agindaki gibi disari birakilmiyor).
+CONTAMINATED WINDOWS (best_species != target) were a problem for the species
+net (a wrong hard label) but they are NOT a problem HERE: a contaminated
+window is still BIRD SONG, it is only that BirdNET's best guess is a
+different species. Stage 1 asks "bird or not", not WHICH — so contaminated
+windows go into training at full weight (they are not dropped the way the
+species net drops them).
 
-OGRETMEN SINYALI (ogretmen.npy, BirdNET sigmoid) KULLANILMIYOR: o dagilim
-TUR bazinda, ikili soruya dogrudan tasinmiyor (bir turun BirdNET skoru
-dusuk olabilir ama yine de KUS'tur). Duz agirlikli BCE yeterli.
-
-==========================================================================
-SINIF DENGESIZLIGI — OLCULDU
-==========================================================================
-57.622 kus penceresi / 3.489 negatif = 16,5:1. Kayip fonksiyonu negatif
-sinifi bu oranla agirlikliyor (pos_agirlik = kus/negatif, --agirlik ile
-degistirilebilir).
+THE TEACHER SIGNAL (teacher.npy, the BirdNET sigmoid) IS NOT USED: that
+distribution is per SPECIES and does not carry over to the binary question
+(a species can have a low BirdNET score and still be a BIRD). A plain
+weighted BCE is enough.
 
 ==========================================================================
-ESIK SECIMI — kacirma (false negative) pahali, gecirme (false positive) ucuz
+CLASS IMBALANCE — MEASURED
 ==========================================================================
-Asama-1 "degil" derse Asama-2 (tur agi) hic calismiyor — yanlis "degil"
-GERCEK BIR KUS TESPITINI SESSIZCE KAYBEDER. "kus" derse ve yanlissa,
-bedel yalnizca bosa harcanan bir Asama-2 cikarimi (Asama-2'nin kendi
-negatif sinifi zaten var, o da "bilinmiyor" der). Bu yuzden varsayilan
-karar esigi 0.5 DEGIL — tools/ikili_esik_olc.py ile olculup rapora yazilir.
+57,622 bird windows / 3,489 negatives = 16.5:1. The loss function weights the
+negative class by that ratio (pos_weight = birds/negatives, changeable with
+--weight).
+
+==========================================================================
+THRESHOLD CHOICE — a miss (false negative) is expensive, a pass-through
+(false positive) is cheap
+==========================================================================
+If stage 1 says "not", stage 2 (the species net) never runs — so a wrong
+"not" SILENTLY LOSES A REAL BIRD DETECTION. If it says "bird" and is wrong,
+the cost is only a wasted stage-2 inference (stage 2 has a negative class of
+its own and will say "unknown"). That is why the default decision threshold
+is NOT 0.5 — it is measured and written into the report.
 """
 
 import argparse
-import csv
 import os
 import sys
 import time
@@ -63,32 +67,32 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRAIN = os.path.join(ROOT, "data", "egitim")
+TRAIN = csv_compat.resolve(os.path.join(ROOT, "data", "dataset"))
 MODELS = os.path.join(ROOT, "models")
 
 FRAMES, BANDS = 187, 64
 SIGMA_SCALE = 4.0 / 127.0
 NEGATIVE_CLS = 178
-MAC_BUDGET = 5_000_000       # tur aginin 30M'inin cok altinda — sik calisacak
-SIZE_BUDGET = 15 * 1024     # ARCHITECTURE §4
+MAC_BUDGET = 5_000_000       # far below the species net's 30M - it runs often
+SIZE_BUDGET = 15 * 1024
 
 
-def data_yukle():
+def load_data():
     X = np.load(csv_compat.resolve(os.path.join(TRAIN, "windows.npy")), mmap_mode="r")
     y_species = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy"))).astype(np.int32)
     with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
         row = list(csv_compat.reader(f))
     if not (len(X) == len(y_species) == len(row)):
-        sys.exit(f"uzunluklar tutmuyor: X {len(X)} y {len(y_species)} "
+        sys.exit(f"lengths do not match: X {len(X)} y {len(y_species)} "
                  f"csv {len(row)}")
 
     split = np.array([s["split"] for s in row])
-    y = (y_species != NEGATIVE_CLS).astype(np.int32)   # 1=kus, 0=degil
+    y = (y_species != NEGATIVE_CLS).astype(np.int32)   # 1=bird, 0=not
     return X, y, split
 
 
 def make_dataset(X, y, class_weight, idx, batch, augment, shuffle):
-    def getir(i):
+    def fetch(i):
         i = np.sort(i)
         return (X[i].astype(np.float32), y[i].astype(np.float32),
                 class_weight[i])
@@ -98,71 +102,73 @@ def make_dataset(X, y, class_weight, idx, batch, augment, shuffle):
         ds = ds.shuffle(len(idx), reshuffle_each_iteration=True)
     ds = ds.batch(batch, drop_remainder=False)
     ds = ds.map(
-        lambda i: tf.numpy_function(getir, [i],
+        lambda i: tf.numpy_function(fetch, [i],
                                     [tf.float32, tf.float32, tf.float32]),
         num_parallel_calls=tf.data.AUTOTUNE)
 
-    def bicim(x, e, w):
+    def shape_batch(x, e, w):
         x = tf.reshape(x, (-1, FRAMES, BANDS, 1))
         e.set_shape([None]); w.set_shape([None])
         if augment:
-            x = artirma(x)
+            x = spec_augment(x)
         return x, e, w
 
-    return ds.map(bicim, num_parallel_calls=tf.data.AUTOTUNE).prefetch(
+    return ds.map(shape_batch, num_parallel_calls=tf.data.AUTOTUNE).prefetch(
         tf.data.AUTOTUNE)
 
 
-def artirma(x):
-    """egit.py ile ayni: zaman kaydirma + SpecAugment, maske degeri 0."""
+def spec_augment(x):
+    """The same as train_species.py: a time shift plus SpecAugment, with 0 as
+    the mask value."""
     b = tf.shape(x)[0]
     k = tf.random.uniform([], -16, 17, dtype=tf.int32)
     x = tf.roll(x, shift=k, axis=1)
 
-    def maskele(x, eksen, max_extra):
-        boy = tf.shape(x)[eksen]
+    def mask(x, axis, max_extra):
+        length = tf.shape(x)[axis]
         width = tf.random.uniform([b, 1], 0, max_extra, dtype=tf.int32)
-        start = tf.random.uniform([b, 1], 0, boy - max_extra, dtype=tf.int32)
-        r = tf.reshape(tf.range(boy), [1, -1])
+        start = tf.random.uniform([b, 1], 0, length - max_extra, dtype=tf.int32)
+        r = tf.reshape(tf.range(length), [1, -1])
         m = tf.cast((r < start) | (r >= start + width), x.dtype)
-        sekil = [b, 1, 1, 1]
-        sekil[eksen] = boy
-        return x * tf.reshape(m, sekil)
+        shape = [b, 1, 1, 1]
+        shape[axis] = length
+        return x * tf.reshape(m, shape)
 
-    x = maskele(x, 1, 30)
-    x = maskele(x, 2, 10)
+    x = mask(x, 1, 30)
+    x = mask(x, 2, 10)
     return x
 
 
-def ds_blok(x, kanal, step, name):
+def ds_block(x, channels, step, name):
     x = tf.keras.layers.DepthwiseConv2D(3, strides=step, padding="same",
                                         use_bias=False, name=f"{name}_dw")(x)
     x = tf.keras.layers.BatchNormalization(name=f"{name}_dwbn")(x)
     x = tf.keras.layers.ReLU(6.0, name=f"{name}_dwrelu")(x)
-    x = tf.keras.layers.Conv2D(kanal, 1, use_bias=False, name=f"{name}_pw")(x)
+    x = tf.keras.layers.Conv2D(channels, 1, use_bias=False, name=f"{name}_pw")(x)
     x = tf.keras.layers.BatchNormalization(name=f"{name}_pwbn")(x)
     return tf.keras.layers.ReLU(6.0, name=f"{name}_pwrelu")(x)
 
 
-def model_kur(width=1.0):
-    """Kucuk derinlemesine ayrilabilir CNN — tur aginin 8 blogundan cok daha
-    dar/kisa. Butce 15 KB int8; tur aginin ~270 KB'inin 1/18'i."""
+def build_model(width=1.0):
+    """A small depthwise-separable CNN - far narrower and shorter than the
+    species net's 8 blocks. The budget is 15 KB int8, 1/18th of the species
+    net's ~270 KB."""
     k = lambda n: max(4, int(n * width))
     g = tf.keras.Input(shape=(FRAMES, BANDS, 1), dtype="float32", name="mel_int8")
     x = tf.keras.layers.Rescaling(SIGMA_SCALE, name="int8_sigma")(g)
 
     x = tf.keras.layers.Conv2D(k(16), 3, strides=2, padding="same",
-                               use_bias=False, name="giris")(x)
-    x = tf.keras.layers.BatchNormalization(name="giris_bn")(x)
-    x = tf.keras.layers.ReLU(6.0, name="giris_relu")(x)
+                               use_bias=False, name="stem")(x)
+    x = tf.keras.layers.BatchNormalization(name="stem_bn")(x)
+    x = tf.keras.layers.ReLU(6.0, name="stem_relu")(x)
 
-    x = ds_blok(x, k(32), 2, "b1")
-    x = ds_blok(x, k(48), 2, "b2")
-    x = ds_blok(x, k(64), 2, "b3")
+    x = ds_block(x, k(32), 2, "b1")
+    x = ds_block(x, k(48), 2, "b2")
+    x = ds_block(x, k(64), 2, "b3")
 
     x = tf.keras.layers.GlobalAveragePooling2D(name="gap")(x)
     c = tf.keras.layers.Dense(1, name="logit")(x)
-    return tf.keras.Model(g, c, name="pokebird_ikili_agi")
+    return tf.keras.Model(g, c, name="pokebird_binary_net")
 
 
 def mac_count(model):
@@ -184,9 +190,9 @@ def mac_count(model):
     return int(total)
 
 
-def loss_kur(pos_weight):
-    """Agirlikli BCE. pos_agirlik: NEGATIF sinifina (0) verilen carpan —
-    16,5:1 dengesizligi tersine cevirmek icin negatif ornek basina agirlik."""
+def build_loss(pos_weight):
+    """Weighted BCE. pos_weight is the multiplier given to the NEGATIVE class
+    (0) - the per-negative-sample weight that undoes the 16.5:1 imbalance."""
     pos_weight = tf.constant(float(pos_weight), dtype=tf.float32)
 
     def loss(y, logit, w):
@@ -196,21 +202,21 @@ def loss_kur(pos_weight):
     return loss
 
 
-def degerlendir(model, ds, threshold=0.5):
-    dogru = total = 0
+def evaluate(model, ds, threshold=0.5):
+    correct = total = 0
     tp = fp = tn = fn = 0
     for x, y, _ in ds:
         logit = model(x, training=False)
         p = tf.sigmoid(logit[:, 0]).numpy()
         e = y.numpy()
         pred = (p >= threshold).astype(np.int32)
-        dogru += int((pred == e).sum())
+        correct += int((pred == e).sum())
         total += len(e)
         tp += int(((pred == 1) & (e == 1)).sum())
         fp += int(((pred == 1) & (e == 0)).sum())
         tn += int(((pred == 0) & (e == 0)).sum())
         fn += int(((pred == 0) & (e == 1)).sum())
-    return dogru / total, tp, fp, tn, fn
+    return correct / total, tp, fp, tn, fn
 
 
 def main():
@@ -221,50 +227,50 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-3)
     ap.add_argument("--width", type=float, default=1.0)
     ap.add_argument("--weight", type=float, default=0.0,
-                    help="negatif sinif agirligi; 0 = olculen 16,5 kullan")
+                    help="negative-class weight; 0 = use the measured 16.5")
     ap.add_argument("--out", default=MODELS)
     a = ap.parse_args()
 
     os.makedirs(a.out, exist_ok=True)
-    X, y, split = data_yukle()
-    print(f"{len(X)} pencere  kus {int(y.sum())}  degil {int((1 - y).sum())}")
+    X, y, split = load_data()
+    print(f"{len(X)} windows  bird {int(y.sum())}  not {int((1 - y).sum())}")
 
-    idx = {b: np.where(split == b)[0] for b in ("egitim", "dogrulama", "test")}
+    idx = {b: np.where(split == b)[0] for b in ("train", "val", "test")}
     if a.smoke:
         rng = np.random.default_rng(0)
         for b in idx:
             idx[b] = rng.choice(idx[b], size=min(len(idx[b]), 3000), replace=False)
         a.epochs = 2
     for b, v in idx.items():
-        print(f"  {b:10s} {len(v):6d}  kus %{100*y[v].mean():.1f}")
+        print(f"  {b:10s} {len(v):6d}  bird {100*y[v].mean():.1f}%")
 
     pos_weight = a.weight if a.weight > 0 else (
-        (y[idx["egitim"]] == 1).sum() / max((y[idx["egitim"]] == 0).sum(), 1))
-    print(f"negatif sinif agirligi: {pos_weight:.2f}")
+        (y[idx["train"]] == 1).sum() / max((y[idx["train"]] == 0).sum(), 1))
+    print(f"negative-class weight: {pos_weight:.2f}")
 
     sample_weight = np.ones(len(X), dtype=np.float32)
 
-    train = make_dataset(X, y, sample_weight, idx["egitim"], a.batch,
+    train = make_dataset(X, y, sample_weight, idx["train"], a.batch,
                          augment=True, shuffle=True)
-    val = make_dataset(X, y, sample_weight, idx["dogrulama"], a.batch,
+    val = make_dataset(X, y, sample_weight, idx["val"], a.batch,
                             augment=False, shuffle=False)
     test = make_dataset(X, y, sample_weight, idx["test"], a.batch,
                        augment=False, shuffle=False)
 
-    model = model_kur(a.width)
+    model = build_model(a.width)
     mac = mac_count(model)
     par = model.count_params()
-    print(f"\nmodel: {par:,} parametre (~{par / 1024:.1f} KB int8)")
-    print(f"MAC/pencere: {mac / 1e6:.2f} M  (butce {MAC_BUDGET / 1e6:.0f} M)")
+    print(f"\nmodel: {par:,} parameters (~{par / 1024:.1f} KB int8)")
+    print(f"MAC/window: {mac / 1e6:.2f} M  (budget {MAC_BUDGET / 1e6:.0f} M)")
     if mac > MAC_BUDGET:
-        sys.exit(f"!! MAC butcesi asildi ({mac/1e6:.1f}M > {MAC_BUDGET/1e6:.0f}M) "
-                 "— --genislik dusurun")
+        sys.exit(f"!! the MAC budget was exceeded "
+                 f"({mac/1e6:.1f}M > {MAC_BUDGET/1e6:.0f}M) - lower --width")
     if par > SIZE_BUDGET:
-        print(f"!! DIKKAT: {par} parametre > {SIZE_BUDGET} bayt butcesi "
-              "(int8 boyut tflite'ta olculecek, kesin karar orada)")
+        print(f"!! WARNING: {par} parameters > the {SIZE_BUDGET} byte budget "
+              "(the int8 size is measured on the tflite; that is the verdict)")
 
-    loss_f = loss_kur(pos_weight)
-    step_count = max(1, len(idx["egitim"]) // a.batch) * a.epochs
+    loss_f = build_loss(pos_weight)
+    step_count = max(1, len(idx["train"]) // a.batch) * a.epochs
     plan = tf.keras.optimizers.schedules.CosineDecay(
         a.lr, step_count, warmup_target=a.lr, warmup_steps=200)
     opt = tf.keras.optimizers.Adam(plan)
@@ -281,46 +287,46 @@ def main():
     best = -1.0
     path = os.path.join(a.out, "binary_net.keras")
     history = []
-    basladi = time.time()
     for epochs in range(1, a.epochs + 1):
         t0 = time.time()
         total = count = 0.0
         for x, e, w in train:
             total += float(step(x, e, w))
             count += 1
-        acc, tp, fp, tn, fn = degerlendir(model, val)
-        geri_cagirma = tp / max(tp + fn, 1)   # recall kus sinifi
-        ozgulluk = tn / max(tn + fp, 1)       # negatifi doGru red
-        history.append((epochs, total / count, acc, geri_cagirma, ozgulluk))
-        yildiz = ""
-        skor = geri_cagirma  # kus kacirmamak asil oncelik
-        if skor > best:
-            best = skor
+        acc, tp, fp, tn, fn = evaluate(model, val)
+        recall = tp / max(tp + fn, 1)          # recall on the bird class
+        specificity = tn / max(tn + fp, 1)     # correct rejection of negatives
+        history.append((epochs, total / count, acc, recall, specificity))
+        star = ""
+        score = recall  # not missing birds is the real priority
+        if score > best:
+            best = score
             model.save(path)
-            yildiz = "  <- kaydedildi"
-        print(f"devir {epochs:3d}/{a.epochs}  kayip {total/count:.4f}  "
-              f"dogrulama acc %{acc*100:.2f}  kus-geri-cagirma %{geri_cagirma*100:.2f}  "
-              f"negatif-ozgulluk %{ozgulluk*100:.2f}  {time.time()-t0:.0f}sn{yildiz}",
+            star = "  <- saved"
+        print(f"epoch {epochs:3d}/{a.epochs}  loss {total/count:.4f}  "
+              f"val acc {acc*100:.2f}%  bird-recall {recall*100:.2f}%  "
+              f"negative-specificity {specificity*100:.2f}%  "
+              f"{time.time()-t0:.0f}s{star}",
               flush=True)
 
-    print(f"\nen iyi (dogrulama kus-geri-cagirma): %{best*100:.2f}  ->  {path}")
+    print(f"\nbest (val bird-recall): {best*100:.2f}%  ->  {path}")
     model = tf.keras.models.load_model(path)
 
-    acc, tp, fp, tn, fn = degerlendir(model, test)
-    print(f"TEST (float32) esik 0.5: acc %{acc*100:.2f}  "
-          f"kus-geri-cagirma %{100*tp/max(tp+fn,1):.2f}  "
-          f"negatif-ozgulluk %{100*tn/max(tn+fp,1):.2f}  "
+    acc, tp, fp, tn, fn = evaluate(model, test)
+    print(f"TEST (float32) threshold 0.5: acc {acc*100:.2f}%  "
+          f"bird-recall {100*tp/max(tp+fn,1):.2f}%  "
+          f"negative-specificity {100*tn/max(tn+fp,1):.2f}%  "
           f"(tp {tp} fp {fp} tn {tn} fn {fn})")
 
-    tflite_path, gs, gz = quantize(model, X, idx["egitim"], a.out)
-    q_acc, qtp, qfp, qtn, qfn = tflite_degerlendir(tflite_path, X, y, idx["test"])
-    print(f"TEST (int8)    esik 0.5: acc %{q_acc*100:.2f}  "
-          f"kus-geri-cagirma %{100*qtp/max(qtp+qfn,1):.2f}  "
-          f"negatif-ozgulluk %{100*qtn/max(qtn+qfp,1):.2f}  "
-          f"(fark {(q_acc-acc)*100:+.2f} puan)")
+    tflite_path, gs, gz = quantize(model, X, idx["train"], a.out)
+    q_acc, qtp, qfp, qtn, qfn = tflite_evaluate(tflite_path, X, y, idx["test"])
+    print(f"TEST (int8)    threshold 0.5: acc {q_acc*100:.2f}%  "
+          f"bird-recall {100*qtp/max(qtp+qfn,1):.2f}%  "
+          f"negative-specificity {100*qtn/max(qtn+qfp,1):.2f}%  "
+          f"(difference {(q_acc-acc)*100:+.2f} points)")
 
-    c_write(tflite_path, os.path.join(a.out, "ikili_agi_int8.h"))
-    rapor_write(a, model, mac, history, acc, tp, fp, tn, fn,
+    c_write(tflite_path, os.path.join(a.out, "binary_net_int8.h"))
+    write_report(a, model, mac, history, acc, tp, fp, tn, fn,
               q_acc, qtp, qfp, qtn, qfn, gs, gz, tflite_path)
     return 0
 
@@ -330,13 +336,13 @@ def quantize(model, X, train_idx, out):
     sample = np.sort(rng.choice(train_idx, size=min(500, len(train_idx)),
                                replace=False))
 
-    def temsili():
+    def representative():
         for i in sample:
             yield [X[i].reshape(1, FRAMES, BANDS, 1).astype(np.float32)]
 
     d = tf.lite.TFLiteConverter.from_keras_model(model)
     d.optimizations = [tf.lite.Optimize.DEFAULT]
-    d.representative_dataset = temsili
+    d.representative_dataset = representative
     d.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
     d.inference_input_type = tf.int8
     d.inference_output_type = tf.int8
@@ -346,39 +352,41 @@ def quantize(model, X, train_idx, out):
     with open(path, "wb") as f:
         f.write(tfl)
 
-    note = tf.lite.Interpreter(model_path=path)
-    note.allocate_tensors()
-    g = note.get_input_details()[0]
-    c = note.get_output_details()[0]
+    interp = tf.lite.Interpreter(model_path=path)
+    interp.allocate_tensors()
+    g = interp.get_input_details()[0]
+    c = interp.get_output_details()[0]
     gs, gz = float(g["quantization"][0]), int(g["quantization"][1])
-    print(f"\nINT8 model: {len(tfl)/1024:.1f} KB  (butce {SIZE_BUDGET/1024:.0f} KB)  -> {path}")
-    print(f"girdi tensoru: {g['dtype'].__name__} {tuple(g['shape'])}  "
-          f"olcek {gs:.6f}  sifir noktasi {gz}")
+    print(f"\nINT8 model: {len(tfl)/1024:.1f} KB  "
+          f"(budget {SIZE_BUDGET/1024:.0f} KB)  -> {path}")
+    print(f"input tensor: {g['dtype'].__name__} {tuple(g['shape'])}  "
+          f"scale {gs:.6f}  zero point {gz}")
     if abs(gs - 1.0) > 0.02 or gz != 0:
-        print("!! DIKKAT: girdi olcegi 1.0/0 DEGIL. Cihaz pb_mel_window()\n"
-              "   ciktisini oldugu gibi veremez; donusum gerekir.\n"
+        print("!! WARNING: the input scale is NOT 1.0/0. The device cannot hand\n"
+              "   pb_mel_window() output over as it is; a conversion is needed.\n"
               f"   q_tflite = round(q_mel * {SIGMA_SCALE:.6f} / {gs:.6f}) + {gz}")
     else:
-        print("   -> cihaz pb_mel_window() ciktisini DOGRUDAN verebilir.")
+        print("   -> the device can hand pb_mel_window() output over DIRECTLY.")
     cs, cz = float(c["quantization"][0]), int(c["quantization"][1])
-    print(f"cikti tensoru: {c['dtype'].__name__}  olcek {cs:.6f}  sifir noktasi {cz}  "
-          "(sigmoid oncesi ham logit)")
+    print(f"output tensor: {c['dtype'].__name__}  scale {cs:.6f}  "
+          f"zero point {cz}  (the raw pre-sigmoid logit)")
     if len(tfl) > SIZE_BUDGET:
-        print(f"!! DIKKAT: {len(tfl)/1024:.1f} KB > {SIZE_BUDGET/1024:.0f} KB butcesi")
+        print(f"!! WARNING: {len(tfl)/1024:.1f} KB > the "
+              f"{SIZE_BUDGET/1024:.0f} KB budget")
     return path, gs, gz
 
 
-def tflite_degerlendir(path, X, y, idx, threshold=0.5):
-    note = tf.lite.Interpreter(model_path=path, num_threads=8)
-    note.allocate_tensors()
-    g = note.get_input_details()[0]
-    c = note.get_output_details()[0]
+def tflite_evaluate(path, X, y, idx, threshold=0.5):
+    interp = tf.lite.Interpreter(model_path=path, num_threads=8)
+    interp.allocate_tensors()
+    g = interp.get_input_details()[0]
+    c = interp.get_output_details()[0]
     cs, cz = c["quantization"]
     tp = fp = tn = fn = 0
     for i in idx:
-        note.set_tensor(g["index"], X[i].reshape(g["shape"]).astype(np.int8))
-        note.invoke()
-        q = int(note.get_tensor(c["index"])[0][0])
+        interp.set_tensor(g["index"], X[i].reshape(g["shape"]).astype(np.int8))
+        interp.invoke()
+        q = int(interp.get_tensor(c["index"])[0][0])
         logit = (q - cz) * cs
         p = 1.0 / (1.0 + np.exp(-logit))
         pred = int(p >= threshold)
@@ -394,43 +402,47 @@ def tflite_degerlendir(path, X, y, idx, threshold=0.5):
 def c_write(tflite_path, h_path):
     raw = open(tflite_path, "rb").read()
     with open(h_path, "w", encoding="utf-8") as f:
-        f.write("/* Uretilmis dosya — tools/train_binary.py. ELLE DUZENLEMEYIN. */\n")
+        f.write("/* GENERATED FILE - tools/train_binary.py. "
+                "DO NOT EDIT BY HAND. */\n")
         f.write("#ifndef POKEBIRD_BINARY_NET_H\n#define POKEBIRD_BINARY_NET_H\n\n")
         f.write("#include <stdint.h>\n\n")
-        f.write(f"#define PB_IKILI_AGI_BOYUT {len(raw)}\n\n")
+        f.write(f"#define PB_BINARY_NET_SIZE {len(raw)}\n\n")
         f.write("__attribute__((aligned(16)))\n")
         f.write("const unsigned char pb_binary_net[] = {\n")
         for i in range(0, len(raw), 12):
             f.write("  " + " ".join(f"0x{b:02x}," for b in raw[i:i + 12]) + "\n")
         f.write("};\n\n#endif\n")
-    print(f"C dizisi: {h_path}  ({len(raw)/1024:.1f} KB)")
+    print(f"C array: {h_path}  ({len(raw)/1024:.1f} KB)")
 
 
-def rapor_write(a, model, mac, history, acc, tp, fp, tn, fn,
+def write_report(a, model, mac, history, acc, tp, fp, tn, fn,
               q_acc, qtp, qfp, qtn, qfn, gs, gz, tflite_path):
     s = []
-    s.append(f"model      : {model.count_params():,} parametre")
-    s.append(f"MAC/pencere: {mac/1e6:.2f} M  (butce {MAC_BUDGET/1e6:.0f} M)")
-    s.append(f"tflite     : {os.path.getsize(tflite_path)/1024:.1f} KB  (butce {SIZE_BUDGET/1024:.0f} KB)")
-    s.append(f"girdi      : int8, olcek {gs:.6f}, sifir noktasi {gz}")
+    s.append(f"model     : {model.count_params():,} parameters")
+    s.append(f"MAC/window: {mac/1e6:.2f} M  (budget {MAC_BUDGET/1e6:.0f} M)")
+    s.append(f"tflite    : {os.path.getsize(tflite_path)/1024:.1f} KB  "
+             f"(budget {SIZE_BUDGET/1024:.0f} KB)")
+    s.append(f"input     : int8, scale {gs:.6f}, zero point {gz}")
     s.append("")
-    s.append(f"TEST float32 esik 0.5: acc %{acc*100:.2f}  "
-             f"kus-geri-cagirma %{100*tp/max(tp+fn,1):.2f}  "
-             f"negatif-ozgulluk %{100*tn/max(tn+fp,1):.2f}")
+    s.append(f"TEST float32 threshold 0.5: acc {acc*100:.2f}%  "
+             f"bird-recall {100*tp/max(tp+fn,1):.2f}%  "
+             f"negative-specificity {100*tn/max(tn+fp,1):.2f}%")
     s.append(f"  tp {tp}  fp {fp}  tn {tn}  fn {fn}")
-    s.append(f"TEST int8    esik 0.5: acc %{q_acc*100:.2f}  "
-             f"kus-geri-cagirma %{100*qtp/max(qtp+qfn,1):.2f}  "
-             f"negatif-ozgulluk %{100*qtn/max(qtn+qfp,1):.2f}"
-             f"   (nicelestirme bedeli {(q_acc-acc)*100:+.2f} puan)")
+    s.append(f"TEST int8    threshold 0.5: acc {q_acc*100:.2f}%  "
+             f"bird-recall {100*qtp/max(qtp+qfn,1):.2f}%  "
+             f"negative-specificity {100*qtn/max(qtn+qfp,1):.2f}%"
+             f"   (the cost of quantisation {(q_acc-acc)*100:+.2f} points)")
     s.append(f"  tp {qtp}  fp {qfp}  tn {qtn}  fn {qfn}")
     s.append("")
-    s.append("devir  kayip   acc     kus-geri-cagirma  negatif-ozgulluk")
+    s.append("epoch  loss    acc        bird-recall  negative-specificity")
     for d, k, ac, gc, oz in history:
-        s.append(f"{d:5d}  {k:.4f}  %{ac*100:6.2f}  %{gc*100:16.2f}  %{oz*100:16.2f}")
+        s.append(f"{d:5d}  {k:.4f}  {ac*100:6.2f}%  {gc*100:11.2f}%  "
+                 f"{oz*100:20.2f}%")
 
     text = "\n".join(s)
     print("\n" + text)
-    with open(os.path.join(a.out, "ikili_rapor.txt"), "w", encoding="utf-8") as f:
+    with open(os.path.join(a.out, "binary_net_report.txt"), "w",
+              encoding="utf-8") as f:
         f.write(text + "\n")
 
 

@@ -25,7 +25,8 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import csv_compat  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-INP = csv_compat.resolve(ROOT / "data" / "egitim" / "classes.csv")
+DATASET = csv_compat.resolve(ROOT / "data" / "dataset")
+INP = csv_compat.resolve(DATASET / "classes.csv")
 SPECIES = ROOT / "data" / "species_istanbul.csv"
 OUTPUT = ROOT / "firmware" / "src" / "ai" / "classes.h"
 

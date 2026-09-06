@@ -30,7 +30,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import csv_compat  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TRAIN = ROOT / "data" / "egitim"
+TRAIN = csv_compat.resolve(ROOT / "data" / "dataset")
 MODEL = csv_compat.resolve(ROOT / "models" / "binary_net_int8.tflite")
 OUTPUT = ROOT / "firmware" / "src" / "ai" / "binary_validation_set.h"
 

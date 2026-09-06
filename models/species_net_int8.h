@@ -1,12 +1,12 @@
-/* Uretilmis dosya — tools/train_species.py. ELLE DUZENLEMEYIN. */
+/* GENERATED FILE - tools/train_species.py. DO NOT EDIT BY HAND. */
 #ifndef POKEBIRD_SPECIES_NET_H
 #define POKEBIRD_SPECIES_NET_H
 
 #include <stdint.h>
 
-#define PB_TUR_AGI_BOYUT 276904
+#define PB_SPECIES_NET_SIZE 276904
 
-/* 16 bayt hizalama: TFLM model verisinin hizali olmasini istiyor. */
+/* 16-byte alignment: TFLM wants the model data aligned. */
 __attribute__((aligned(16)))
 const unsigned char pb_species_net[] = {
   0x1c, 0x00, 0x00, 0x00, 0x54, 0x46, 0x4c, 0x33, 0x14, 0x00, 0x20, 0x00,

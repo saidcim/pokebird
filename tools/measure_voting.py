@@ -35,10 +35,35 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRAIN = os.path.join(ROOT, "data", "egitim")
+TRAIN = csv_compat.resolve(os.path.join(ROOT, "data", "dataset"))
+SPECIES = os.path.join(ROOT, "data", "species_istanbul.csv")
 MODELS = os.path.join(ROOT, "models")
 TFLITE = csv_compat.resolve(os.path.join(MODELS, "species_net_int8.tflite"))
 CACHE = csv_compat.resolve(os.path.join(MODELS, "test_probs.npy"))
+
+
+def class_names():
+    """class index -> English display name.
+
+    The name column of a data/dataset/classes.csv written by an older run is
+    Turkish, so the committed species list is the source of truth and the
+    dataset's own column is only the fallback.
+    """
+    english = {}
+    if os.path.exists(SPECIES):
+        with open(SPECIES, encoding="utf-8") as f:
+            english = {r["ebird_code"]: r["english_name"].strip()
+                       for r in csv_compat.reader(f)}
+    negative = {"__negative__", "__negatif__"}   # the negative-class sentinel
+    out = {}
+    with open(csv_compat.resolve(os.path.join(TRAIN, "classes.csv")),
+              encoding="utf-8") as f:
+        for s in csv_compat.reader(f):
+            code = s["ebird_code"]
+            out[int(s["class_index"])] = (
+                "unknown / not a bird" if code in negative
+                else english.get(code, s.get("english_name", code)))
+    return out
 
 
 def probabilities(idx, X):
@@ -72,10 +97,7 @@ def main():
     y = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy")))
     with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
         r = list(csv_compat.reader(f))
-    name = {int(s["class_index"]): (s.get("english_name")
-                                    or s.get("turkish_name", "")) for s in
-          csv_compat.reader(open(csv_compat.resolve(os.path.join(TRAIN, "classes.csv")),
-                              encoding="utf-8"))}
+    name = class_names()
 
     idx = np.array([i for i, x in enumerate(r) if x["split"] == "test"])
     P = probabilities(idx, X)

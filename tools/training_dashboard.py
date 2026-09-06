@@ -1,56 +1,58 @@
 #!/usr/bin/env python3
 """
-egitim_pano.py — calisan bir egitim log dosyasini izleyip kendini yenileyen
-bir HTML pano uretir. AYRI BIR SUREC: egitim script'ine hic dokunmuyor,
-yalnizca stdout'un yonlendirildigi log dosyasini okuyor.
+training_dashboard.py — watch a running training log and produce a
+self-refreshing HTML dashboard. A SEPARATE PROCESS: it does not touch the
+training script at all, it only reads the log file stdout was redirected to.
 
-NEDEN AYRI: egit.py/ikili_egit.py'nin kendi ici pano_yaz() fonksiyonu var
-ama o SADECE o script YENIDEN BASLATILIRSA calisir. Zaten calismakta olan
-bir egitimi (ör. arka planda baslatilmis ikili_egit.py) bozmadan pano
-istenirse tek yol disaridan log'u tail'lemek.
+WHY SEPARATE: train_species.py / train_binary.py have their own internal
+write_dashboard() function, but that one only runs if the script is RESTARTED.
+If a dashboard is wanted for a training run that is ALREADY going (say a
+train_binary.py started in the background), the only way to get one without
+disturbing it is to tail the log from the outside.
 
-Kullanim:
-    python tools/training_dashboard.py --log /tmp/ikili_egit_log.txt \
-        --out tools/egitim_pano.html --baslik "Asama-1 ikili ag"
+Usage:
+    python tools/training_dashboard.py --log /tmp/train_binary_log.txt \
+        --out tools/training_dashboard.html --title "Stage-1 binary net"
 
-Taniyabildigi iki format:
-  ikili_egit.py : "devir N/M  kayip K  dogrulama acc %A  kus-geri-cagirma %G  negatif-ozgulluk %O  Ssn"
-  egit.py       : "devir N/M  kayip K  dogrulama top-1 %A  top-3 %B  Ssn"
+The two formats it recognises:
+  train_binary.py  : "epoch N/M  loss K  val acc A%  bird-recall G%  negative-specificity O%  Ss"
+  train_species.py : "epoch N/M  loss K  val top-1 A%  top-3 B%  Ss"
 
-durur: log'da "en iyi" satiri gorununce ya da --bir-kere verilirse tek
-seferlik yazip cikar (CI/otomatik kontrol icin).
+It stops when a "best" line shows up in the log, or writes once and exits if
+--one-shot is given (for CI / automated checks).
 """
 
 import argparse
 import re
 import time
 
-IKILI_DESEN = re.compile(
-    r"devir\s+(\d+)/(\d+)\s+kayip\s+([\d.]+)\s+dogrulama acc %([\d.]+)\s+"
-    r"kus-geri-cagirma %([\d.]+)\s+negatif-ozgulluk %([\d.]+)\s+(\d+)sn")
+BINARY_PATTERN = re.compile(
+    r"epoch\s+(\d+)/(\d+)\s+loss\s+([\d.]+)\s+val acc ([\d.]+)%\s+"
+    r"bird-recall ([\d.]+)%\s+negative-specificity ([\d.]+)%\s+(\d+)s")
 
-SPECIES_DESEN = re.compile(
-    r"devir\s+(\d+)/(\d+)\s+kayip\s+([\d.]+)\s+dogrulama top-1 %([\d.]+)\s+"
-    r"top-3 %([\d.]+)\s+(\d+)sn")
+SPECIES_PATTERN = re.compile(
+    r"epoch\s+(\d+)/(\d+)\s+loss\s+([\d.]+)\s+val top-1 ([\d.]+)%\s+"
+    r"top-3 ([\d.]+)%\s+(\d+)s")
 
 
-def satirlari_ayikla(text):
-    """Log metnini (devir, toplam_devir, kayip, [metrikler...], sure) listesine cevirir.
-    Ikili ve tur formatini otomatik ayirt eder."""
-    ikili = [(int(m[0]), int(m[1]), float(m[2]), float(m[3]), float(m[4]),
-              float(m[5]), int(m[6])) for m in IKILI_DESEN.findall(text)]
-    if ikili:
-        return "ikili", ikili
+def parse_lines(text):
+    """Turn the log text into a list of (epoch, total_epochs, loss,
+    [metrics...], seconds). Tells the binary and species formats apart on its
+    own."""
+    binary = [(int(m[0]), int(m[1]), float(m[2]), float(m[3]), float(m[4]),
+               float(m[5]), int(m[6])) for m in BINARY_PATTERN.findall(text)]
+    if binary:
+        return "binary", binary
     species = [(int(m[0]), int(m[1]), float(m[2]), float(m[3]), float(m[4]),
-            int(m[5])) for m in SPECIES_DESEN.findall(text)]
-    return "tur", species
+            int(m[5])) for m in SPECIES_PATTERN.findall(text)]
+    return "species", species
 
 
-def cizgi(value, renk, max_az=None, max_cok=None):
+def line(value, colour, lo_max=None, hi_max=None):
     if not value:
         return ""
-    lo = min(value) if max_az is None else max_az
-    hi = max(value) if max_cok is None else max_cok
+    lo = min(value) if lo_max is None else lo_max
+    hi = max(value) if hi_max is None else hi_max
     if hi - lo < 1e-9:
         hi = lo + 1
     n = len(value)
@@ -58,132 +60,130 @@ def cizgi(value, renk, max_az=None, max_cok=None):
         f"{40 + 660 * (i / max(n - 1, 1)):.1f},"
         f"{180 - 160 * ((v - lo) / (hi - lo)):.1f}"
         for i, v in enumerate(value))
-    return (f'<polyline fill="none" stroke="{renk}" stroke-width="2.5" '
+    return (f'<polyline fill="none" stroke="{colour}" stroke-width="2.5" '
             f'points="{p}"/>')
 
 
-def html_uret(tip, rows, title, log_yolu, bitti):
+def build_html(kind, rows, title, log_path, done):
     if not rows:
-        govde = "<p class='alt'>Henuz devir tamamlanmadi, bekleniyor…</p>"
+        body = "<p class='alt'>No epoch has finished yet, waiting…</p>"
         last = None
         total_epochs = 0
     else:
         last = rows[-1]
         total_epochs = last[1]
 
-    yenile = "" if bitti else '<meta http-equiv="refresh" content="5">'
+    refresh = "" if done else '<meta http-equiv="refresh" content="5">'
 
-    if tip == "ikili":
-        d = [s[0] for s in rows]
+    if kind == "binary":
         loss = [s[2] for s in rows]
         acc = [s[3] for s in rows]
-        geri = [s[4] for s in rows]
-        ozg = [s[5] for s in rows]
-        kutular = f"""
-<div class="k"><span>dogrulama acc</span><b>%{last[3]:.2f}</b></div>
-<div class="k"><span>kus-geri-cagirma</span><b>%{last[4]:.2f}</b></div>
-<div class="k"><span>negatif-ozgulluk</span><b>%{last[5]:.2f}</b></div>
-<div class="k"><span>kayip</span><b>{last[2]:.4f}</b></div>""" if last else ""
-        grafik = (f'{cizgi(ozg, "#63a8ff", 0, 100)}{cizgi(geri, "#5ed17f", 0, 100)}'
-                  f'{cizgi(acc, "#e0803c", 0, 100)}') if rows else ""
-        lejant = ('<span><i style="background:#5ed17f"></i>kus-geri-cagirma</span>'
-                  '<span><i style="background:#63a8ff"></i>negatif-ozgulluk</span>'
+        recall = [s[4] for s in rows]
+        spec = [s[5] for s in rows]
+        boxes = f"""
+<div class="k"><span>val acc</span><b>{last[3]:.2f}%</b></div>
+<div class="k"><span>bird-recall</span><b>{last[4]:.2f}%</b></div>
+<div class="k"><span>negative-specificity</span><b>{last[5]:.2f}%</b></div>
+<div class="k"><span>loss</span><b>{last[2]:.4f}</b></div>""" if last else ""
+        chart = (f'{line(spec, "#63a8ff", 0, 100)}{line(recall, "#5ed17f", 0, 100)}'
+                 f'{line(acc, "#e0803c", 0, 100)}') if rows else ""
+        legend = ('<span><i style="background:#5ed17f"></i>bird-recall</span>'
+                  '<span><i style="background:#63a8ff"></i>negative-specificity</span>'
                   '<span><i style="background:#e0803c"></i>acc</span>')
-        basliklar = "<th>devir</th><th>kayip</th><th>acc</th><th>geri-cagirma</th><th>ozgulluk</th>"
+        headers = "<th>epoch</th><th>loss</th><th>acc</th><th>recall</th><th>specificity</th>"
         row_html = "".join(
-            f"<tr><td>{s[0]}</td><td>{s[2]:.4f}</td><td>%{s[3]:.2f}</td>"
-            f"<td>%{s[4]:.2f}</td><td>%{s[5]:.2f}</td></tr>"
+            f"<tr><td>{s[0]}</td><td>{s[2]:.4f}</td><td>{s[3]:.2f}%</td>"
+            f"<td>{s[4]:.2f}%</td><td>{s[5]:.2f}%</td></tr>"
             for s in reversed(rows[-25:]))
     else:
-        d = [s[0] for s in rows]
         loss = [s[2] for s in rows]
         t1 = [s[3] for s in rows]
         t3 = [s[4] for s in rows]
-        kutular = f"""
-<div class="k"><span>dogrulama top-1</span><b>%{last[3]:.2f}</b></div>
-<div class="k"><span>dogrulama top-3</span><b>%{last[4]:.2f}</b></div>
-<div class="k"><span>kayip</span><b>{last[2]:.4f}</b></div>""" if last else ""
-        grafik = (f'{cizgi(t3, "#63a8ff", 0, 100)}{cizgi(t1, "#5ed17f", 0, 100)}'
-                  f'{cizgi(loss, "#e0803c")}') if rows else ""
-        lejant = ('<span><i style="background:#5ed17f"></i>top-1</span>'
+        boxes = f"""
+<div class="k"><span>val top-1</span><b>{last[3]:.2f}%</b></div>
+<div class="k"><span>val top-3</span><b>{last[4]:.2f}%</b></div>
+<div class="k"><span>loss</span><b>{last[2]:.4f}</b></div>""" if last else ""
+        chart = (f'{line(t3, "#63a8ff", 0, 100)}{line(t1, "#5ed17f", 0, 100)}'
+                 f'{line(loss, "#e0803c")}') if rows else ""
+        legend = ('<span><i style="background:#5ed17f"></i>top-1</span>'
                   '<span><i style="background:#63a8ff"></i>top-3</span>'
-                  '<span><i style="background:#e0803c"></i>kayip</span>')
-        basliklar = "<th>devir</th><th>kayip</th><th>top-1</th><th>top-3</th>"
+                  '<span><i style="background:#e0803c"></i>loss</span>')
+        headers = "<th>epoch</th><th>loss</th><th>top-1</th><th>top-3</th>"
         row_html = "".join(
-            f"<tr><td>{s[0]}</td><td>{s[2]:.4f}</td><td>%{s[3]:.2f}</td><td>%{s[4]:.2f}</td></tr>"
+            f"<tr><td>{s[0]}</td><td>{s[2]:.4f}</td><td>{s[3]:.2f}%</td><td>{s[4]:.2f}%</td></tr>"
             for s in reversed(rows[-25:]))
 
     percent = 100.0 * len(rows) / max(total_epochs, 1)
-    status = "bitti" if bitti else f"devir {len(rows)}/{total_epochs}"
+    status = "done" if done else f"epoch {len(rows)}/{total_epochs}"
 
-    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>{title}</title>
-{yenile}
+{refresh}
 <style>
  body{{font:14px/1.5 system-ui,sans-serif;margin:0;padding:24px;
       background:#11151a;color:#dfe6ee}}
  h1{{font-size:19px;margin:0 0 4px}} .alt{{color:#8b98a6;font-size:13px}}
- .kutular{{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}}
+ .boxes{{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}}
  .k{{background:#1a2028;border:1px solid #262f3a;border-radius:10px;
      padding:12px 16px;min-width:120px}}
  .k b{{display:block;font-size:22px;font-weight:600;margin-top:2px}}
  .k span{{color:#8b98a6;font-size:12px;text-transform:uppercase;
           letter-spacing:.04em}}
- .cubuk{{height:8px;background:#232c36;border-radius:5px;overflow:hidden}}
- .cubuk div{{height:100%;background:linear-gradient(90deg,#3ba55d,#5ed17f)}}
+ .bar{{height:8px;background:#232c36;border-radius:5px;overflow:hidden}}
+ .bar div{{height:100%;background:linear-gradient(90deg,#3ba55d,#5ed17f)}}
  svg{{background:#1a2028;border:1px solid #262f3a;border-radius:10px}}
  table{{border-collapse:collapse;margin-top:16px;font-variant-numeric:tabular-nums}}
  th,td{{padding:4px 14px 4px 0;text-align:right;border-bottom:1px solid #232c36}}
  th{{color:#8b98a6;font-weight:500;text-align:right}}
  td:first-child,th:first-child{{text-align:left}}
- .lej i{{display:inline-block;width:11px;height:3px;vertical-align:middle;
+ .leg i{{display:inline-block;width:11px;height:3px;vertical-align:middle;
          margin-right:5px}}
- .lej span{{margin-right:16px;color:#8b98a6;font-size:12px}}
+ .leg span{{margin-right:16px;color:#8b98a6;font-size:12px}}
 </style></head><body>
 <h1>{title}</h1>
-<div class="alt">log: {log_yolu} · {status} {'' if bitti else '· sayfa 5 sn de bir yenileniyor'}</div>
-<div class="kutular">{kutular}</div>
-<div class="cubuk"><div style="width:{percent:.1f}%"></div></div>
-<p class="lej">{lejant}</p>
+<div class="alt">log: {log_path} · {status} {'' if done else '· the page refreshes every 5 s'}</div>
+<div class="boxes">{boxes}</div>
+<div class="bar"><div style="width:{percent:.1f}%"></div></div>
+<p class="leg">{legend}</p>
 <svg viewBox="0 0 740 200" width="100%" height="200">
  <line x1="40" y1="180" x2="700" y2="180" stroke="#2e3945"/>
  <line x1="40" y1="20" x2="700" y2="20" stroke="#2e3945" stroke-dasharray="3 4"/>
- {grafik}
+ {chart}
  <text x="6" y="184" fill="#8b98a6" font-size="11">0</text>
  <text x="6" y="24" fill="#8b98a6" font-size="11">100</text>
 </svg>
-<table><tr>{basliklar}</tr>{row_html}</table>
-{govde if not rows else ''}
+<table><tr>{headers}</tr>{row_html}</table>
+{body if not rows else ''}
 </body></html>"""
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--log", required=True, help="izlenecek egitim log dosyasi")
-    ap.add_argument("--out", default="tools/egitim_pano.html")
-    ap.add_argument("--title", default="PokeBird — egitim")
-    ap.add_argument("--span", type=float, default=3.0, help="yenileme saniyesi")
+    ap.add_argument("--log", required=True, help="the training log file to watch")
+    ap.add_argument("--out", default="tools/training_dashboard.html")
+    ap.add_argument("--title", default="PokeBird - training")
+    ap.add_argument("--span", type=float, default=3.0, help="refresh seconds")
     ap.add_argument("--one-shot", action="store_true",
-                    help="tek seferlik yaz ve cik (izlemeden)")
+                    help="write once and exit (without watching)")
     a = ap.parse_args()
 
-    print(f"izleniyor: {a.log}  ->  {a.out}  (Ctrl+C ile durdurun)")
+    print(f"watching: {a.log}  ->  {a.out}  (stop with Ctrl+C)")
     while True:
         try:
             with open(a.log, encoding="utf-8", errors="replace") as f:
                 text = f.read()
         except FileNotFoundError:
             text = ""
-        tip, rows = satirlari_ayikla(text)
-        bitti = ("en iyi (" in text) or ("en iyi dogrulama" in text)
-        html = html_uret(tip, rows, a.title, a.log, bitti)
+        kind, rows = parse_lines(text)
+        done = ("best (" in text) or ("best val top-1" in text)
+        html = build_html(kind, rows, a.title, a.log, done)
         with open(a.out, "w", encoding="utf-8") as f:
             f.write(html)
         valid_epochs = rows[-1][0] if rows else 0
         total = rows[-1][1] if rows else 0
-        print(f"  yazildi: devir {valid_epochs}/{total}"
-              f"{'  [BITTI]' if bitti else ''}")
-        if bitti or a.one_shot:
+        print(f"  wrote: epoch {valid_epochs}/{total}"
+              f"{'  [DONE]' if done else ''}")
+        if done or a.one_shot:
             break
         time.sleep(a.span)
 

@@ -38,7 +38,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRAIN = os.path.join(ROOT, "data", "egitim")
+TRAIN = csv_compat.resolve(os.path.join(ROOT, "data", "dataset"))
 MODELS = os.path.join(ROOT, "models")
 CACHE = csv_compat.resolve(os.path.join(MODELS, "test_probs.npy"))
 

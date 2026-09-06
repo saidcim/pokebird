@@ -7,12 +7,12 @@ training tooling are MIT licensed; see the LICENSE file at the repository root.
 
 Files covered by this license:
 
-    tur_agi_int8.h        species network, INT8 weights
-    ikili_agi_int8.h      bird / not-bird network, INT8 weights
-    rapor.txt             species network training report
-    ikili_rapor.txt       binary network training report
-    esik.txt              measured decision thresholds
-    birlestirme.txt       measured window-voting table
+    species_net_int8.h    species network, INT8 weights
+    binary_net_int8.h     bird / not-bird network, INT8 weights
+    species_net_report.txt  species network training report
+    binary_net_report.txt   binary network training report
+    thresholds.txt          measured decision thresholds
+    voting.txt              measured window-voting table
 
 WHY THIS DIRECTORY IS DIFFERENT
 

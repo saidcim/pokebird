@@ -1,10 +1,10 @@
-/* Uretilmis dosya — tools/train_binary.py. ELLE DUZENLEMEYIN. */
+/* GENERATED FILE - tools/train_binary.py. DO NOT EDIT BY HAND. */
 #ifndef POKEBIRD_BINARY_NET_H
 #define POKEBIRD_BINARY_NET_H
 
 #include <stdint.h>
 
-#define PB_IKILI_AGI_BOYUT 21416
+#define PB_BINARY_NET_SIZE 21416
 
 __attribute__((aligned(16)))
 const unsigned char pb_binary_net[] = {
