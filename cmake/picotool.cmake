@@ -1,22 +1,23 @@
-# picotool.cmake — çalışan bir picotool bulup SDK'ya tanıtır.
+# picotool.cmake — finds a working picotool and points the SDK at it.
 #
-# NEDEN GEREKLİ:
-# Pico SDK, sistemde uygun sürüm bulamazsa picotool'u kaynaktan derliyor.
-# Bu makinede kullanılabilir tek host derleyicisi winlibs GCC 16.1; onunla
-# derlenen picotool 2.3.0, dosya okuyan HER komutta segfault ediyor
-# ("Access violation"): hem `uf2 convert` hem `coprodis`. picotool'un kendi
-# `version` komutu çalışıyor, yani sorun ELF/dosya işleme yolunda.
+# WHY THIS IS NEEDED:
+# If it cannot find a suitable version on the system, the Pico SDK builds
+# picotool from source. On this machine the only usable host compiler is
+# winlibs GCC 16.1, and the picotool 2.3.0 it produces segfaults on EVERY
+# command that reads a file ("Access violation") — both `uf2 convert` and
+# `coprodis`. picotool's own `version` command works, so the problem is in the
+# ELF/file handling path.
 #
-# ÇÖZÜM:
-# PlatformIO ile birlikte gelen, önceden derlenmiş picotool'u kullan. Test
-# edildi: `uf2 convert` ve `coprodis` sorunsuz çalışıyor.
+# THE FIX:
+# Use the pre-built picotool that ships with PlatformIO. Tested: `uf2 convert`
+# and `coprodis` both work.
 #
-# SDK'nın Findpicotool.cmake dosyası `if (NOT TARGET picotool)` ile başlıyor;
-# bu yüzden pico_sdk_init() öncesinde kendi imported hedefimizi tanımlamak,
-# indirme/derleme adımını tamamen atlatıyor.
+# The SDK's Findpicotool.cmake begins with `if (NOT TARGET picotool)`, so
+# defining our own imported target before pico_sdk_init() skips the
+# download/build step entirely.
 #
-# Bu dosya bir kolaylık katmanı: çalışan picotool bulamazsa sessizce çekilir
-# ve SDK her zamanki davranışına döner.
+# This file is a convenience layer: if no working picotool is found it backs
+# out quietly and the SDK falls back to its usual behaviour.
 
 if(NOT TARGET picotool)
     set(_pb_picotool_candidates
@@ -27,7 +28,7 @@ if(NOT TARGET picotool)
 
     foreach(_cand ${_pb_picotool_candidates})
         if(EXISTS "${_cand}")
-            # Sadece var olması yetmez — gerçekten çalıştığını doğrula.
+            # Existing is not enough — verify that it actually runs.
             execute_process(
                 COMMAND "${_cand}" version
                 RESULT_VARIABLE _pb_rc
@@ -38,14 +39,15 @@ if(NOT TARGET picotool)
                 add_executable(picotool IMPORTED GLOBAL)
                 set_property(TARGET picotool PROPERTY IMPORTED_LOCATION "${_cand}")
                 string(STRIP "${_pb_out}" _pb_out)
-                message(STATUS "picotool (hazir): ${_cand} — ${_pb_out}")
+                message(STATUS "picotool (prebuilt): ${_cand} - ${_pb_out}")
                 break()
             endif()
         endif()
     endforeach()
 
     if(NOT TARGET picotool)
-        message(STATUS "Hazir picotool bulunamadi; SDK kaynaktan derleyecek. "
-                       "Derleme 'Access violation' ile duserse cmake/picotool.cmake'e bakin.")
+        message(STATUS "No prebuilt picotool found; the SDK will build one from "
+                       "source. If the build fails with an 'Access violation', "
+                       "see cmake/picotool.cmake.")
     endif()
 endif()
