@@ -24,7 +24,7 @@ add_executable(arayuz_onizle
     onizle.c
     # Cihazın ekran kodunun TA KENDİSİ — taklit yok.
     ${KOK}/firmware/src/ui/tema.c
-    ${KOK}/firmware/src/ui/metin.c
+    ${KOK}/firmware/src/ui/text.c
     ${KOK}/firmware/src/ui/ekran_dinleme.c
     ${KOK}/firmware/src/ui/ekran_gunluk.c
     # Spektrogram panele DOGRUDAN yaziyor; onizleme pb_lcd_blit yerine
