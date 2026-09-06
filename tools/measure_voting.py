@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-birlestirme_olc.py — Zamansal birlestirmenin dogruluga katkisini olc. (M5)
+measure_voting.py — measure what temporal voting contributes to accuracy.
 
     .venv-birdnet\\Scripts\\python -u tools/measure_voting.py
 
-NEDEN BU OLCUM: `egit.py`'nin bildirdigi top-1/top-3 TEK 3 saniyelik pencere
-basina. Cihaz oyle calismiyor — pencere 3 sn ama adim 1 sn, ve Asama-3 ardisik
-pencerelerin softmax'ini birlestiriyor (ARCHITECTURE §4). Kullanicinin ekranda
-gordugu sayi bu birlestirilmis sonuc. Pencere basina dogrulugu optimize etmek,
-yanlis sayiyi kovalamak olabilir; once dogru sayiya bakalim.
+WHY MEASURE THIS: the top-1/top-3 that train_species.py reports is PER SINGLE
+3-second window. The device does not work that way — the window is 3 s but the
+step is 1 s, and the voting stage combines the softmax of consecutive windows.
+The number the user sees on screen is that combined result. Optimising
+per-window accuracy could mean chasing the wrong number; look at the right one
+first.
 
-KAPSAM — abartmadan yazalim. Buradaki birlestirme, test kumesindeki AYNI
-KAYDIN ardisik dilimleri uzerinden yapiliyor. Cihazdakiyle iki farki var:
-  * cihaz 1 sn adimla daha cok ortusen pencere goruyor -> hatalari daha
-    ILINTILI, yani gercek kazanc buradakinden bir miktar DUSUK olur;
-  * buradaki dilimler BirdNET'in kus duydugu dilimler, yani kus surekli
-    otuyor varsayimi bu kumede gecerli.
-Dolayisiyla asagidaki sayilar bir UST SINIR tahmini. Kesin cevap M8'deki
-saha testinde.
+SCOPE, without overclaiming. The voting here is done over consecutive slices
+of the SAME RECORDING in the test set. It differs from the device in two ways:
+  * the device sees more overlapping windows at a 1 s step, so its errors are
+    more CORRELATED and the real gain is somewhat LOWER than this;
+  * the slices here are the ones where BirdNET heard a bird, so the assumption
+    that the bird is singing continuously holds in this set.
+The numbers below are therefore an UPPER BOUND. The definitive answer comes
+from a field test.
 
-Cikti: models/voting.txt
+Output: models/voting.txt
 """
 
-import csv
 import os
 import sys
 from collections import defaultdict
@@ -41,22 +41,22 @@ TFLITE = csv_compat.resolve(os.path.join(MODELS, "species_net_int8.tflite"))
 CACHE = csv_compat.resolve(os.path.join(MODELS, "test_probs.npy"))
 
 
-def olasiliklar(idx, X):
-    """Test penceresi basina softmax. Bir kez hesaplanip onbellege alinir."""
+def probabilities(idx, X):
+    """The softmax per test window. Computed once and cached."""
     if os.path.exists(CACHE):
         P = np.load(CACHE)
         if len(P) == len(idx):
-            print(f"onbellekten okundu: {CACHE}")
+            print(f"read from cache: {CACHE}")
             return P
     it = tf.lite.Interpreter(model_path=TFLITE, num_threads=10)
     it.allocate_tensors()
     g, c = it.get_input_details()[0], it.get_output_details()[0]
-    scale, sifir = c["quantization"]
+    scale, zero = c["quantization"]
     P = np.zeros((len(idx), c["shape"][-1]), dtype=np.float32)
     for k, i in enumerate(idx):
         it.set_tensor(g["index"], X[i].reshape(g["shape"]).astype(np.int8))
         it.invoke()
-        raw = (it.get_tensor(c["index"])[0].astype(np.float32) - sifir) * scale
+        raw = (it.get_tensor(c["index"])[0].astype(np.float32) - zero) * scale
         e = np.exp(raw - raw.max())
         P[k] = e / e.sum()
         if k % 1000 == 0:
@@ -67,7 +67,7 @@ def olasiliklar(idx, X):
 
 def main():
     if not os.path.exists(TFLITE):
-        sys.exit(f"{TFLITE} yok — once tools/train_species.py")
+        sys.exit(f"{TFLITE} is missing — run tools/train_species.py first")
     X = np.load(csv_compat.resolve(os.path.join(TRAIN, "windows.npy")), mmap_mode="r")
     y = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy")))
     with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
@@ -78,10 +78,10 @@ def main():
                               encoding="utf-8"))}
 
     idx = np.array([i for i, x in enumerate(r) if x["split"] == "test"])
-    P = olasiliklar(idx, X)
+    P = probabilities(idx, X)
     Y = y[idx]
 
-    # Ayni kaydin dilimlerini zaman sirasina diz.
+    # Put the slices of the same recording in time order.
     record = defaultdict(list)
     for k, i in enumerate(idx):
         record[(r[i]["ebird_code"], r[i]["file"])].append(
@@ -90,48 +90,49 @@ def main():
         v.sort()
 
     s = []
-    s.append("ZAMANSAL BIRLESTIRME — kac ardisik pencere oylanirsa ne oluyor")
-    s.append("(secim yok, olcum test kumesinde; ust sinir tahmini, bkz. betik "
-             "basligi)")
+    s.append("TEMPORAL VOTING — what happens as more consecutive windows vote")
+    s.append("(no selection; measured on the test set. An upper bound — see the "
+             "header of this script)")
     s.append("")
-    s.append(" pencere   ornek    top-1     top-3")
+    s.append(" windows  samples    top-1     top-3")
     for n in (1, 2, 3, 5, 8, 12):
         d1 = d3 = count = 0
         for (_, _), v in record.items():
             for b in range(0, len(v), n):
-                grup = [k for _, k in v[b:b + n]]
-                if len(grup) < min(n, 2) and n > 1:
+                group = [k for _, k in v[b:b + n]]
+                if len(group) < min(n, 2) and n > 1:
                     continue
-                ort = P[grup].mean(axis=0)
-                ilk3 = np.argsort(-ort)[:3]
-                target = Y[grup[0]]
-                d1 += int(ilk3[0] == target)
-                d3 += int(target in ilk3)
+                avg = P[group].mean(axis=0)
+                top3 = np.argsort(-avg)[:3]
+                target = Y[group[0]]
+                d1 += int(top3[0] == target)
+                d3 += int(target in top3)
                 count += 1
-        s.append(f" {n:>7}  {count:>6}   %{100 * d1 / count:5.2f}   "
-                 f"%{100 * d3 / count:5.2f}")
+        s.append(f" {n:>7}  {count:>7}   {100 * d1 / count:5.2f}%   "
+                 f"{100 * d3 / count:5.2f}%")
 
-    # Negatif sinif ayri: sahada en pahali hata "gurultuyu kus sanmak".
+    # The negative class separately: in the field the most expensive mistake
+    # is mistaking noise for a bird.
     neg = 178
     bird = Y != neg
-    ilk = np.argmax(P, axis=1)
+    top = np.argmax(P, axis=1)
     s.append("")
-    s.append(f"negatifi kus sanma orani (pencere basina): "
-             f"%{100 * (ilk[~bird] != neg).mean():.2f}")
-    s.append(f"kusu negatif sanma orani  (pencere basina): "
-             f"%{100 * (ilk[bird] == neg).mean():.2f}")
+    s.append(f"negative mistaken for a bird (per window): "
+             f"{100 * (top[~bird] != neg).mean():.2f}%")
+    s.append(f"bird mistaken for negative   (per window): "
+             f"{100 * (top[bird] == neg).mean():.2f}%")
     s.append("")
-    s.append("En cok karisan 15 cift (pencere basina, test):")
-    cift = defaultdict(int)
-    for h, t in zip(Y, ilk):
+    s.append("The 15 most confused pairs (per window, test set):")
+    pairs = defaultdict(int)
+    for h, t in zip(Y, top):
         if h != t:
-            cift[(int(h), int(t))] += 1
-    for (h, t), n in sorted(cift.items(), key=lambda x: -x[1])[:15]:
+            pairs[(int(h), int(t))] += 1
+    for (h, t), n in sorted(pairs.items(), key=lambda x: -x[1])[:15]:
         s.append(f"  {name.get(h, h):26s} -> {name.get(t, t):26s} {n:4d}")
 
     text = "\n".join(s)
     print("\n" + text)
-    with open(os.path.join(MODELS, "birlestirme.txt"), "w",
+    with open(os.path.join(MODELS, "voting.txt"), "w",
               encoding="utf-8") as f:
         f.write(text + "\n")
     return 0
