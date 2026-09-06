@@ -1,23 +1,25 @@
 /**
- * mel.h — Log-mel öznitelik çıkarımı ve halka tamponu
+ * mel.h — log-mel feature extraction and its ring buffer
  *
- * Plan §3'teki parametreler:
- *   24 kHz mono · FFT 512 (Hann) · hop 384 (16 ms) · 64 mel bandı
- *   150 Hz – 11.5 kHz · 3 s pencere = 187 kare
+ * The parameters:
+ *   24 kHz mono · FFT 512 (Hann) · hop 384 (16 ms) · 64 mel bands
+ *   150 Hz - 11.5 kHz · 3 s window = 187 frames
  *
- * KRİTİK BELLEK KARARI: 3 saniyelik ham ses TUTULMUYOR (144 KB olurdu).
- * Mel kareleri gelen sese göre ARTIMLI hesaplanıp 64×187'lik int8 halka
- * tamponda tutuluyor — 12 KB. Tek başına ~130 KB kazandıran karar bu.
+ * THE CRITICAL MEMORY DECISION: three seconds of raw audio is NOT KEPT (that
+ * would be 144 KB). Mel frames are computed INCREMENTALLY as audio arrives
+ * and held in a 64x187 int8 ring buffer — 12 KB. This single decision saves
+ * about 130 KB.
  *
- * REFERANSLA UYUM: filtre bankası HTK mel ölçeği ve alan normalizasyonu
- * OLMADAN kuruluyor. Python karşılığı birebir şudur:
+ * MATCHING THE REFERENCE: the filter bank is built on the HTK mel scale and
+ * WITHOUT area normalisation. The exact Python equivalent is:
  *
  *     librosa.filters.mel(sr=24000, n_fft=512, n_mels=64,
  *                         fmin=150, fmax=11500, htk=True, norm=None)
  *
- * Pencere de periyodik Hann (`sym=False`). Bu iki ayrıntı tutmazsa cihazdaki
- * öznitelikler eğitimdekilerle uyuşmaz ve model sessizce kötü çalışır —
- * hata ayıklaması en pahalı sınıftan olur.
+ * The window is a periodic Hann (`sym=False`). If either of these details
+ * fails to match, the features on the device diverge from the ones used in
+ * training and the model quietly performs badly — the most expensive class of
+ * bug to debug.
  */
 #ifndef POKEBIRD_MEL_H
 #define POKEBIRD_MEL_H
@@ -32,52 +34,53 @@
 #define PB_MEL_FMIN      150.0f
 #define PB_MEL_FMAX      11500.0f
 
-/* int8 saklama: log-güç dB olarak bu aralığa doğrusal eşleniyor.
- * -90 dBFS taban, M1'de ölçülen ~-36 dBFS oda gürültüsünün epey altında;
- * 0 dBFS tavan tam ölçek. Çözünürlük ~0.35 dB — kuş sesi için fazlasıyla. */
+/* int8 storage: log power in dB is mapped linearly onto this range.
+ * The -90 dBFS floor is well below the ~-36 dBFS of measured room noise, and
+ * the 0 dBFS ceiling is full scale. The resolution is about 0.35 dB — ample
+ * for birdsong. */
 #define PB_MEL_DB_MIN    (-90.0f)
 #define PB_MEL_DB_MAX    (0.0f)
 
-/** Filtre bankasını kur. Diğer çağrılardan önce bir kez. */
+/** Build the filter bank. Once, before any other call. */
 void pb_mel_init(void);
 
 /**
- * Tek kare log-mel üret (halka tamponuna dokunmaz).
- * @param samples PB_FFT_SIZE adet int16
- * @param out     PB_MEL_BANDS adet int8, dB→int8 eşlemesi yukarıda
+ * Produce one log-mel frame (leaves the ring buffer alone).
+ * @param samples PB_FFT_SIZE int16 values
+ * @param out     PB_MEL_BANDS int8 values; the dB->int8 mapping is above
  */
 void pb_mel_frame(const int16_t *samples, int8_t *out);
 
-/** Kareyi hesaplayıp halka tamponuna it. */
+/** Compute the frame and push it into the ring buffer. */
 void pb_mel_push(const int16_t *samples);
 
-/** Halka tamponunu sıfırla. */
+/** Reset the ring buffer. */
 void pb_mel_reset(void);
 
-/** Tampona itilmiş toplam kare sayısı (3 s dolduğunu anlamak için). */
+/** Total frames pushed into the buffer (used to tell when 3 s is full). */
 uint32_t pb_mel_frame_count(void);
 
 /**
- * Son itilen karenin int8 değerlerini kopyala — canlı gösterim için.
- * Mel karesini yeniden HESAPLAMAZ; halkadan okur.
- * @param out PB_MEL_BANDS adet int8
- * @return    henüz hiç kare itilmediyse false
+ * Copy the int8 values of the most recently pushed frame — for the live
+ * display. Does NOT recompute the mel frame; it reads from the ring.
+ * @param out PB_MEL_BANDS int8 values
+ * @return    false if no frame has been pushed yet
  */
 bool pb_mel_last_frame(int8_t *out);
 
 /**
- * Son 3 saniyeyi, model girdisi olarak normalize edilmiş hâlde ver.
+ * Return the last three seconds, normalised as model input.
  *
- * Pencere içi ortalama/varyans normalizasyonu burada yapılıyor (plan §3):
- * kayıt seviyesi ve mikrofon kazancı cihazdan cihaza değişiyor, mutlak dB
- * değerleri modele verilirse bu değişkenlik doğrudan doğruluğa yansır.
+ * Per-window mean/variance normalisation happens here: recording level and
+ * microphone gain vary from device to device, and feeding the model absolute
+ * dB values would push that variability straight into accuracy.
  *
- * @param out PB_MEL_BANDS * PB_MEL_FRAMES adet int8, kare sırası eskiden yeniye
- * @return    henüz 187 kare birikmediyse false (çıktı yazılmaz)
+ * @param out PB_MEL_BANDS * PB_MEL_FRAMES int8 values, frames oldest to newest
+ * @return    false if 187 frames have not accumulated yet (nothing is written)
  */
 bool pb_mel_window(int8_t *out);
 
-/** int8 saklama değerini dB'ye çevir — test ve teşhis için. */
+/** Convert an int8 storage value back to dB — for tests and diagnostics. */
 float pb_mel_q_to_db(int8_t q);
 
 #endif /* POKEBIRD_MEL_H */

@@ -6,23 +6,24 @@
 #include "dsp/fft.h"
 #include "dsp/mel.h"      /* PB_SAMPLE_RATE */
 
-/* Bant sınırlarının bin karşılığı — tamamı tam sayı aritmetiği, çünkü
- * s_prev'in boyutu derleme zamanında bilinmek zorunda. */
+/* The band bounds as bin indices — all integer arithmetic, because the size
+ * of s_prev has to be known at compile time. */
 #define BIN_LO ((PB_GATE_F_LO * PB_FFT_SIZE) / PB_SAMPLE_RATE)
 #define BIN_HI ((PB_GATE_F_HI * PB_FFT_SIZE) / PB_SAMPLE_RATE)
 
-/* Taban izleme hızları (kare başına dB). 16 ms'lik karelerle:
- *   düşüş 0.50 dB/kare -> ~30 dB/s, sessizliğe hızla oturur
- *   yükseliş 0.02 dB/kare -> ~1.2 dB/s, uzun bir ötüş tabanı yukarı çekemez
- * Asimetri bilinçli; gerekçesi gate.h'de. */
+/* Floor tracking rates (dB per frame). With 16 ms frames:
+ *   falling  0.50 dB/frame -> ~30 dB/s, settles onto silence quickly
+ *   rising   0.02 dB/frame -> ~1.2 dB/s, a long call cannot drag the floor up
+ * The asymmetry is deliberate; the reasoning is in gate.h. */
 #define FLOOR_DOWN_DB 0.50f
 #define FLOOR_UP_DB   0.02f
 
-/* Kapı eşiği: taban üstü kaç dB. 6 dB, enerjinin dört katına denk geliyor. */
+/* Gate threshold: how many dB above the floor. 6 dB is a factor of four in
+ * energy. */
 #define TRIGGER_DB    6.0f
 
-/* Akı eşiği. Normalize edilmiş bant şekli üzerinden hesaplandığı için
- * birimsiz; 0.15 sessiz kayıtlarda gürültünün epey üstünde kalıyor. */
+/* Flux threshold. It is computed over the normalised band shape, so it is
+ * dimensionless; 0.15 sits well above the noise on quiet recordings. */
 #define TRIGGER_FLUX  0.15f
 
 #define NBANDS (BIN_HI - BIN_LO + 1)
@@ -34,7 +35,9 @@ static bool  s_have_prev;
 
 void pb_gate_reset(void) {
     s_floor_db = 0.0f;
-    s_have_floor = false;   /* ayrı bayrak: 0 dB geçerli bir değer, sentinel olamaz */
+    /* A separate flag: 0 dB is a legitimate value and cannot serve as a
+     * sentinel. */
+    s_have_floor = false;
     s_have_prev = false;
     memset(s_prev, 0, sizeof(s_prev));
 }
@@ -43,21 +46,25 @@ pb_gate_result_t pb_gate_update(const float *power) {
     pb_gate_result_t r;
     memset(&r, 0, sizeof(r));
 
-    /* Bant enerjisi */
+    /* Band energy */
     float total = 0.0f;
     for (int k = BIN_LO; k <= BIN_HI; k++) total += power[k];
     r.band_db = 10.0f * log10f(total + 1e-12f);
 
-    /* Spektral akı: bant şekli normalize edilip ardışık kareler arasındaki
-     * POZİTİF farklar toplanıyor. Sadece artışlara bakmak önemli — sesin
-     * kesilmesi de büyük bir fark üretir ama ilgilendiğimiz şey başlangıç. */
-    /* Şekil vektörü her karede GÜNCELLENİYOR — sessiz kareler dahil.
-     * Önce yalnızca enerji varken güncelleniyordu; sessizlikten sonra gelen
-     * ilk sesli karede karşılaştıracak önceki şekil olmuyordu ve akı sıfır
-     * çıkıyordu. Yani kapı tam da yakalaması gereken anı kaçırıyordu.
-     * Host testi ("ani ton kapiyi aciyor") bunu yakaladı.
-     * Sessizlikte şekil düzgün dağılım kabul ediliyor: enerji bir banda
-     * toplandığında akı doğal olarak yükseliyor. */
+    /* Spectral flux: the band shape is normalised and the POSITIVE
+     * differences between consecutive frames are summed. Looking only at
+     * increases matters — sound stopping also produces a large difference,
+     * but what we care about is the onset.
+     *
+     * The shape vector is UPDATED ON EVERY FRAME, silent ones included. It
+     * used to be updated only when there was energy, which meant the first
+     * loud frame after a silence had no previous shape to compare against and
+     * the flux came out zero — so the gate missed exactly the moment it was
+     * supposed to catch. A host test ("a sudden tone opens the gate") caught
+     * this.
+     *
+     * During silence the shape is taken to be a flat distribution, so when
+     * energy gathers into one band the flux naturally rises. */
     float current[NBANDS];
     const float flat = 1.0f / (float)NBANDS;
     if (total > 1e-12f) {
@@ -67,20 +74,20 @@ pb_gate_result_t pb_gate_update(const float *power) {
         for (int i = 0; i < NBANDS; i++) current[i] = flat;
     }
 
-    float akı = 0.0f;
+    float flux = 0.0f;
     if (s_have_prev) {
         for (int i = 0; i < NBANDS; i++) {
             float d = current[i] - s_prev[i];
-            if (d > 0.0f) akı += d;
+            if (d > 0.0f) flux += d;
         }
     }
     memcpy(s_prev, current, sizeof(s_prev));
     s_have_prev = true;
-    r.flux = akı;
+    r.flux = flux;
 
-    /* Uyarlamalı taban */
+    /* Adaptive floor */
     if (!s_have_floor) {
-        s_floor_db = r.band_db;          /* ilk kare: doğrudan otur */
+        s_floor_db = r.band_db;          /* first frame: settle immediately */
         s_have_floor = true;
     } else if (r.band_db < s_floor_db) {
         s_floor_db -= FLOOR_DOWN_DB;
@@ -91,8 +98,8 @@ pb_gate_result_t pb_gate_update(const float *power) {
     }
     r.floor_db = s_floor_db;
 
-    /* İki ölçüt de gerekiyor: sabit uğultu enerjiyi yükseltir ama akıyı
-     * yükseltmez, kuş ötüşü ikisini birden yükseltir. */
+    /* Both criteria are required: a steady drone raises the energy but not
+     * the flux, while birdsong raises both. */
     r.active = (r.band_db > s_floor_db + TRIGGER_DB) && (r.flux > TRIGGER_FLUX);
     return r;
 }
