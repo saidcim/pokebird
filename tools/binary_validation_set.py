@@ -25,47 +25,47 @@ import sys
 
 import numpy as np
 
-KOK = pathlib.Path(__file__).resolve().parent.parent
-EGITIM = KOK / "data" / "egitim"
-MODEL = KOK / "models" / "ikili_agi_int8.tflite"
-CIKTI = KOK / "src" / "ai" / "ikili_dogrulama_seti.h"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+TRAIN = ROOT / "data" / "egitim"
+MODEL = ROOT / "models" / "ikili_agi_int8.tflite"
+OUTPUT = ROOT / "src" / "ai" / "ikili_dogrulama_seti.h"
 
-KARE, BANT = 187, 64
-NEGATIF_SINIF = 178
-ADET_HER_TARAF = 4   # 4 kus + 4 negatif = 8 pencere
+KARE, BAND = 187, 64
+NEGATIVE_CLS = 178
+COUNT_HER_TARAF = 4   # 4 kus + 4 negatif = 8 pencere
 
 
-def ornek_sec(tohum: int) -> list[int]:
-    etiket = np.load(EGITIM / "etiket.npy")
-    bolum = []
-    with open(EGITIM / "ornekler.csv", encoding="utf-8") as f:
-        for satir in csv.DictReader(f):
-            bolum.append(satir["bolum"])
-    bolum = np.array(bolum)
+def sample_pick(seed: int) -> list[int]:
+    label = np.load(TRAIN / "etiket.npy")
+    split = []
+    with open(TRAIN / "ornekler.csv", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            split.append(row["bolum"])
+    split = np.array(split)
 
-    test = np.flatnonzero(bolum == "test")
-    rng = np.random.default_rng(tohum)
+    test = np.flatnonzero(split == "test")
+    rng = np.random.default_rng(seed)
 
-    negatif = test[etiket[test] == NEGATIF_SINIF]
-    kus = test[etiket[test] != NEGATIF_SINIF]
+    negative = test[label[test] == NEGATIVE_CLS]
+    bird = test[label[test] != NEGATIVE_CLS]
 
-    secim_negatif = list(rng.choice(negatif, size=ADET_HER_TARAF, replace=False))
+    selection_negative = list(rng.choice(negative, size=COUNT_HER_TARAF, replace=False))
 
     # Kus tarafinda cesitlilik: farkli turlerden.
-    kus_karisik = rng.permutation(kus)
-    gorulen: set[int] = set()
-    secim_kus = []
-    for i in kus_karisik:
-        s = int(etiket[i])
-        if s in gorulen:
+    bird_karisik = rng.permutation(bird)
+    seen: set[int] = set()
+    selection_bird = []
+    for i in bird_karisik:
+        s = int(label[i])
+        if s in seen:
             continue
-        gorulen.add(s)
-        secim_kus.append(int(i))
-        if len(secim_kus) == ADET_HER_TARAF:
+        seen.add(s)
+        selection_bird.append(int(i))
+        if len(selection_bird) == COUNT_HER_TARAF:
             break
 
-    secim = sorted(int(i) for i in secim_negatif) + sorted(secim_kus)
-    return secim
+    selection = sorted(int(i) for i in selection_negative) + sorted(selection_bird)
+    return selection
 
 
 def main() -> None:
@@ -77,9 +77,9 @@ def main() -> None:
     if not MODEL.exists():
         sys.exit(f"{MODEL} yok — once tools/train_binary.py calistirin.")
 
-    secim = ornek_sec(20260803)
-    pencereler = np.load(EGITIM / "pencereler.npy", mmap_mode="r")
-    etiket = np.load(EGITIM / "etiket.npy")
+    selection = sample_pick(20260803)
+    windows = np.load(TRAIN / "pencereler.npy", mmap_mode="r")
+    label = np.load(TRAIN / "etiket.npy")
 
     # BUILTIN_REF — dogrulama_seti.py'deki uyarinin aynisi: XNNPACK int8'i
     # bit-birebir hesaplamiyor (olculdu, M6 §9l), altin standart REF cekirdek.
@@ -92,53 +92,53 @@ def main() -> None:
 
     if gd["dtype"] != np.int8 or gd["quantization"] != (1.0, 0):
         sys.exit(f"girdi sozlesmesi bozuk: {gd['dtype']} {gd['quantization']}")
-    if tuple(gd["shape"]) != (1, KARE, BANT, 1):
-        sys.exit(f"girdi sekli {gd['shape']}, beklenen (1,{KARE},{BANT},1)")
+    if tuple(gd["shape"]) != (1, KARE, BAND, 1):
+        sys.exit(f"girdi sekli {gd['shape']}, beklenen (1,{KARE},{BAND},1)")
 
-    cikti_olcek, cikti_sifir = cd["quantization"]
+    output_scale, output_sifir = cd["quantization"]
 
-    girdiler = np.empty((len(secim), KARE, BANT), dtype=np.int8)
-    logitler = np.empty(len(secim), dtype=np.int8)
-    gercek_ikili = np.empty(len(secim), dtype=np.int32)
-    for k, i in enumerate(secim):
-        p = np.asarray(pencereler[i], dtype=np.int8)
+    girdiler = np.empty((len(selection), KARE, BAND), dtype=np.int8)
+    logitler = np.empty(len(selection), dtype=np.int8)
+    truth_ikili = np.empty(len(selection), dtype=np.int32)
+    for k, i in enumerate(selection):
+        p = np.asarray(windows[i], dtype=np.int8)
         girdiler[k] = p
-        interp.set_tensor(gd["index"], p.reshape(1, KARE, BANT, 1))
+        interp.set_tensor(gd["index"], p.reshape(1, KARE, BAND, 1))
         interp.invoke()
         q = int(interp.get_tensor(cd["index"])[0][0])
         logitler[k] = q
-        gercek_ikili[k] = 0 if int(etiket[i]) == NEGATIF_SINIF else 1
+        truth_ikili[k] = 0 if int(label[i]) == NEGATIVE_CLS else 1
 
-    print(f"{len(secim)} pencere secildi (test bolumu, {ADET_HER_TARAF} kus + "
-          f"{ADET_HER_TARAF} negatif)")
-    for k, i in enumerate(secim):
-        p = 1.0 / (1.0 + np.exp(-(float(logitler[k]) - cikti_sifir) * cikti_olcek))
-        print(f"  satir {i:6d}  gercek {'KUS' if gercek_ikili[k] else 'DEGIL':5s}"
+    print(f"{len(selection)} pencere secildi (test bolumu, {COUNT_HER_TARAF} kus + "
+          f"{COUNT_HER_TARAF} negatif)")
+    for k, i in enumerate(selection):
+        p = 1.0 / (1.0 + np.exp(-(float(logitler[k]) - output_sifir) * output_scale))
+        print(f"  satir {i:6d}  gercek {'KUS' if truth_ikili[k] else 'DEGIL':5s}"
               f"  logit(int8) {int(logitler[k]):4d}  p={p:.4f}")
 
     def dizi(v: np.ndarray) -> str:
-        s, satir = [], []
+        s, row = [], []
         for x in v:
-            satir.append(f"{int(x):4d}")
-            if len(satir) == 16:
-                s.append("    " + ",".join(satir) + ",")
-                satir = []
-        if satir:
-            s.append("    " + ",".join(satir) + ",")
+            row.append(f"{int(x):4d}")
+            if len(row) == 16:
+                s.append("    " + ",".join(row) + ",")
+                row = []
+        if row:
+            s.append("    " + ",".join(row) + ",")
         return "\n".join(s)
 
-    with open(CIKTI, "w", encoding="utf-8", newline="\n") as f:
+    with open(OUTPUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(f"""/* Uretilmis dosya — tools/binary_validation_set.py. ELLE DUZENLEMEYIN.
  *
  * ASAMA-1 IKILI AG CIHAZ-ICI DOGRULAMA SETI (M7).
  *
- * {len(secim)} pencere data/egitim/pencereler.npy'nin TEST bolumunden secildi
- * ({ADET_HER_TARAF} kus + {ADET_HER_TARAF} negatif); beklenen logit PC'deki
+ * {len(selection)} pencere data/egitim/pencereler.npy'nin TEST bolumunden secildi
+ * ({COUNT_HER_TARAF} kus + {COUNT_HER_TARAF} negatif); beklenen logit PC'deki
  * TFLite REFERANS cekirdek (BUILTIN_REF) ciktisi. Cihaz BIREBIR ayni
  * uretmeli — varsayilan XNNPACK delegesi int8'i bit-birebir hesaplamiyor
  * (M6 §9l'de olculdu), o yuzden BUILTIN_REF kullanildi.
  *
- * Cikti nicelestirmesi: logit = (q - {int(cikti_sifir)}) * {float(cikti_olcek):.9f}
+ * Cikti nicelestirmesi: logit = (q - {int(output_sifir)}) * {float(output_scale):.9f}
  * (sigmoid ONCESI ham deger; p = sigmoid(logit))
  */
 #ifndef POKEBIRD_BINARY_VALIDATION_SET_H
@@ -146,13 +146,13 @@ def main() -> None:
 
 #include <stdint.h>
 
-#define PB_BINARY_VALIDATION_COUNT  {len(secim)}
+#define PB_BINARY_VALIDATION_COUNT  {len(selection)}
 #define PB_BINARY_VALIDATION_FRAMES  {KARE}
-#define PB_BINARY_VALIDATION_BANDS  {BANT}
+#define PB_BINARY_VALIDATION_BANDS  {BAND}
 
 /* Gercek ikili etiket: 1 = KUS, 0 = DEGIL. */
 static const int16_t pb_binary_validation_truth[PB_BINARY_VALIDATION_COUNT] = {{
-{dizi(gercek_ikili)}
+{dizi(truth_ikili)}
 }};
 
 /* PC REFERANS cekirdegin urettigi ham int8 logit (sigmoid oncesi). */
@@ -164,11 +164,11 @@ static const int8_t pb_binary_validation_logit[PB_BINARY_VALIDATION_COUNT] = {{
 static const int8_t pb_binary_validation_input[PB_BINARY_VALIDATION_COUNT]
                                             [PB_BINARY_VALIDATION_FRAMES * PB_BINARY_VALIDATION_BANDS] = {{
 """)
-        for k in range(len(secim)):
+        for k in range(len(selection)):
             f.write("  {\n" + dizi(girdiler[k].reshape(-1)) + "\n  },\n")
         f.write("};\n\n#endif\n")
 
-    print(f"\nyazildi: {CIKTI}")
+    print(f"\nyazildi: {OUTPUT}")
 
 
 if __name__ == "__main__":

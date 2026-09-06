@@ -30,9 +30,9 @@ from collections import defaultdict
 import numpy as np
 import tensorflow as tf
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EGITIM = os.path.join(KOK, "data", "egitim")
-MODELLER = os.path.join(KOK, "models")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRAIN = os.path.join(ROOT, "data", "egitim")
+MODELLER = os.path.join(ROOT, "models")
 TFLITE = os.path.join(MODELLER, "tur_agi_int8.tflite")
 ONBELLEK = os.path.join(MODELLER, "test_olasilik.npy")
 
@@ -47,13 +47,13 @@ def olasiliklar(idx, X):
     it = tf.lite.Interpreter(model_path=TFLITE, num_threads=10)
     it.allocate_tensors()
     g, c = it.get_input_details()[0], it.get_output_details()[0]
-    olcek, sifir = c["quantization"]
+    scale, sifir = c["quantization"]
     P = np.zeros((len(idx), c["shape"][-1]), dtype=np.float32)
     for k, i in enumerate(idx):
         it.set_tensor(g["index"], X[i].reshape(g["shape"]).astype(np.int8))
         it.invoke()
-        ham = (it.get_tensor(c["index"])[0].astype(np.float32) - sifir) * olcek
-        e = np.exp(ham - ham.max())
+        raw = (it.get_tensor(c["index"])[0].astype(np.float32) - sifir) * scale
+        e = np.exp(raw - raw.max())
         P[k] = e / e.sum()
         if k % 1000 == 0:
             print(f"  {k}/{len(idx)}", flush=True)
@@ -64,12 +64,12 @@ def olasiliklar(idx, X):
 def main():
     if not os.path.exists(TFLITE):
         sys.exit(f"{TFLITE} yok — once tools/train_species.py")
-    X = np.load(os.path.join(EGITIM, "pencereler.npy"), mmap_mode="r")
-    y = np.load(os.path.join(EGITIM, "etiket.npy"))
-    with open(os.path.join(EGITIM, "ornekler.csv"), encoding="utf-8") as f:
+    X = np.load(os.path.join(TRAIN, "pencereler.npy"), mmap_mode="r")
+    y = np.load(os.path.join(TRAIN, "etiket.npy"))
+    with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
         r = list(csv.DictReader(f))
-    ad = {int(s["sinif"]): s["turkce_ad"] for s in
-          csv.DictReader(open(os.path.join(EGITIM, "siniflar.csv"),
+    name = {int(s["sinif"]): s["turkce_ad"] for s in
+          csv.DictReader(open(os.path.join(TRAIN, "siniflar.csv"),
                               encoding="utf-8"))}
 
     idx = np.array([i for i, x in enumerate(r) if x["bolum"] == "test"])
@@ -77,11 +77,11 @@ def main():
     Y = y[idx]
 
     # Ayni kaydin dilimlerini zaman sirasina diz.
-    kayit = defaultdict(list)
+    record = defaultdict(list)
     for k, i in enumerate(idx):
-        kayit[(r[i]["ebird_kodu"], r[i]["dosya"])].append(
+        record[(r[i]["ebird_kodu"], r[i]["dosya"])].append(
             (float(r[i]["baslangic"]), k))
-    for v in kayit.values():
+    for v in record.values():
         v.sort()
 
     s = []
@@ -91,30 +91,30 @@ def main():
     s.append("")
     s.append(" pencere   ornek    top-1     top-3")
     for n in (1, 2, 3, 5, 8, 12):
-        d1 = d3 = adet = 0
-        for (_, _), v in kayit.items():
+        d1 = d3 = count = 0
+        for (_, _), v in record.items():
             for b in range(0, len(v), n):
                 grup = [k for _, k in v[b:b + n]]
                 if len(grup) < min(n, 2) and n > 1:
                     continue
                 ort = P[grup].mean(axis=0)
                 ilk3 = np.argsort(-ort)[:3]
-                hedef = Y[grup[0]]
-                d1 += int(ilk3[0] == hedef)
-                d3 += int(hedef in ilk3)
-                adet += 1
-        s.append(f" {n:>7}  {adet:>6}   %{100 * d1 / adet:5.2f}   "
-                 f"%{100 * d3 / adet:5.2f}")
+                target = Y[grup[0]]
+                d1 += int(ilk3[0] == target)
+                d3 += int(target in ilk3)
+                count += 1
+        s.append(f" {n:>7}  {count:>6}   %{100 * d1 / count:5.2f}   "
+                 f"%{100 * d3 / count:5.2f}")
 
     # Negatif sinif ayri: sahada en pahali hata "gurultuyu kus sanmak".
     neg = 178
-    kus = Y != neg
+    bird = Y != neg
     ilk = np.argmax(P, axis=1)
     s.append("")
     s.append(f"negatifi kus sanma orani (pencere basina): "
-             f"%{100 * (ilk[~kus] != neg).mean():.2f}")
+             f"%{100 * (ilk[~bird] != neg).mean():.2f}")
     s.append(f"kusu negatif sanma orani  (pencere basina): "
-             f"%{100 * (ilk[kus] == neg).mean():.2f}")
+             f"%{100 * (ilk[bird] == neg).mean():.2f}")
     s.append("")
     s.append("En cok karisan 15 cift (pencere basina, test):")
     cift = defaultdict(int)
@@ -122,13 +122,13 @@ def main():
         if h != t:
             cift[(int(h), int(t))] += 1
     for (h, t), n in sorted(cift.items(), key=lambda x: -x[1])[:15]:
-        s.append(f"  {ad.get(h, h):26s} -> {ad.get(t, t):26s} {n:4d}")
+        s.append(f"  {name.get(h, h):26s} -> {name.get(t, t):26s} {n:4d}")
 
-    metin = "\n".join(s)
-    print("\n" + metin)
+    text = "\n".join(s)
+    print("\n" + text)
     with open(os.path.join(MODELLER, "birlestirme.txt"), "w",
               encoding="utf-8") as f:
-        f.write(metin + "\n")
+        f.write(text + "\n")
     return 0
 
 

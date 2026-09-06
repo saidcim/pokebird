@@ -14,9 +14,9 @@ import csv
 import pathlib
 import sys
 
-KOK = pathlib.Path(__file__).resolve().parent.parent
-GIRDI = KOK / "data" / "egitim" / "siniflar.csv"
-CIKTI = KOK / "src" / "ai" / "siniflar.h"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+INP = ROOT / "data" / "egitim" / "siniflar.csv"
+OUTPUT = ROOT / "src" / "ai" / "siniflar.h"
 
 
 def kacir(s: str) -> str:
@@ -28,47 +28,47 @@ def kacir(s: str) -> str:
 
 
 def main() -> None:
-    if not GIRDI.exists():
-        sys.exit(f"{GIRDI} yok — once tools/build_dataset.py calistirin.")
+    if not INP.exists():
+        sys.exit(f"{INP} yok — once tools/build_dataset.py calistirin.")
 
-    satirlar = []
-    with open(GIRDI, encoding="utf-8") as f:
+    rows = []
+    with open(INP, encoding="utf-8") as f:
         for s in csv.DictReader(f):
-            satirlar.append((int(s["sinif"]), s["ebird_kodu"], s["turkce_ad"],
+            rows.append((int(s["sinif"]), s["ebird_kodu"], s["turkce_ad"],
                              s.get("birdnet_bilimsel_ad", "")))
-    satirlar.sort()
+    rows.sort()
 
-    beklenen = list(range(len(satirlar)))
-    if [s[0] for s in satirlar] != beklenen:
+    beklenen = list(range(len(rows)))
+    if [s[0] for s in rows] != beklenen:
         sys.exit("siniflar.csv'de indeksler 0..N-1 degil — tablo hizasiz olurdu")
 
-    with open(CIKTI, "w", encoding="utf-8", newline="\n") as f:
+    with open(OUTPUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(f"""/* Uretilmis dosya — tools/class_table.py. ELLE DUZENLEMEYIN.
- * Kaynak: data/egitim/siniflar.csv ({len(satirlar)} sinif)
+ * Kaynak: data/egitim/siniflar.csv ({len(rows)} sinif)
  *
- * Sinif {len(satirlar) - 1} = negatif / bilinmiyor.
+ * Sinif {len(rows) - 1} = negatif / bilinmiyor.
  * Diziler flash'ta (const), RAM maliyeti sifir.
  */
 #ifndef POKEBIRD_CLASSES_H
 #define POKEBIRD_CLASSES_H
 
-#define PB_CLASS_COUNT {len(satirlar)}
+#define PB_CLASS_COUNT {len(rows)}
 
 static const char *const pb_class_code[PB_CLASS_COUNT] = {{
 """)
-        for _, kod, _ad, _lat in satirlar:
-            f.write(f'  "{kacir(kod)}",\n')
+        for _, code, _name, _lat in rows:
+            f.write(f'  "{kacir(code)}",\n')
         f.write("};\n\nstatic const char *const pb_class_name[PB_CLASS_COUNT] = {\n")
-        for _, _kod, ad, _lat in satirlar:
-            f.write(f'  "{kacir(ad)}",\n')
+        for _, _code, name, _lat in rows:
+            f.write(f'  "{kacir(name)}",\n')
         # Bilimsel adlar: arayüz tür adının altında gösteriyor (tasarımdaki
         # italik satır). Flash'ta duruyor, RAM maliyeti sifir.
         f.write("};\n\nstatic const char *const pb_class_latin[PB_CLASS_COUNT] = {\n")
-        for _, _kod, _ad, lat in satirlar:
+        for _, _code, _name, lat in rows:
             f.write(f'  "{kacir(lat)}",\n')
         f.write("};\n\n#endif /* POKEBIRD_CLASSES_H */\n")
 
-    print(f"{CIKTI.relative_to(KOK)} yazildi — {len(satirlar)} sinif")
+    print(f"{OUTPUT.relative_to(ROOT)} yazildi — {len(rows)} sinif")
 
 
 if __name__ == "__main__":

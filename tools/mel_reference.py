@@ -128,10 +128,10 @@ def main():
         text = Path(sys.argv[1]).read_text()
     else:
         exe = None
-        for aday in ("test/build/dsp_test.exe", "test/build/dsp_test"):
-            if Path(aday).exists():
+        for candidate in ("test/build/dsp_test.exe", "test/build/dsp_test"):
+            if Path(candidate).exists():
                 # Mutlak yol: Windows'ta gorece yol PATH'te aranir ve bulunamaz.
-                exe = str(Path(aday).resolve())
+                exe = str(Path(candidate).resolve())
                 break
         if exe is None:
             sys.exit("dsp_test bulunamadi. Once:\n"
@@ -154,9 +154,9 @@ def main():
 
     print(f"{'bant':>4} {'C (dB)':>9} {'ref (dB)':>9} {'fark':>7}  {'C q':>5} {'ref q':>6}")
     for b in range(N_MELS):
-        isaret = "  <<<" if fark[b] > TOLERANS_DB else ""
+        marker = "  <<<" if fark[b] > TOLERANS_DB else ""
         print(f"{b:>4} {c_db[b]:>9.3f} {ref_db_q[b]:>9.3f} {fark[b]:>7.3f} "
-              f"{c_q[b]:>5} {ref_q[b]:>6}{isaret}")
+              f"{c_q[b]:>5} {ref_q[b]:>6}{marker}")
 
     print()
     print(f"en buyuk fark : {fark.max():.4f} dB  (tolerans {TOLERANS_DB})")

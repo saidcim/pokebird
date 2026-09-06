@@ -31,8 +31,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-KOK = Path(__file__).resolve().parent.parent
-CIKTI = KOK / "src" / "ui" / "fonts"
+ROOT = Path(__file__).resolve().parent.parent
+OUTPUT = ROOT / "src" / "ui" / "fonts"
 WINFONT = Path("C:/Windows/Fonts")
 
 # ── Türkçe glifler ────────────────────────────────────────────────────────────
@@ -64,17 +64,17 @@ def npx_komutu() -> list[str]:
     return [npx, "--yes", "lv_font_conv@latest"]
 
 
-def uret(ad: str, ttf: str, boyut: int, bpp: int) -> Path:
-    kaynak = WINFONT / ttf
-    if not kaynak.is_file():
-        sys.exit(f"HATA: yazi tipi yok: {kaynak}")
+def uret(name: str, ttf: str, size: int, bpp: int) -> Path:
+    source = WINFONT / ttf
+    if not source.is_file():
+        sys.exit(f"HATA: yazi tipi yok: {source}")
 
-    hedef = CIKTI / f"{ad}.c"
+    target = OUTPUT / f"{name}.c"
     cmd = npx_komutu() + [
-        "--font", str(kaynak),
+        "--font", str(source),
         "-r", "0x20-0x7E",
         "--symbols", SIMGELER,
-        "--size", str(boyut),
+        "--size", str(size),
         "--bpp", str(bpp),
         # Sıkıştırma AÇILMIYOR: kart artık dilim dilim yeniden çiziliyor, çözme
         # maliyeti her dilimde tekrar ödenirdi. Flash bizde bol (16 MB), CPU değil.
@@ -82,50 +82,50 @@ def uret(ad: str, ttf: str, boyut: int, bpp: int) -> Path:
         "--format", "lvgl",
         "--force-fast-kern-format",
         "--lv-include", "lvgl.h",
-        "-o", str(hedef),
+        "-o", str(target),
     ]
-    print(f"  {ad:<18} {ttf} {boyut}px bpp{bpp}")
+    print(f"  {name:<18} {ttf} {size}px bpp{bpp}")
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(r.stdout)
         print(r.stderr, file=sys.stderr)
-        sys.exit(f"HATA: {ad} uretilemedi")
-    return hedef
+        sys.exit(f"HATA: {name} uretilemedi")
+    return target
 
 
-def dogrula(yol: Path, ad: str) -> None:
+def verify(path: Path, name: str) -> None:
     """Üretilen .c dosyasında her Türkçe kod noktası GERÇEKTEN var mı.
 
     lv_font_conv eksik glifi sessizce atlıyor; sonucu ekranda kutu olarak
     görmek bir tur göz demek. Burada kaynak dosyadan okunuyor: glif aralıkları
     `.range_start` / `.range_length` alanlarında yazılı.
     """
-    metin = yol.read_text(encoding="utf-8", errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
 
     araliklar: list[tuple[int, int]] = []
     for m in re.finditer(r"\.range_start\s*=\s*(\d+).*?\.range_length\s*=\s*(\d+)",
-                         metin, re.S):
-        basla, uzunluk = int(m.group(1)), int(m.group(2))
-        araliklar.append((basla, basla + uzunluk))
+                         text, re.S):
+        basla, length = int(m.group(1)), int(m.group(2))
+        araliklar.append((basla, basla + length))
 
     if not araliklar:
-        sys.exit(f"HATA: {ad} icinde glif araligi bulunamadi (bicim degismis olabilir)")
+        sys.exit(f"HATA: {name} icinde glif araligi bulunamadi (bicim degismis olabilir)")
 
-    eksik = [c for c in SIMGELER
+    missing = [c for c in SIMGELER
              if not any(a <= ord(c) < b for a, b in araliklar)]
-    if eksik:
-        sys.exit(f"HATA: {ad} icinde eksik glif: {''.join(eksik)}")
+    if missing:
+        sys.exit(f"HATA: {name} icinde eksik glif: {''.join(missing)}")
 
 
 def main() -> int:
-    CIKTI.mkdir(parents=True, exist_ok=True)
-    print(f"Yazi tipleri -> {CIKTI.relative_to(KOK)}")
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    print(f"Yazi tipleri -> {OUTPUT.relative_to(ROOT)}")
     print(f"Turkce glifler: {TURKCE}")
 
-    for ad, ttf, boyut, bpp in FONTLAR:
-        yol = uret(ad, ttf, boyut, bpp)
-        dogrula(yol, ad)
-        print(f"  {'':<18} -> {yol.stat().st_size / 1024:.1f} KB  (Turkce tam)")
+    for name, ttf, size, bpp in FONTLAR:
+        path = uret(name, ttf, size, bpp)
+        verify(path, name)
+        print(f"  {'':<18} -> {path.stat().st_size / 1024:.1f} KB  (Turkce tam)")
 
     print("\nHepsi uretildi ve Turkce kapsamasi dogrulandi.")
     return 0

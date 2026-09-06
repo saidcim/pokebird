@@ -24,56 +24,56 @@ import os
 import random
 import wave
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(KOK, "data")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = os.path.join(ROOT, "data")
 
 
-def kes(kaynak, hedef, bas, bit):
-    with wave.open(kaynak, "rb") as g:
-        hiz = g.getframerate()
-        g.setpos(min(int(bas * hiz), g.getnframes()))
-        veri = g.readframes(int((bit - bas) * hiz))
-        with wave.open(hedef, "wb") as c:
+def cut(source, target, start, end):
+    with wave.open(source, "rb") as g:
+        rate = g.getframerate()
+        g.setpos(min(int(start * rate), g.getnframes()))
+        data = g.readframes(int((end - start) * rate))
+        with wave.open(target, "wb") as c:
             c.setnchannels(g.getnchannels())
             c.setsampwidth(g.getsampwidth())
-            c.setframerate(hiz)
-            c.writeframes(veri)
-    return len(veri)
+            c.setframerate(rate)
+            c.writeframes(data)
+    return len(data)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--segmentler", default=os.path.join(DATA, "segmentler.csv"))
+    ap.add_argument("--segments", default=os.path.join(DATA, "segmentler.csv"))
     ap.add_argument("--wav", default=os.path.join(DATA, "wav"))
     ap.add_argument("--out", default=os.path.join(DATA, "segment_ornek"))
-    ap.add_argument("--tur", nargs="*", help="yalnizca bu ebird kodlari")
-    ap.add_argument("--esik", type=float, default=0.5, help="en az hedef_guven")
-    ap.add_argument("--adet", type=int, default=10)
-    ap.add_argument("--tohum", type=int, default=0, help="tekrarlanabilirlik")
+    ap.add_argument("--species", nargs="*", help="yalnizca bu ebird kodlari")
+    ap.add_argument("--threshold", type=float, default=0.5, help="en az hedef_guven")
+    ap.add_argument("--count", type=int, default=10)
+    ap.add_argument("--seed", type=int, default=0, help="tekrarlanabilirlik")
     a = ap.parse_args()
 
-    with open(a.segmentler, encoding="utf-8") as f:
-        satir = [
+    with open(a.segments, encoding="utf-8") as f:
+        row = [
             r for r in csv.DictReader(f)
-            if float(r["hedef_guven"]) >= a.esik
-            and (not a.tur or r["ebird_kodu"] in a.tur)
+            if float(r["hedef_guven"]) >= a.threshold
+            and (not a.species or r["ebird_kodu"] in a.species)
         ]
-    if not satir:
-        raise SystemExit(f"esik {a.esik} ustunde dilim yok")
+    if not row:
+        raise SystemExit(f"esik {a.threshold} ustunde dilim yok")
 
-    random.seed(a.tohum)
-    secim = random.sample(satir, min(a.adet, len(satir)))
+    random.seed(a.seed)
+    selection = random.sample(row, min(a.count, len(row)))
     os.makedirs(a.out, exist_ok=True)
 
-    print(f"{len(satir)} uygun dilimden {len(secim)} tanesi kesiliyor -> {a.out}\n")
-    for r in sorted(secim, key=lambda x: (x["ebird_kodu"], x["dosya"])):
-        kod, dosya = r["ebird_kodu"], r["dosya"]
-        bas, bit = float(r["baslangic"]), float(r["bitis"])
-        kaynak = os.path.join(a.wav, kod, dosya + ".wav")
-        ad = f"{kod}_{dosya}_{bas:06.1f}.wav"
-        kes(kaynak, os.path.join(a.out, ad), bas, bit)
+    print(f"{len(row)} uygun dilimden {len(selection)} tanesi kesiliyor -> {a.out}\n")
+    for r in sorted(selection, key=lambda x: (x["ebird_kodu"], x["dosya"])):
+        code, file = r["ebird_kodu"], r["dosya"]
+        start, end = float(r["baslangic"]), float(r["bitis"])
+        source = os.path.join(a.wav, code, file + ".wav")
+        name = f"{code}_{file}_{start:06.1f}.wav"
+        cut(source, os.path.join(a.out, name), start, end)
         print(
-            f"{ad}\n    hedef {float(r['hedef_guven']):.2f}   "
+            f"{name}\n    hedef {float(r['hedef_guven']):.2f}   "
             f"en iyi: {r['en_iyi_tur']} {float(r['en_iyi_guven']):.2f}"
             + (f"   kus disi: {r['kus_disi_tur']}" if r["kus_disi_tur"] else "")
         )

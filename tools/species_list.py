@@ -38,8 +38,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(KOK, "data")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = os.path.join(ROOT, "data")
 CACHE = os.path.join(DATA, "cache")
 
 GBIF = "https://api.gbif.org/v1"
@@ -86,28 +86,28 @@ SESLE_AYIRT_EDILEMEZ = {
 }
 
 
-def cache_get(ad, uretici):
+def cache_get(name, uretici):
     """API sonucunu diske al. Script tekrar çalıştırılabilir olsun ve API
     gereksiz yere dövülmesin; 390 tür sorgusu yeniden çekilirse dakikalar."""
     os.makedirs(CACHE, exist_ok=True)
-    yol = os.path.join(CACHE, ad)
-    if os.path.exists(yol):
-        with open(yol, "r", encoding="utf-8") as f:
+    path = os.path.join(CACHE, name)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    veri = uretici()
-    with open(yol, "w", encoding="utf-8") as f:
-        json.dump(veri, f, ensure_ascii=False)
-    return veri
+    data = uretici()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    return data
 
 
-def http_json(url, deneme=3):
-    for i in range(deneme):
+def http_json(url, attempt=3):
+    for i in range(attempt):
         try:
             req = urllib.request.Request(url, headers=UA)
             with urllib.request.urlopen(req, timeout=90) as r:
                 return json.loads(r.read().decode("utf-8"))
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
-            if i == deneme - 1:
+            if i == attempt - 1:
                 raise
             time.sleep(2 * (i + 1))
 
@@ -124,12 +124,12 @@ def gbif_istanbul_turleri():
     return d["count"], {c["name"]: c["count"] for c in sayimlar}
 
 
-def gbif_tur_adi(species_key):
+def gbif_species_name(species_key):
     d = http_json(f"{GBIF}/species/{species_key}")
     return d.get("canonicalName") or d.get("scientificName", "")
 
 
-def gbif_aylik(species_key):
+def gbif_monthly(species_key):
     """Türün İstanbul'daki aylık kayıt dağılımı — mevsim önceliği (Aşama 3)
     tablosunun ham verisi. 12 elemanlı liste, Ocak=indeks 0."""
     url = (f"{GBIF}/occurrence/search?gadmGid={ISTANBUL_GADM}"
@@ -139,9 +139,9 @@ def gbif_aylik(species_key):
     aylar = [0] * 12
     for c in d.get("facets", [{}])[0].get("counts", []):
         try:
-            ay = int(c["name"])
-            if 1 <= ay <= 12:
-                aylar[ay - 1] = c["count"]
+            month = int(c["name"])
+            if 1 <= month <= 12:
+                aylar[month - 1] = c["count"]
         except (ValueError, KeyError):
             pass
     return aylar
@@ -161,15 +161,15 @@ def ebird_taksonomi():
         return http_json(url)
 
     tr = cache_get("ebird_tax_tr.json", lambda: cek("tr"))
-    en = cache_get("ebird_tax_en.json", lambda: cek(None))
+    highest = cache_get("ebird_tax_en.json", lambda: cek(None))
 
-    en_ad = {t["speciesCode"]: t.get("comName", "") for t in en}
+    max_name = {t["speciesCode"]: t.get("comName", "") for t in highest}
     tablo = {}
     for t in tr:
         sci = t.get("sciName", "")
-        kod = t.get("speciesCode", "")
+        code = t.get("speciesCode", "")
         if sci:
-            tablo[sci] = (kod, t.get("comName", ""), en_ad.get(kod, ""))
+            tablo[sci] = (code, t.get("comName", ""), max_name.get(code, ""))
     return tablo
 
 
@@ -177,9 +177,9 @@ def ebird_taksonomi():
 
 def main():
     ap = argparse.ArgumentParser(description="PokeBird M4: Istanbul tur listesi")
-    ap.add_argument("--esik", type=int, default=30,
+    ap.add_argument("--threshold", type=int, default=30,
                     help="asgari GBIF kayit sayisi (varsayilan 30)")
-    ap.add_argument("--aylik", action="store_true",
+    ap.add_argument("--monthly", action="store_true",
                     help="aylik dagilimi da cek (tur basina 1 sorgu, yavas)")
     ap.add_argument("--out", default=os.path.join(DATA, "species_istanbul.csv"))
     args = ap.parse_args()
@@ -187,8 +187,8 @@ def main():
     os.makedirs(DATA, exist_ok=True)
 
     print(f"GBIF: Istanbul ({ISTANBUL_GADM}) kus kayitlari cekiliyor...")
-    toplam, sayimlar = cache_get("gbif_istanbul_facet.json", gbif_istanbul_turleri)
-    print(f"  {toplam:,} kayit, {len(sayimlar)} farkli tur")
+    total, sayimlar = cache_get("gbif_istanbul_facet.json", gbif_istanbul_turleri)
+    print(f"  {total:,} kayit, {len(sayimlar)} farkli tur")
 
     print("eBird taksonomisi (TR + EN) cekiliyor...")
     taksonomi = ebird_taksonomi()
@@ -196,65 +196,65 @@ def main():
 
     print("Tur adlari cozumleniyor...")
     adlar = cache_get("gbif_species_names.json",
-                      lambda: {k: gbif_tur_adi(k) for k in sayimlar})
+                      lambda: {k: gbif_species_name(k) for k in sayimlar})
 
-    satirlar = []
-    for key, sayi in sorted(sayimlar.items(), key=lambda kv: -kv[1]):
+    rows = []
+    for key, count in sorted(sayimlar.items(), key=lambda kv: -kv[1]):
         sci = adlar.get(key, "")
         if not sci:
             continue
 
-        kod, tr_ad, en_ad = taksonomi.get(sci, ("", "", ""))
+        code, tr_name, max_name = taksonomi.get(sci, ("", "", ""))
 
-        durum, gerekce = "dahil", ""
+        status, gerekce = "dahil", ""
         if sci in EGZOTIK:
-            durum, gerekce = "elendi", EGZOTIK[sci]
+            status, gerekce = "elendi", EGZOTIK[sci]
         elif sci in SESLE_AYIRT_EDILEMEZ:
-            durum, gerekce = "elendi", SESLE_AYIRT_EDILEMEZ[sci]
-        elif sayi < args.esik:
-            durum, gerekce = "elendi", f"Istanbul'da yalnizca {sayi} kayit (esik {args.esik})"
-        elif not kod:
+            status, gerekce = "elendi", SESLE_AYIRT_EDILEMEZ[sci]
+        elif count < args.threshold:
+            status, gerekce = "elendi", f"Istanbul'da yalnizca {count} kayit (esik {args.threshold})"
+        elif not code:
             # eBird taksonomisinde yoksa ya alt tür ya da eskimiş bir ad.
             # Sessizce dahil etmek yanlış: Xeno-canto sorgusu da tutmaz.
-            durum, gerekce = "elendi", "eBird taksonomisinde eslesmedi"
+            status, gerekce = "elendi", "eBird taksonomisinde eslesmedi"
 
-        satirlar.append({
-            "ebird_kodu": kod, "bilimsel_ad": sci, "turkce_ad": tr_ad,
-            "ingilizce_ad": en_ad, "gbif_kayit": sayi, "gbif_species_key": key,
-            "durum": durum, "gerekce": gerekce,
+        rows.append({
+            "ebird_kodu": code, "bilimsel_ad": sci, "turkce_ad": tr_name,
+            "ingilizce_ad": max_name, "gbif_kayit": count, "gbif_species_key": key,
+            "durum": status, "gerekce": gerekce,
         })
 
-    if args.aylik:
-        dahil = [s for s in satirlar if s["durum"] == "dahil"]
-        print(f"Aylik dagilim cekiliyor ({len(dahil)} tur)...")
-        for i, s in enumerate(dahil, 1):
+    if args.monthly:
+        include = [s for s in rows if s["durum"] == "dahil"]
+        print(f"Aylik dagilim cekiliyor ({len(include)} tur)...")
+        for i, s in enumerate(include, 1):
             key = s["gbif_species_key"]
-            aylar = cache_get(f"aylik_{key}.json", lambda k=key: gbif_aylik(k))
-            for ay in range(12):
-                s[f"ay_{ay+1:02d}"] = aylar[ay]
-            if i % 25 == 0 or i == len(dahil):
-                print(f"  {i}/{len(dahil)}")
+            aylar = cache_get(f"aylik_{key}.json", lambda k=key: gbif_monthly(k))
+            for month in range(12):
+                s[f"ay_{month+1:02d}"] = aylar[month]
+            if i % 25 == 0 or i == len(include):
+                print(f"  {i}/{len(include)}")
 
     sutunlar = ["ebird_kodu", "bilimsel_ad", "turkce_ad", "ingilizce_ad",
                 "gbif_kayit", "gbif_species_key", "durum", "gerekce"]
-    if args.aylik:
+    if args.monthly:
         sutunlar += [f"ay_{a:02d}" for a in range(1, 13)]
 
     with open(args.out, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=sutunlar, extrasaction="ignore")
         w.writeheader()
-        for s in satirlar:
+        for s in rows:
             w.writerow(s)
 
-    dahil = sum(1 for s in satirlar if s["durum"] == "dahil")
-    elendi = len(satirlar) - dahil
+    include = sum(1 for s in rows if s["durum"] == "dahil")
+    elendi = len(rows) - include
     print(f"\n{args.out}")
-    print(f"  dahil  {dahil} tur")
+    print(f"  dahil  {include} tur")
     print(f"  elendi {elendi} tur")
 
-    if dahil:
+    if include:
         print("\nEn cok kaydi olan 10 tur:")
-        for s in [x for x in satirlar if x["durum"] == "dahil"][:10]:
+        for s in [x for x in rows if x["durum"] == "dahil"][:10]:
             print(f"  {s['gbif_kayit']:7,}  {s['turkce_ad'] or s['bilimsel_ad']}")
 
     # Plan ~110 tür öngörüyor. Buradaki liste HAVUZ; nihai daraltmayı
@@ -270,10 +270,10 @@ def main():
     #
     # Dogru daraltma olcutu Xeno-canto ses kaydi sayisi: hem sesle
     # taninabilirligi hem egitim verisi mevcudiyetini ayni anda olcer.
-    if dahil > 300:
-        print(f"\n[!] {dahil} tur beklenenden fazla — GBIF sorgusu genislemis olabilir.")
-    elif dahil < 150:
-        print(f"\n[!] {dahil} tur, havuz icin dusuk. --esik dusurmeyi dusunun.")
+    if include > 300:
+        print(f"\n[!] {include} tur beklenenden fazla — GBIF sorgusu genislemis olabilir.")
+    elif include < 150:
+        print(f"\n[!] {include} tur, havuz icin dusuk. --esik dusurmeyi dusunun.")
     else:
         print(f"\nBu bir HAVUZ listesi. Nihai ~110 ture daraltma xc_fetch.py'de,\n"
               f"Xeno-canto ses kaydi sayisina gore yapilacak (bkz. dosya basligi).")

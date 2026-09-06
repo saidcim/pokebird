@@ -56,26 +56,26 @@ try:
 except (AttributeError, ValueError):
     pass
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HARITA = os.path.join(KOK, "data", "birdnet_ad_haritasi.csv")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MAP = os.path.join(ROOT, "data", "birdnet_ad_haritasi.csv")
 
 
-def harita_yukle():
+def map_yukle():
     """birdnet_bilimsel_ad -> (ebird_kodu, turkce_ad)"""
-    if not os.path.exists(HARITA):
-        sys.exit("eslesme tablosu yok: " + HARITA)
+    if not os.path.exists(MAP):
+        sys.exit("eslesme tablosu yok: " + MAP)
     d = {}
-    with open(HARITA, encoding="utf-8") as f:
+    with open(MAP, encoding="utf-8") as f:
         for s in csv.DictReader(f):
             d[s["birdnet_bilimsel_ad"].strip()] = (s["ebird_kodu"].strip(),
                                                    s["turkce_ad"].strip())
     return d
 
 
-def cihaz_yukle(yol):
+def cihaz_yukle(path):
     """cihaz.csv -> (isaretler[datetime], tur_olaylari[(dt, kod, ad, guven)])"""
     isaretler, olaylar = [], []
-    with open(yol, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for s in csv.DictReader(f):
             t = dt.datetime.fromisoformat(s["duvar_saati"])
             if s["kip"] == "ISARET":
@@ -86,44 +86,44 @@ def cihaz_yukle(yol):
     return isaretler, olaylar
 
 
-def birdnet_yukle(yol, esik, harita):
+def birdnet_yukle(path, threshold, name_map):
     """BirdNET results.csv -> (bilinen[(bas, bit, kod, ad, skor)], kapsam_disi)"""
     bilinen, kapsam_disi = [], defaultdict(float)
-    with open(yol, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for s in csv.DictReader(f):
             skor = float(s["Confidence"])
-            if skor < esik:
+            if skor < threshold:
                 continue
-            bilimsel = s["Scientific name"].strip()
-            if bilimsel in harita:
-                kod, tr = harita[bilimsel]
+            scientific = s["Scientific name"].strip()
+            if scientific in name_map:
+                code, tr = name_map[scientific]
                 bilinen.append((float(s["Start (s)"]), float(s["End (s)"]),
-                                kod, tr, skor))
+                                code, tr, skor))
             else:
-                kapsam_disi[bilimsel] = max(kapsam_disi[bilimsel], skor)
+                kapsam_disi[scientific] = max(kapsam_disi[scientific], skor)
     return bilinen, kapsam_disi
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--oturum", required=True, help="saha_kayit.py'nin dizini")
+    ap.add_argument("--session", required=True, help="saha_kayit.py'nin dizini")
     ap.add_argument("--birdnet", required=True,
                     help="telefon kaydinin results.csv'si")
-    ap.add_argument("--isaret-ses", type=float, required=True,
+    ap.add_argument("--marker-audio", type=float, required=True,
                     help="ILK cirpmanin kayittaki saniyesi")
-    ap.add_argument("--isaret2-ses", type=float, default=None,
+    ap.add_argument("--marker2-audio", type=float, default=None,
                     help="SON cirpmanin saniyesi (saat kaymasi duzeltmesi)")
-    ap.add_argument("--esik", type=float, default=0.25,
+    ap.add_argument("--threshold", type=float, default=0.25,
                     help="BirdNET guven esigi (varsayilan 0.25, BirdNET'inki)")
-    ap.add_argument("--pencere", type=float, default=8.0,
+    ap.add_argument("--window", type=float, default=8.0,
                     help="+- kac saniyelik uyum penceresi. 8 = cihazin 3 pencerelik birlestirmesi (PB_DECISION_MIN_WINDOWS) + 5 s ekranda tutma (PB_DECISION_HOLD_MS)")
     args = ap.parse_args()
 
-    cihaz_csv = os.path.join(args.oturum, "cihaz.csv")
+    cihaz_csv = os.path.join(args.session, "cihaz.csv")
     if not os.path.exists(cihaz_csv):
         sys.exit("bulunamadi: " + cihaz_csv)
 
-    harita = harita_yukle()
+    name_map = map_yukle()
     isaretler, olaylar = cihaz_yukle(cihaz_csv)
     if not isaretler:
         sys.exit("cihaz.csv'de ISARET yok -- eszamanlama yapilamaz.\n"
@@ -132,11 +132,11 @@ def main():
 
     t0 = isaretler[0]
     egim = 1.0
-    if args.isaret2_ses is not None and len(isaretler) >= 2:
+    if args.marker2_audio is not None and len(isaretler) >= 2:
         pc_araligi = (isaretler[-1] - t0).total_seconds()
-        ses_araligi = args.isaret2_ses - args.isaret_ses
+        audio_araligi = args.marker2_audio - args.marker_audio
         if pc_araligi > 60:
-            egim = ses_araligi / pc_araligi
+            egim = audio_araligi / pc_araligi
             kayma = (egim - 1.0) * pc_araligi
             print("  saat kaymasi: {:+.2f} s / {:.0f} dk (egim {:.6f}) -- duzeltildi"
                   .format(kayma, pc_araligi / 60, egim))
@@ -145,89 +145,89 @@ def main():
     elif len(isaretler) >= 2:
         print("  [!] ikinci isaret var ama --isaret2-ses verilmedi; kayma DUZELTILMEDI")
 
-    def ses_saniyesi(t):
-        return (t - t0).total_seconds() * egim + args.isaret_ses
+    def audio_saniyesi(t):
+        return (t - t0).total_seconds() * egim + args.marker_audio
 
-    bilinen, kapsam_disi = birdnet_yukle(args.birdnet, args.esik, harita)
+    bilinen, kapsam_disi = birdnet_yukle(args.birdnet, args.threshold, name_map)
 
     # --- eslestirme -------------------------------------------------------
     bn_kullanildi = [False] * len(bilinen)
-    ortak, cihaz_fazla = [], []
-    for t, kod, ad, guven in olaylar:
-        ts = ses_saniyesi(t)
+    ortak, cihaz_extra = [], []
+    for t, code, name, guven in olaylar:
+        ts = audio_saniyesi(t)
         eslesen = None
-        for i, (bas, bit, bkod, bad, skor) in enumerate(bilinen):
-            if bkod != kod:
+        for i, (start, end, bkod, bad, skor) in enumerate(bilinen):
+            if bkod != code:
                 continue
-            if bas - args.pencere <= ts <= bit + args.pencere:
+            if start - args.window <= ts <= end + args.window:
                 eslesen = i
                 break
         if eslesen is None:
-            cihaz_fazla.append((ts, kod, ad, guven))
+            cihaz_extra.append((ts, code, name, guven))
         else:
             bn_kullanildi[eslesen] = True
-            ortak.append((ts, kod, ad, guven, bilinen[eslesen][4]))
+            ortak.append((ts, code, name, guven, bilinen[eslesen][4]))
 
     cihazin_dedigi = set(k for _, k, _, _ in olaylar)
-    birdnet_fazla = [b for i, b in enumerate(bilinen)
+    birdnet_extra = [b for i, b in enumerate(bilinen)
                      if not bn_kullanildi[i] and b[2] not in cihazin_dedigi]
 
     # --- rapor ------------------------------------------------------------
     W = 74
     print()
     print("=" * W)
-    print("  SAHA UYUM RAPORU   " + os.path.basename(os.path.normpath(args.oturum)))
-    print("  BirdNET esigi {}  |  uyum penceresi +-{:.0f} s".format(args.esik, args.pencere))
+    print("  SAHA UYUM RAPORU   " + os.path.basename(os.path.normpath(args.session)))
+    print("  BirdNET esigi {}  |  uyum penceresi +-{:.0f} s".format(args.threshold, args.window))
     print("=" * W)
     print("  cihaz TUR olayi                    : {}".format(len(olaylar)))
     print("  BirdNET tespiti (bizim 178 icinde) : {}".format(len(bilinen)))
     print("  BirdNET tespiti (kapsam disi tur)  : {} tur".format(len(kapsam_disi)))
     print("-" * W)
     print("  ortak (hemfikir)                   : {}".format(len(ortak)))
-    print("  cihaz fazla (yanlis alarm adayi)   : {}".format(len(cihaz_fazla)))
-    print("  BirdNET fazla (kacirma adayi)      : {}".format(len(birdnet_fazla)))
+    print("  cihaz fazla (yanlis alarm adayi)   : {}".format(len(cihaz_extra)))
+    print("  BirdNET fazla (kacirma adayi)      : {}".format(len(birdnet_extra)))
     if olaylar:
         print("\n  cihazin TUR dediklerinin %{:.1f}'i BirdNET'ce dogrulandi"
               .format(100.0 * len(ortak) / len(olaylar)))
 
-    def blok(baslik, satirlar):
+    def blok(title, rows):
         print("\n" + "-" * W)
-        print("  " + baslik)
+        print("  " + title)
         print("-" * W)
-        if not satirlar:
+        if not rows:
             print("  (yok)")
-        for s in satirlar:
+        for s in rows:
             print(" ", s)
 
     blok("ORTAK - cihaz ve BirdNET ayni turu duydu",
          ["{:8.1f}s  {:<9} {:<24} cihaz %{:5.1f}  birdnet {:.2f}"
-          .format(ts, kod, ad, g, b) for ts, kod, ad, g, b in ortak])
+          .format(ts, code, name, g, b) for ts, code, name, g, b in ortak])
 
     blok("CIHAZ FAZLA - BirdNET dogrulamadi (negatif madenciligi adayi)",
-         ["{:8.1f}s  {:<9} {:<24} cihaz %{:5.1f}".format(ts, kod, ad, g)
-          for ts, kod, ad, g in cihaz_fazla])
+         ["{:8.1f}s  {:<9} {:<24} cihaz %{:5.1f}".format(ts, code, name, g)
+          for ts, code, name, g in cihaz_extra])
 
     blok("BIRDNET FAZLA - cihaz bu turu hic demedi",
-         ["{:8.1f}s  {:<9} {:<24} birdnet {:.2f}".format(bas, kod, ad, skor)
-          for bas, bit, kod, ad, skor in birdnet_fazla])
+         ["{:8.1f}s  {:<9} {:<24} birdnet {:.2f}".format(start, code, name, skor)
+          for start, end, code, name, skor in birdnet_extra])
 
     if kapsam_disi:
         blok("KAPSAM DISI - 178 turluk listemizde olmayan (kacirma DEGIL)",
-             ["{:<34} en yuksek {:.2f}".format(ad, skor)
-              for ad, skor in sorted(kapsam_disi.items(), key=lambda x: -x[1])])
+             ["{:<34} en yuksek {:.2f}".format(name, skor)
+              for name, skor in sorted(kapsam_disi.items(), key=lambda x: -x[1])])
 
-    cikti = os.path.join(args.oturum, "uyum.csv")
-    with open(cikti, "w", encoding="utf-8", newline="") as f:
+    output = os.path.join(args.session, "uyum.csv")
+    with open(output, "w", encoding="utf-8", newline="") as f:
         y = csv.writer(f)
         y.writerow(["sinif", "ses_saniyesi", "ebird_kodu", "ad",
                     "cihaz_guven_yuzde", "birdnet_skor"])
-        for ts, kod, ad, g, b in ortak:
-            y.writerow(["ortak", "{:.1f}".format(ts), kod, ad, g, b])
-        for ts, kod, ad, g in cihaz_fazla:
-            y.writerow(["cihaz_fazla", "{:.1f}".format(ts), kod, ad, g, ""])
-        for bas, bit, kod, ad, skor in birdnet_fazla:
-            y.writerow(["birdnet_fazla", "{:.1f}".format(bas), kod, ad, "", skor])
-    print("\n  yazildi: " + cikti + "\n")
+        for ts, code, name, g, b in ortak:
+            y.writerow(["ortak", "{:.1f}".format(ts), code, name, g, b])
+        for ts, code, name, g in cihaz_extra:
+            y.writerow(["cihaz_fazla", "{:.1f}".format(ts), code, name, g, ""])
+        for start, end, code, name, skor in birdnet_extra:
+            y.writerow(["birdnet_fazla", "{:.1f}".format(start), code, name, "", skor])
+    print("\n  yazildi: " + output + "\n")
 
 
 if __name__ == "__main__":

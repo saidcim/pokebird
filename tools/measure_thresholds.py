@@ -30,27 +30,27 @@ from collections import defaultdict
 
 import numpy as np
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EGITIM = os.path.join(KOK, "data", "egitim")
-MODELLER = os.path.join(KOK, "models")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRAIN = os.path.join(ROOT, "data", "egitim")
+MODELLER = os.path.join(ROOT, "models")
 ONBELLEK = os.path.join(MODELLER, "test_olasilik.npy")
 
-NEGATIF = 178          # siniflar.csv'nin son sinifi: negatif / bilinmiyor
-PENCERE = 8            # cihazdaki birlestirme penceresi (PB_VOTE_WINDOWS)
+NEGATIVE = 178          # siniflar.csv'nin son sinifi: negatif / bilinmiyor
+WINDOW = 8            # cihazdaki birlestirme penceresi (PB_VOTE_WINDOWS)
 
 # Secim olcutleri — hangi isabete razi oldugumuz bir URUN karari, sayilar degil.
 # Girme esigi: tur adini ekrana yazdigimizda hakli olma orani.
-HEDEF_ISABET_GIRIS = 0.85
+TARGET_ISABET_GIRIS = 0.85
 # Cikma esigi: yazdigimizi silme noktasi. Birlestirilmis top-1 dogrulugunun
 # (%70,40) altina dusen bir gosterim artik "en iyi tahmin"den iyi degil.
-HEDEF_ISABET_CIKIS = 0.70
+TARGET_ISABET_CIKIS = 0.70
 
 
-def bloklar(P, Y, kayitlar, n):
+def bloklar(P, Y, records, n):
     """Ardisik n pencereyi ortala. birlestirme_olc.py ile AYNI kural (softmax
     ortalamasi) — baska bir kural secilirse §9k'daki sayilar gecersiz olur."""
-    p1, tahmin, hedef = [], [], []
-    for v in kayitlar.values():
+    p1, pred, target = [], [], []
+    for v in records.values():
         for b in range(0, len(v), n):
             grup = [k for _, k in v[b:b + n]]
             if len(grup) < min(n, 2) and n > 1:
@@ -58,31 +58,31 @@ def bloklar(P, Y, kayitlar, n):
             ort = P[grup].mean(axis=0)
             t = int(np.argmax(ort))
             p1.append(float(ort[t]))
-            tahmin.append(t)
-            hedef.append(int(Y[grup[0]]))
-    return np.array(p1), np.array(tahmin), np.array(hedef)
+            pred.append(t)
+            target.append(int(Y[grup[0]]))
+    return np.array(p1), np.array(pred), np.array(target)
 
 
-def tablo(p1, tahmin, hedef, esikler):
+def tablo(p1, pred, target, esikler):
     """Her esik icin: kapsam, isabet, yanlis alarm, kacirma."""
-    kus = hedef != NEGATIF
-    satir = []
+    bird = target != NEGATIVE
+    row = []
     for t in esikler:
-        duyuru = (p1 >= t) & (tahmin != NEGATIF)
+        duyuru = (p1 >= t) & (pred != NEGATIVE)
         n_duyuru = int(duyuru.sum())
-        isabet = float((tahmin[duyuru] == hedef[duyuru]).mean()) if n_duyuru else float("nan")
+        isabet = float((pred[duyuru] == target[duyuru]).mean()) if n_duyuru else float("nan")
         kapsam = n_duyuru / len(p1)
         # Sahadaki en pahali hata: gurultuyu kus sanmak.
-        yanlis_alarm = float(duyuru[~kus].mean()) if (~kus).any() else float("nan")
-        kacirma = float(1.0 - duyuru[kus].mean()) if kus.any() else float("nan")
-        satir.append((t, n_duyuru, kapsam, isabet, yanlis_alarm, kacirma))
-    return satir
+        yanlis_alarm = float(duyuru[~bird].mean()) if (~bird).any() else float("nan")
+        kacirma = float(1.0 - duyuru[bird].mean()) if bird.any() else float("nan")
+        row.append((t, n_duyuru, kapsam, isabet, yanlis_alarm, kacirma))
+    return row
 
 
-def sec(satir, hedef_isabet):
+def pick(row, target_isabet):
     """Hedef isabete ulasan EN KUCUK esik — kapsami gereksiz yere kismayalim."""
-    for t, n, kapsam, isabet, ya, kac in satir:
-        if n >= 50 and isabet >= hedef_isabet:
+    for t, n, kapsam, isabet, ya, kac in row:
+        if n >= 50 and isabet >= target_isabet:
             return t, kapsam, isabet, ya
     return None, None, None, None
 
@@ -93,8 +93,8 @@ def main():
                  "tools/measure_voting.py calistirin (onbellegi o uretiyor).")
 
     P = np.load(ONBELLEK)
-    y = np.load(os.path.join(EGITIM, "etiket.npy"))
-    with open(os.path.join(EGITIM, "ornekler.csv"), encoding="utf-8") as f:
+    y = np.load(os.path.join(TRAIN, "etiket.npy"))
+    with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
         r = list(csv.DictReader(f))
 
     idx = np.array([i for i, x in enumerate(r) if x["bolum"] == "test"])
@@ -103,49 +103,49 @@ def main():
                  "esitlenmemis. birlestirme_olc.py'yi yeniden calistirin.")
     Y = y[idx]
 
-    kayitlar = defaultdict(list)
+    records = defaultdict(list)
     for k, i in enumerate(idx):
-        kayitlar[(r[i]["ebird_kodu"], r[i]["dosya"])].append(
+        records[(r[i]["ebird_kodu"], r[i]["dosya"])].append(
             (float(r[i]["baslangic"]), k))
-    for v in kayitlar.values():
+    for v in records.values():
         v.sort()
 
     esikler = [round(0.05 * i, 2) for i in range(1, 20)]
     s = []
     s.append("EKRAN KARAR KURALI — guven esigi olcumu")
     s.append("(model: models/tur_agi_int8.tflite, test kumesi, "
-             f"{len(idx)} pencere / {len(kayitlar)} kayit)")
+             f"{len(idx)} pencere / {len(records)} kayit)")
     s.append("kapsam = kac blokta tur adi yazariz - isabet = yazdigimizda "
              "hakli olma orani")
     s.append("yanlis alarm = negatif bloklarin kacinda tur adi yazariz - "
              "kacirma = kus bloklarinin kacini kaciririz")
 
     secimler = {}
-    for n in (1, 3, PENCERE):
-        p1, tahmin, hedef = bloklar(P, Y, kayitlar, n)
+    for n in (1, 3, WINDOW):
+        p1, pred, target = bloklar(P, Y, records, n)
         s.append("")
         s.append(f"--- {n} pencere birlestirilmis ({len(p1)} blok) "
                  f"------------------------")
         s.append("  esik    blok  kapsam   isabet  yanlis-alarm  kacirma")
-        satir = tablo(p1, tahmin, hedef, esikler)
-        for t, nd, kapsam, isabet, ya, kac in satir:
+        row = tablo(p1, pred, target, esikler)
+        for t, nd, kapsam, isabet, ya, kac in row:
             s.append(f"  {t:4.2f}  {nd:6d}  %{100*kapsam:5.1f}   "
                      f"%{100*isabet:5.1f}   %{100*ya:9.1f}   %{100*kac:5.1f}")
-        secimler[n] = satir
+        secimler[n] = row
 
-    satir8 = secimler[PENCERE]
-    giris = sec(satir8, HEDEF_ISABET_GIRIS)
-    cikis = sec(satir8, HEDEF_ISABET_CIKIS)
+    satir8 = secimler[WINDOW]
+    giris = pick(satir8, TARGET_ISABET_GIRIS)
+    cikis = pick(satir8, TARGET_ISABET_CIKIS)
 
     s.append("")
     s.append("--- SECIM ---------------------------------------------------")
-    s.append(f"girme esigi (isabet >= %{100*HEDEF_ISABET_GIRIS:.0f}): "
+    s.append(f"girme esigi (isabet >= %{100*TARGET_ISABET_GIRIS:.0f}): "
              f"{giris[0]}  -> kapsam %{100*giris[1]:.1f}, isabet "
              f"%{100*giris[2]:.1f}, yanlis alarm %{100*giris[3]:.1f}"
              if giris[0] is not None else
              "girme esigi: hedef isabete ULASILAMADI — hedefi dusurun ya da "
              "modeli iyilestirin")
-    s.append(f"cikma esigi (isabet >= %{100*HEDEF_ISABET_CIKIS:.0f}): "
+    s.append(f"cikma esigi (isabet >= %{100*TARGET_ISABET_CIKIS:.0f}): "
              f"{cikis[0]}  -> kapsam %{100*cikis[1]:.1f}, isabet "
              f"%{100*cikis[2]:.1f}, yanlis alarm %{100*cikis[3]:.1f}"
              if cikis[0] is not None else
@@ -156,10 +156,10 @@ def main():
     s.append("UYARI: bu sayilar UST SINIR — bloklar ortusmeyen dilimlerden, "
              "cihazda pencereler 1 sn adimla ortusuyor (hatalar ilintili).")
 
-    metin = "\n".join(s)
-    print("\n" + metin)
+    text = "\n".join(s)
+    print("\n" + text)
     with open(os.path.join(MODELLER, "esik.txt"), "w", encoding="utf-8") as f:
-        f.write(metin + "\n")
+        f.write(text + "\n")
     return 0
 
 

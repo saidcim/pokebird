@@ -51,46 +51,46 @@ import numpy as np
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 import tensorflow as tf  # noqa: E402
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EGITIM = os.path.join(KOK, "data", "egitim")
-MODELLER = os.path.join(KOK, "models")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRAIN = os.path.join(ROOT, "data", "egitim")
+MODELLER = os.path.join(ROOT, "models")
 
 FRAMES, BANDS = 187, 64
-SIGMA_OLCEK = 4.0 / 127.0        # int8 -> sigma; mel.c'deki +-4 sigma yayilimi
-MAC_BUTCE = 30_000_000           # ARCHITECTURE §4
-ARENA_BUTCE = 180 * 1024         # ARCHITECTURE §5
+SIGMA_SCALE = 4.0 / 127.0        # int8 -> sigma; mel.c'deki +-4 sigma yayilimi
+MAC_BUDGET = 30_000_000           # ARCHITECTURE §4
+ARENA_BUDGET = 180 * 1024         # ARCHITECTURE §5
 
 
 # ══ Veri ════════════════════════════════════════════════════════════════
-def veri_yukle():
-    X = np.load(os.path.join(EGITIM, "pencereler.npy"), mmap_mode="r")
-    y = np.load(os.path.join(EGITIM, "etiket.npy")).astype(np.int32)
-    T = np.load(os.path.join(EGITIM, "ogretmen.npy")).astype(np.float32)
-    with open(os.path.join(EGITIM, "ornekler.csv"), encoding="utf-8") as f:
-        satir = list(csv.DictReader(f))
-    with open(os.path.join(EGITIM, "siniflar.csv"), encoding="utf-8") as f:
-        siniflar = list(csv.DictReader(f))
-    if not (len(X) == len(y) == len(T) == len(satir)):
+def data_yukle():
+    X = np.load(os.path.join(TRAIN, "pencereler.npy"), mmap_mode="r")
+    y = np.load(os.path.join(TRAIN, "etiket.npy")).astype(np.int32)
+    T = np.load(os.path.join(TRAIN, "ogretmen.npy")).astype(np.float32)
+    with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
+        row = list(csv.DictReader(f))
+    with open(os.path.join(TRAIN, "siniflar.csv"), encoding="utf-8") as f:
+        classes = list(csv.DictReader(f))
+    if not (len(X) == len(y) == len(T) == len(row)):
         sys.exit(f"uzunluklar tutmuyor: X {len(X)} y {len(y)} T {len(T)} "
-                 f"csv {len(satir)} — tools/build_dataset.py --dogrula-cikti")
+                 f"csv {len(row)} — tools/build_dataset.py --dogrula-cikti")
 
-    bolum = np.array([s["bolum"] for s in satir])
-    bulasik = np.array([s["bulasik"] == "1" for s in satir])
-    n_sinif = len(siniflar)
+    split = np.array([s["bolum"] for s in row])
+    contaminated = np.array([s["bulasik"] == "1" for s in row])
+    n_classes = len(classes)
 
     # Ogretmen -> dagilim. Negatif sinifin ogretmeni yok (BirdNET orada kus
     # duymuyor); onlarda sert etiket tek kaynak.
-    toplam = T.sum(axis=1, keepdims=True)
-    yumusak = np.zeros((len(X), n_sinif), dtype=np.float32)
-    var = (toplam[:, 0] > 1e-6)
-    yumusak[var, :T.shape[1]] = T[var] / toplam[var]
+    total = T.sum(axis=1, keepdims=True)
+    yumusak = np.zeros((len(X), n_classes), dtype=np.float32)
+    var = (total[:, 0] > 1e-6)
+    yumusak[var, :T.shape[1]] = T[var] / total[var]
     # ogretmensiz satirlar (negatifler + esigi geceni olmayanlar) -> tek sicak
     yumusak[~var, y[~var]] = 1.0
 
-    return X, y, yumusak, bolum, bulasik, siniflar, n_sinif
+    return X, y, yumusak, split, contaminated, classes, n_classes
 
 
-def veri_kumesi(X, y, yumusak, sert_agirlik, idx, yigin, artir, karistir):
+def make_dataset(X, y, yumusak, sert_weight, idx, batch, augment, shuffle):
     """memmap'ten yigin okuyan tf.data hatti.
 
     Diziyi tf sabitine cevirmiyoruz (738 MB, graf icine gomulmemeli);
@@ -98,12 +98,12 @@ def veri_kumesi(X, y, yumusak, sert_agirlik, idx, yigin, artir, karistir):
     """
     def getir(i):
         i = np.sort(i)                       # memmap'te sirali okuma hizli
-        return (X[i].astype(np.float32), y[i], yumusak[i], sert_agirlik[i])
+        return (X[i].astype(np.float32), y[i], yumusak[i], sert_weight[i])
 
     ds = tf.data.Dataset.from_tensor_slices(idx)
-    if karistir:
+    if shuffle:
         ds = ds.shuffle(len(idx), reshuffle_each_iteration=True)
-    ds = ds.batch(yigin, drop_remainder=False)
+    ds = ds.batch(batch, drop_remainder=False)
     ds = ds.map(
         lambda i: tf.numpy_function(
             getir, [i], [tf.float32, tf.int32, tf.float32, tf.float32]),
@@ -113,7 +113,7 @@ def veri_kumesi(X, y, yumusak, sert_agirlik, idx, yigin, artir, karistir):
         x = tf.reshape(x, (-1, FRAMES, BANDS, 1))
         e.set_shape([None]); s.set_shape([None, yumusak.shape[1]])
         w.set_shape([None])
-        if artir:
+        if augment:
             x = artirma(x)
         return x, {"sert": e, "yumusak": s}, w
 
@@ -138,12 +138,12 @@ def artirma(x):
     k = tf.random.uniform([], -16, 17, dtype=tf.int32)
     x = tf.roll(x, shift=k, axis=1)
 
-    def maskele(x, eksen, en_fazla):
+    def maskele(x, eksen, max_extra):
         boy = tf.shape(x)[eksen]
-        genislik = tf.random.uniform([b, 1], 0, en_fazla, dtype=tf.int32)
-        bas = tf.random.uniform([b, 1], 0, boy - en_fazla, dtype=tf.int32)
+        width = tf.random.uniform([b, 1], 0, max_extra, dtype=tf.int32)
+        start = tf.random.uniform([b, 1], 0, boy - max_extra, dtype=tf.int32)
         r = tf.reshape(tf.range(boy), [1, -1])
-        m = tf.cast((r < bas) | (r >= bas + genislik), x.dtype)
+        m = tf.cast((r < start) | (r >= start + width), x.dtype)
         sekil = [b, 1, 1, 1]
         sekil[eksen] = boy
         return x * tf.reshape(m, sekil)
@@ -154,27 +154,27 @@ def artirma(x):
 
 
 # ══ Model ═══════════════════════════════════════════════════════════════
-def ds_blok(x, kanal, adim, ad):
-    x = tf.keras.layers.DepthwiseConv2D(3, strides=adim, padding="same",
-                                        use_bias=False, name=f"{ad}_dw")(x)
-    x = tf.keras.layers.BatchNormalization(name=f"{ad}_dwbn")(x)
-    x = tf.keras.layers.ReLU(6.0, name=f"{ad}_dwrelu")(x)
-    x = tf.keras.layers.Conv2D(kanal, 1, use_bias=False, name=f"{ad}_pw")(x)
-    x = tf.keras.layers.BatchNormalization(name=f"{ad}_pwbn")(x)
-    return tf.keras.layers.ReLU(6.0, name=f"{ad}_pwrelu")(x)
+def ds_blok(x, kanal, step, name):
+    x = tf.keras.layers.DepthwiseConv2D(3, strides=step, padding="same",
+                                        use_bias=False, name=f"{name}_dw")(x)
+    x = tf.keras.layers.BatchNormalization(name=f"{name}_dwbn")(x)
+    x = tf.keras.layers.ReLU(6.0, name=f"{name}_dwrelu")(x)
+    x = tf.keras.layers.Conv2D(kanal, 1, use_bias=False, name=f"{name}_pw")(x)
+    x = tf.keras.layers.BatchNormalization(name=f"{name}_pwbn")(x)
+    return tf.keras.layers.ReLU(6.0, name=f"{name}_pwrelu")(x)
 
 
-def model_kur(n_sinif, genislik=1.0, dropout=0.2):
+def model_kur(n_classes, width=1.0, dropout=0.2):
     """Derinlemesine ayrilabilir CNN (daraltilmis MobileNet), ARCHITECTURE §4.
 
     ReLU6 bilerek: INT8 niceleştirmede aktivasyon araligini sinirli tutuyor,
     kalibrasyon kuyruk degerlerine daha az duyarli oluyor.
     """
-    k = lambda n: max(8, int(n * genislik))
+    k = lambda n: max(8, int(n * width))
     g = tf.keras.Input(shape=(FRAMES, BANDS, 1), dtype="float32", name="mel_int8")
 
     # Ham int8 -> sigma. Cihaz baytlari oldugu gibi versin diye MODELIN ICINDE.
-    x = tf.keras.layers.Rescaling(SIGMA_OLCEK, name="int8_sigma")(g)
+    x = tf.keras.layers.Rescaling(SIGMA_SCALE, name="int8_sigma")(g)
 
     x = tf.keras.layers.Conv2D(k(24), 3, strides=2, padding="same",
                                use_bias=False, name="giris")(x)
@@ -192,13 +192,13 @@ def model_kur(n_sinif, genislik=1.0, dropout=0.2):
 
     x = tf.keras.layers.GlobalAveragePooling2D(name="gap")(x)
     x = tf.keras.layers.Dropout(dropout, name="dropout")(x)
-    c = tf.keras.layers.Dense(n_sinif, name="logit")(x)
+    c = tf.keras.layers.Dense(n_classes, name="logit")(x)
     return tf.keras.Model(g, c, name="pokebird_tur_agi")
 
 
-def mac_say(model):
+def mac_count(model):
     """Pencere basina carpma-toplama. Butce ARCHITECTURE §4: <=30 MMAC."""
-    toplam = 0
+    total = 0
     for k in model.layers:
         c = getattr(k, "output", None)
         if c is None:
@@ -207,13 +207,13 @@ def mac_say(model):
         if isinstance(k, tf.keras.layers.Conv2D):
             h, w, f = s[1], s[2], s[3]
             gk = k.kernel_size[0] * k.kernel_size[1]
-            toplam += h * w * f * gk * k.input.shape[-1]
+            total += h * w * f * gk * k.input.shape[-1]
         elif isinstance(k, tf.keras.layers.DepthwiseConv2D):
             h, w, f = s[1], s[2], s[3]
-            toplam += h * w * f * k.kernel_size[0] * k.kernel_size[1]
+            total += h * w * f * k.kernel_size[0] * k.kernel_size[1]
         elif isinstance(k, tf.keras.layers.Dense):
-            toplam += k.input.shape[-1] * s[-1]
-    return int(toplam)
+            total += k.input.shape[-1] * s[-1]
+    return int(total)
 
 
 def aktivasyon_tepe(model):
@@ -237,7 +237,7 @@ def aktivasyon_tepe(model):
 
 
 # ══ Kayip ═══════════════════════════════════════════════════════════════
-def kayip_kur(n_sinif, alfa, gama, kd_agirlik):
+def loss_kur(n_classes, alfa, gama, kd_weight):
     """focal(sert) * ornek_agirligi  +  kd_agirlik * CE(ogretmen).
 
     Sert etiketin agirligi BULASIK dilimlerde 0 — o dilimler yalnizca
@@ -245,30 +245,30 @@ def kayip_kur(n_sinif, alfa, gama, kd_agirlik):
     """
     alfa = tf.constant(alfa, dtype=tf.float32)
 
-    def kayip(hedef, logit, ornek_agirlik):
+    def loss(target, logit, sample_weight):
         p = tf.nn.log_softmax(logit)
-        sert = tf.one_hot(hedef["sert"], n_sinif)
+        sert = tf.one_hot(target["sert"], n_classes)
 
         pt = tf.reduce_sum(sert * tf.exp(p), axis=-1)
         ce = -tf.reduce_sum(sert * p, axis=-1)
         a = tf.reduce_sum(sert * alfa, axis=-1)
         focal = a * tf.pow(1.0 - pt, gama) * ce
 
-        kd = -tf.reduce_sum(hedef["yumusak"] * p, axis=-1)
-        return tf.reduce_mean(ornek_agirlik * focal + kd_agirlik * kd)
+        kd = -tf.reduce_sum(target["yumusak"] * p, axis=-1)
+        return tf.reduce_mean(sample_weight * focal + kd_weight * kd)
 
-    return kayip
+    return loss
 
 
 # ══ Egitim dongusu ══════════════════════════════════════════════════════
-def ilk_k(logit, hedef, k):
+def ilk_k(logit, target, k):
     return tf.reduce_mean(tf.cast(
-        tf.math.in_top_k(hedef, logit, k), tf.float32))
+        tf.math.in_top_k(target, logit, k), tf.float32))
 
 
-def degerlendir(model, ds, n_sinif):
+def degerlendir(model, ds, n_classes):
     dogru1 = dogru3 = n = 0
-    kar = np.zeros((n_sinif, n_sinif), dtype=np.int32)
+    kar = np.zeros((n_classes, n_classes), dtype=np.int32)
     for x, h, _ in ds:
         logit = model(x, training=False)
         e = h["sert"].numpy()
@@ -283,131 +283,131 @@ def degerlendir(model, ds, n_sinif):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--duman", action="store_true",
+    ap.add_argument("--smoke", action="store_true",
                     help="kucuk alt kume + 2 devir: hat calisiyor mu")
-    ap.add_argument("--devir", type=int, default=60)
-    ap.add_argument("--yigin", type=int, default=64)
+    ap.add_argument("--epochs", type=int, default=60)
+    ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=3e-3)
-    ap.add_argument("--genislik", type=float, default=1.0)
-    ap.add_argument("--gama", type=float, default=2.0, help="focal loss")
+    ap.add_argument("--width", type=float, default=1.0)
+    ap.add_argument("--gamma", type=float, default=2.0, help="focal loss")
     ap.add_argument("--kd", type=float, default=0.5, help="damitma agirligi")
     ap.add_argument("--out", default=MODELLER)
     a = ap.parse_args()
 
     os.makedirs(a.out, exist_ok=True)
-    X, y, yumusak, bolum, bulasik, siniflar, n_sinif = veri_yukle()
-    print(f"{len(X)} pencere · {n_sinif} sinif")
+    X, y, yumusak, split, contaminated, classes, n_classes = data_yukle()
+    print(f"{len(X)} pencere · {n_classes} sinif")
 
-    idx = {b: np.where(bolum == b)[0] for b in ("egitim", "dogrulama", "test")}
-    if a.duman:
+    idx = {b: np.where(split == b)[0] for b in ("egitim", "dogrulama", "test")}
+    if a.smoke:
         rng = np.random.default_rng(0)
         for b in idx:
             idx[b] = rng.choice(idx[b], size=min(len(idx[b]), 3000), replace=False)
-        a.devir = 2
+        a.epochs = 2
     for b, v in idx.items():
         print(f"  {b:10s} {len(v):6d}")
 
     # Sinif dengesizligi: focal'in yaninda alfa = (ortanca/sayi)^0.5.
     # Karekok bilerek — ham ters frekans 1:31'lik oranda en zayif turu
     # asiri agirliklandirip egitimi dengesizlestiriyor.
-    say = np.bincount(y[idx["egitim"]], minlength=n_sinif).astype(np.float32)
-    alfa = np.sqrt(np.median(say[say > 0]) / np.maximum(say, 1.0))
+    count = np.bincount(y[idx["egitim"]], minlength=n_classes).astype(np.float32)
+    alfa = np.sqrt(np.median(count[count > 0]) / np.maximum(count, 1.0))
     alfa = np.clip(alfa, 0.5, 4.0)
     print(f"sinif agirligi alfa: {alfa.min():.2f} .. {alfa.max():.2f}")
 
-    sert_agirlik = (~bulasik).astype(np.float32)   # bulasik -> yalniz ogretmen
+    sert_weight = (~contaminated).astype(np.float32)   # bulasik -> yalniz ogretmen
 
-    egitim = veri_kumesi(X, y, yumusak, sert_agirlik, idx["egitim"],
-                         a.yigin, artir=True, karistir=True)
-    dogrulama = veri_kumesi(X, y, yumusak, sert_agirlik, idx["dogrulama"],
-                            a.yigin, artir=False, karistir=False)
-    test = veri_kumesi(X, y, yumusak, sert_agirlik, idx["test"],
-                       a.yigin, artir=False, karistir=False)
+    train = make_dataset(X, y, yumusak, sert_weight, idx["egitim"],
+                         a.batch, augment=True, shuffle=True)
+    val = make_dataset(X, y, yumusak, sert_weight, idx["dogrulama"],
+                            a.batch, augment=False, shuffle=False)
+    test = make_dataset(X, y, yumusak, sert_weight, idx["test"],
+                       a.batch, augment=False, shuffle=False)
 
-    model = model_kur(n_sinif, a.genislik)
-    mac = mac_say(model)
+    model = model_kur(n_classes, a.width)
+    mac = mac_count(model)
     tepe, buyukler = aktivasyon_tepe(model)
     par = model.count_params()
     print(f"\nmodel: {par:,} parametre (~{par / 1024:.0f} KB int8)")
-    print(f"MAC/pencere: {mac / 1e6:.1f} M   (butce {MAC_BUTCE / 1e6:.0f} M)")
+    print(f"MAC/pencere: {mac / 1e6:.1f} M   (butce {MAC_BUDGET / 1e6:.0f} M)")
     print(f"aktivasyon tepesi (kaba): {tepe / 1024:.0f} KB "
-          f"(arena butcesi {ARENA_BUTCE / 1024:.0f} KB)")
+          f"(arena butcesi {ARENA_BUDGET / 1024:.0f} KB)")
     print("  en buyuk katman ciktilari: " +
           ", ".join(f"{n} {v / 1024:.0f}KB" for n, v in buyukler))
-    if mac > MAC_BUTCE:
+    if mac > MAC_BUDGET:
         sys.exit(f"!! MAC butcesi asildi ({mac / 1e6:.1f} M > "
-                 f"{MAC_BUTCE / 1e6:.0f} M) — --genislik dusurun")
+                 f"{MAC_BUDGET / 1e6:.0f} M) — --genislik dusurun")
 
-    kayip_f = kayip_kur(n_sinif, alfa, a.gama, a.kd)
-    adim_sayisi = max(1, len(idx["egitim"]) // a.yigin) * a.devir
-    plan = tf.keras.optimizers.schedules.CosineDecay(a.lr, adim_sayisi,
+    loss_f = loss_kur(n_classes, alfa, a.gamma, a.kd)
+    step_count = max(1, len(idx["egitim"]) // a.batch) * a.epochs
+    plan = tf.keras.optimizers.schedules.CosineDecay(a.lr, step_count,
                                                      warmup_target=a.lr,
                                                      warmup_steps=300)
     opt = tf.keras.optimizers.Adam(plan)
 
     @tf.function
-    def adim(x, h, w):
+    def step(x, h, w):
         with tf.GradientTape() as t:
             logit = model(x, training=True)
-            kayip = kayip_f(h, logit, w)
-        opt.apply_gradients(zip(t.gradient(kayip, model.trainable_variables),
+            loss = loss_f(h, logit, w)
+        opt.apply_gradients(zip(t.gradient(loss, model.trainable_variables),
                                 model.trainable_variables))
-        return kayip
+        return loss
 
-    en_iyi = -1.0
-    yol = os.path.join(a.out, "tur_agi.keras")
+    best = -1.0
+    path = os.path.join(a.out, "tur_agi.keras")
     pano = os.path.join(a.out, "ilerleme.html")
     bilgi = (f"{par:,} parametre · {mac / 1e6:.1f} MMAC · "
              f"{len(idx['egitim'])} egitim / {len(idx['dogrulama'])} dogrulama")
-    gecmis = []
+    history = []
     basladi = time.time()
     print(f"\nilerleme panosu: {pano}\n")
-    for devir in range(1, a.devir + 1):
+    for epochs in range(1, a.epochs + 1):
         t0 = time.time()
-        toplam = adet = 0.0
-        for x, h, w in egitim:
-            toplam += float(adim(x, h, w))
-            adet += 1
-        d1, d3, _, _ = degerlendir(model, dogrulama, n_sinif)
-        gecmis.append((devir, toplam / adet, d1, d3))
+        total = count = 0.0
+        for x, h, w in train:
+            total += float(step(x, h, w))
+            count += 1
+        d1, d3, _, _ = degerlendir(model, val, n_classes)
+        history.append((epochs, total / count, d1, d3))
         yildiz = ""
-        if d1 > en_iyi:
-            en_iyi = d1
-            model.save(yol)
+        if d1 > best:
+            best = d1
+            model.save(path)
             yildiz = "  <- kaydedildi"
-        print(f"devir {devir:3d}/{a.devir}  kayip {toplam / adet:.4f}  "
+        print(f"devir {epochs:3d}/{a.epochs}  kayip {total / count:.4f}  "
               f"dogrulama top-1 %{d1 * 100:.2f}  top-3 %{d3 * 100:.2f}  "
               f"{time.time() - t0:.0f} sn{yildiz}", flush=True)
-        pano_yaz(pano, gecmis, a.devir, bilgi, time.time() - basladi,
-                 bitti=(devir == a.devir))
+        pano_write(pano, history, a.epochs, bilgi, time.time() - basladi,
+                 bitti=(epochs == a.epochs))
 
-    print(f"\nen iyi dogrulama top-1: %{en_iyi * 100:.2f}  ->  {yol}")
-    model = tf.keras.models.load_model(yol)
+    print(f"\nen iyi dogrulama top-1: %{best * 100:.2f}  ->  {path}")
+    model = tf.keras.models.load_model(path)
 
-    d1, d3, kar, n = degerlendir(model, test, n_sinif)
+    d1, d3, kar, n = degerlendir(model, test, n_classes)
     print(f"TEST (float32): top-1 %{d1 * 100:.2f}  top-3 %{d3 * 100:.2f}  "
           f"({n} pencere)")
 
-    tflite_yol, gs, gz = niceleştir(model, X, idx["egitim"], a.out)
-    q1, q3, qkar = tflite_degerlendir(tflite_yol, X, y, idx["test"], n_sinif)
+    tflite_path, gs, gz = quantize(model, X, idx["egitim"], a.out)
+    q1, q3, qkar = tflite_degerlendir(tflite_path, X, y, idx["test"], n_classes)
     print(f"TEST (int8)   : top-1 %{q1 * 100:.2f}  top-3 %{q3 * 100:.2f}  "
           f"(fark {(q1 - d1) * 100:+.2f} puan)")
 
-    c_yaz(tflite_yol, os.path.join(a.out, "tur_agi_int8.h"))
-    rapor_yaz(a, model, siniflar, mac, tepe, gecmis, d1, d3, q1, q3, qkar,
-              gs, gz, tflite_yol)
+    c_write(tflite_path, os.path.join(a.out, "tur_agi_int8.h"))
+    rapor_write(a, model, classes, mac, tepe, history, d1, d3, q1, q3, qkar,
+              gs, gz, tflite_path)
     return 0
 
 
 # ══ INT8 ════════════════════════════════════════════════════════════════
-def niceleştir(model, X, egitim_idx, out):
+def quantize(model, X, train_idx, out):
     """Egitim sonrasi INT8 niceleştirme, temsili veri kumesiyle."""
     rng = np.random.default_rng(0)
-    ornek = np.sort(rng.choice(egitim_idx, size=min(500, len(egitim_idx)),
+    sample = np.sort(rng.choice(train_idx, size=min(500, len(train_idx)),
                                replace=False))
 
     def temsili():
-        for i in ornek:
+        for i in sample:
             yield [X[i].reshape(1, FRAMES, BANDS, 1).astype(np.float32)]
 
     d = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -418,37 +418,37 @@ def niceleştir(model, X, egitim_idx, out):
     d.inference_output_type = tf.int8
     tfl = d.convert()
 
-    yol = os.path.join(out, "tur_agi_int8.tflite")
-    with open(yol, "wb") as f:
+    path = os.path.join(out, "tur_agi_int8.tflite")
+    with open(path, "wb") as f:
         f.write(tfl)
 
-    yorum = tf.lite.Interpreter(model_path=yol)
-    yorum.allocate_tensors()
-    g = yorum.get_input_details()[0]
+    note = tf.lite.Interpreter(model_path=path)
+    note.allocate_tensors()
+    g = note.get_input_details()[0]
     gs, gz = float(g["quantization"][0]), int(g["quantization"][1])
-    print(f"\nINT8 model: {len(tfl) / 1024:.0f} KB  ->  {yol}")
+    print(f"\nINT8 model: {len(tfl) / 1024:.0f} KB  ->  {path}")
     print(f"girdi tensoru: {g['dtype'].__name__} {tuple(g['shape'])}  "
           f"olcek {gs:.6f}  sifir noktasi {gz}")
     if abs(gs - 1.0) > 0.02 or gz != 0:
         print("!! DIKKAT: girdi olcegi 1.0/0 DEGIL. Cihaz pb_mel_window()\n"
               "   ciktisini oldugu gibi veremez; M6'da donusum gerekir.\n"
-              f"   q_tflite = round(q_mel * {SIGMA_OLCEK:.6f} / {gs:.6f}) + {gz}")
+              f"   q_tflite = round(q_mel * {SIGMA_SCALE:.6f} / {gs:.6f}) + {gz}")
     else:
         print("   -> cihaz pb_mel_window() ciktisini DOGRUDAN verebilir.")
-    return yol, gs, gz
+    return path, gs, gz
 
 
-def tflite_degerlendir(yol, X, y, idx, n_sinif):
-    yorum = tf.lite.Interpreter(model_path=yol, num_threads=8)
-    yorum.allocate_tensors()
-    g = yorum.get_input_details()[0]
-    c = yorum.get_output_details()[0]
+def tflite_degerlendir(path, X, y, idx, n_classes):
+    note = tf.lite.Interpreter(model_path=path, num_threads=8)
+    note.allocate_tensors()
+    g = note.get_input_details()[0]
+    c = note.get_output_details()[0]
     d1 = d3 = 0
-    kar = np.zeros((n_sinif, n_sinif), dtype=np.int32)
+    kar = np.zeros((n_classes, n_classes), dtype=np.int32)
     for i in idx:
-        yorum.set_tensor(g["index"], X[i].reshape(g["shape"]).astype(np.int8))
-        yorum.invoke()
-        o = yorum.get_tensor(c["index"])[0].astype(np.int32)
+        note.set_tensor(g["index"], X[i].reshape(g["shape"]).astype(np.int8))
+        note.invoke()
+        o = note.get_tensor(c["index"])[0].astype(np.int32)
         ilk3 = np.argsort(-o)[:3]
         d1 += int(ilk3[0] == y[i])
         d3 += int(y[i] in ilk3)
@@ -456,57 +456,57 @@ def tflite_degerlendir(yol, X, y, idx, n_sinif):
     return d1 / len(idx), d3 / len(idx), kar
 
 
-def c_yaz(tflite_yol, h_yol):
-    ham = open(tflite_yol, "rb").read()
-    with open(h_yol, "w", encoding="utf-8") as f:
+def c_write(tflite_path, h_path):
+    raw = open(tflite_path, "rb").read()
+    with open(h_path, "w", encoding="utf-8") as f:
         f.write("/* Uretilmis dosya — tools/train_species.py. ELLE DUZENLEMEYIN. */\n")
         f.write("#ifndef POKEBIRD_SPECIES_NET_H\n#define POKEBIRD_SPECIES_NET_H\n\n")
         f.write("#include <stdint.h>\n\n")
-        f.write(f"#define PB_TUR_AGI_BOYUT {len(ham)}\n\n")
+        f.write(f"#define PB_TUR_AGI_BOYUT {len(raw)}\n\n")
         f.write("/* 16 bayt hizalama: TFLM model verisinin hizali olmasini "
                 "istiyor. */\n")
         f.write("__attribute__((aligned(16)))\n")
         f.write("const unsigned char pb_species_net[] = {\n")
-        for i in range(0, len(ham), 12):
-            f.write("  " + " ".join(f"0x{b:02x}," for b in ham[i:i + 12]) + "\n")
+        for i in range(0, len(raw), 12):
+            f.write("  " + " ".join(f"0x{b:02x}," for b in raw[i:i + 12]) + "\n")
         f.write("};\n\n#endif\n")
-    print(f"C dizisi: {h_yol}  ({len(ham) / 1024:.0f} KB)")
+    print(f"C dizisi: {h_path}  ({len(raw) / 1024:.0f} KB)")
 
 
-def pano_yaz(yol, gecmis, toplam_devir, bilgi, gecen, bitti=False):
+def pano_write(path, history, total_epochs, bilgi, gecen, bitti=False):
     """Her devirde kendini yenileyen basit HTML pano.
 
     Tarayicida acik birakin; 10 saniyede bir kendini yeniliyor. Bagimlilik
     yok, tek dosya, grafik satir ici SVG.
     """
-    d = [g[0] for g in gecmis]
-    kayip = [g[1] for g in gecmis]
-    t1 = [g[2] * 100 for g in gecmis]
-    t3 = [g[3] * 100 for g in gecmis]
-    son = gecmis[-1] if gecmis else (0, 0, 0, 0)
-    yuzde = 100.0 * len(gecmis) / max(toplam_devir, 1)
+    d = [g[0] for g in history]
+    loss = [g[1] for g in history]
+    t1 = [g[2] * 100 for g in history]
+    t3 = [g[3] * 100 for g in history]
+    last = history[-1] if history else (0, 0, 0, 0)
+    percent = 100.0 * len(history) / max(total_epochs, 1)
     kalan = ("bitti" if bitti else
-             f"~{(toplam_devir - len(gecmis)) * gecen / max(len(gecmis), 1) / 60:.0f} dk")
+             f"~{(total_epochs - len(history)) * gecen / max(len(history), 1) / 60:.0f} dk")
 
-    def cizgi(deger, renk, en_az=None, en_cok=None):
-        if not deger:
+    def cizgi(value, renk, max_az=None, max_cok=None):
+        if not value:
             return ""
-        lo = min(deger) if en_az is None else en_az
-        hi = max(deger) if en_cok is None else en_cok
+        lo = min(value) if max_az is None else max_az
+        hi = max(value) if max_cok is None else max_cok
         if hi - lo < 1e-9:
             hi = lo + 1
-        n = len(deger)
+        n = len(value)
         p = " ".join(
             f"{40 + 660 * (i / max(n - 1, 1)):.1f},"
             f"{180 - 160 * ((v - lo) / (hi - lo)):.1f}"
-            for i, v in enumerate(deger))
+            for i, v in enumerate(value))
         return (f'<polyline fill="none" stroke="{renk}" stroke-width="2.5" '
                 f'points="{p}"/>')
 
-    en_iyi = max(t1) if t1 else 0
-    satirlar = "".join(
+    best = max(t1) if t1 else 0
+    rows = "".join(
         f"<tr><td>{g[0]}</td><td>{g[1]:.4f}</td><td>%{g[2]*100:.2f}</td>"
-        f"<td>%{g[3]*100:.2f}</td></tr>" for g in reversed(gecmis[-25:]))
+        f"<td>%{g[3]*100:.2f}</td></tr>" for g in reversed(history[-25:]))
 
     html = f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <title>PokeBird — egitim</title>
@@ -533,36 +533,36 @@ def pano_yaz(yol, gecmis, toplam_devir, bilgi, gecen, bitti=False):
  .lej span{{margin-right:16px;color:#8b98a6;font-size:12px}}
 </style></head><body>
 <h1>PokeBird — Asama-2 tur agi egitimi</h1>
-<div class="alt">{bilgi} · devir {len(gecmis)}/{toplam_devir} · kalan {kalan}
+<div class="alt">{bilgi} · devir {len(history)}/{total_epochs} · kalan {kalan}
  {'' if bitti else '· sayfa 10 sn`de bir yenileniyor'}</div>
 <div class="kutular">
- <div class="k"><span>dogrulama top-1</span><b>%{son[2]*100:.2f}</b></div>
- <div class="k"><span>dogrulama top-3</span><b>%{son[3]*100:.2f}</b></div>
- <div class="k"><span>en iyi top-1</span><b>%{en_iyi:.2f}</b></div>
- <div class="k"><span>kayip</span><b>{son[1]:.4f}</b></div>
+ <div class="k"><span>dogrulama top-1</span><b>%{last[2]*100:.2f}</b></div>
+ <div class="k"><span>dogrulama top-3</span><b>%{last[3]*100:.2f}</b></div>
+ <div class="k"><span>en iyi top-1</span><b>%{best:.2f}</b></div>
+ <div class="k"><span>kayip</span><b>{last[1]:.4f}</b></div>
  <div class="k"><span>gecen</span><b>{gecen/60:.0f} dk</b></div>
 </div>
-<div class="cubuk"><div style="width:{yuzde:.1f}%"></div></div>
+<div class="cubuk"><div style="width:{percent:.1f}%"></div></div>
 <p class="lej"><span><i style="background:#5ed17f"></i>top-1</span>
 <span><i style="background:#63a8ff"></i>top-3</span>
 <span><i style="background:#e0803c"></i>kayip</span></p>
 <svg viewBox="0 0 740 200" width="100%" height="200">
  <line x1="40" y1="180" x2="700" y2="180" stroke="#2e3945"/>
  <line x1="40" y1="20" x2="700" y2="20" stroke="#2e3945" stroke-dasharray="3 4"/>
- {cizgi(t3, '#63a8ff', 0, 100)}{cizgi(t1, '#5ed17f', 0, 100)}{cizgi(kayip, '#e0803c')}
+ {cizgi(t3, '#63a8ff', 0, 100)}{cizgi(t1, '#5ed17f', 0, 100)}{cizgi(loss, '#e0803c')}
  <text x="6" y="184" fill="#8b98a6" font-size="11">0</text>
  <text x="6" y="24" fill="#8b98a6" font-size="11">100</text>
 </svg>
 <table><tr><th>devir</th><th>kayip</th><th>top-1</th><th>top-3</th></tr>
-{satirlar}</table>
+{rows}</table>
 </body></html>"""
-    with open(yol, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(html)
 
 
-def rapor_yaz(a, model, siniflar, mac, tepe, gecmis, d1, d3, q1, q3, kar,
-              gs, gz, tflite_yol):
-    ad = {int(s["sinif"]): s["turkce_ad"] for s in siniflar}
+def rapor_write(a, model, classes, mac, tepe, history, d1, d3, q1, q3, kar,
+              gs, gz, tflite_path):
+    name = {int(s["sinif"]): s["turkce_ad"] for s in classes}
     n = kar.sum(axis=1)
     duyarlilik = np.divide(np.diag(kar), np.maximum(n, 1))
 
@@ -570,7 +570,7 @@ def rapor_yaz(a, model, siniflar, mac, tepe, gecmis, d1, d3, q1, q3, kar,
     s.append(f"model     : {model.count_params():,} parametre")
     s.append(f"MAC/pencere: {mac / 1e6:.1f} M  (butce 30 M)")
     s.append(f"aktivasyon tepesi (kaba): {tepe / 1024:.0f} KB (arena butcesi 180 KB)")
-    s.append(f"tflite    : {os.path.getsize(tflite_yol) / 1024:.0f} KB")
+    s.append(f"tflite    : {os.path.getsize(tflite_path) / 1024:.0f} KB")
     s.append(f"girdi     : int8, olcek {gs:.6f}, sifir noktasi {gz}")
     s.append("")
     s.append(f"TEST float32 : top-1 %{d1 * 100:.2f}  top-3 %{d3 * 100:.2f}")
@@ -585,17 +585,17 @@ def rapor_yaz(a, model, siniflar, mac, tepe, gecmis, d1, d3, q1, q3, kar,
             break
         karisan = np.argsort(-kar[i])
         k0 = karisan[0] if karisan[0] != i else (karisan[1] if len(karisan) > 1 else i)
-        s.append(f"  {ad.get(i, i):28s} %{duyarlilik[i] * 100:5.1f}  "
-                 f"({int(n[i])} pencere)  en cok karistigi: {ad.get(int(k0), k0)}")
+        s.append(f"  {name.get(i, i):28s} %{duyarlilik[i] * 100:5.1f}  "
+                 f"({int(n[i])} pencere)  en cok karistigi: {name.get(int(k0), k0)}")
     s.append("")
     s.append("devir  kayip   dogrulama top-1  top-3")
-    for d, k, v1, v3 in gecmis:
+    for d, k, v1, v3 in history:
         s.append(f"{d:5d}  {k:.4f}  %{v1 * 100:12.2f}  %{v3 * 100:5.2f}")
 
-    metin = "\n".join(s)
-    print("\n" + metin)
+    text = "\n".join(s)
+    print("\n" + text)
     with open(os.path.join(a.out, "rapor.txt"), "w", encoding="utf-8") as f:
-        f.write(metin + "\n")
+        f.write(text + "\n")
 
 
 if __name__ == "__main__":

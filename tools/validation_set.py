@@ -34,16 +34,16 @@ import sys
 
 import numpy as np
 
-KOK = pathlib.Path(__file__).resolve().parent.parent
-EGITIM = KOK / "data" / "egitim"
-MODEL = KOK / "models" / "tur_agi_int8.tflite"
-CIKTI = KOK / "src" / "ai" / "dogrulama_seti.h"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+TRAIN = ROOT / "data" / "egitim"
+MODEL = ROOT / "models" / "tur_agi_int8.tflite"
+OUTPUT = ROOT / "src" / "ai" / "dogrulama_seti.h"
 
 KARE = 187
-BANT = 64
+BAND = 64
 
 
-def ornek_sec(adet: int, tohum: int) -> list[int]:
+def sample_pick(count: int, seed: int) -> list[int]:
     """Test bölümünden `adet` satır seç.
 
     Seçim TEST bölümünden: eğitimde görülmemiş pencereler. Doğrulama
@@ -54,46 +54,46 @@ def ornek_sec(adet: int, tohum: int) -> list[int]:
     yol (global ortalama → tam bağlı) diğerlerinden farklı bir aktivasyon
     aralığı görüyor.
     """
-    etiket = np.load(EGITIM / "etiket.npy")
-    bolum = []
-    with open(EGITIM / "ornekler.csv", encoding="utf-8") as f:
-        for satir in csv.DictReader(f):
-            bolum.append(satir["bolum"])
-    bolum = np.array(bolum)
-    if len(bolum) != len(etiket):
-        sys.exit(f"ornekler.csv {len(bolum)} satir, etiket.npy {len(etiket)} — hizasiz")
+    label = np.load(TRAIN / "etiket.npy")
+    split = []
+    with open(TRAIN / "ornekler.csv", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            split.append(row["bolum"])
+    split = np.array(split)
+    if len(split) != len(label):
+        sys.exit(f"ornekler.csv {len(split)} satir, etiket.npy {len(label)} — hizasiz")
 
-    test = np.flatnonzero(bolum == "test")
-    rng = np.random.default_rng(tohum)
+    test = np.flatnonzero(split == "test")
+    rng = np.random.default_rng(seed)
 
-    negatif = test[etiket[test] == 178]
-    kus = test[etiket[test] != 178]
-    if len(negatif) == 0:
+    negative = test[label[test] == 178]
+    bird = test[label[test] != 178]
+    if len(negative) == 0:
         sys.exit("test bolumunde negatif ornek yok")
 
-    secim = [int(rng.choice(negatif))]
+    selection = [int(rng.choice(negative))]
     # Kalanı farklı sınıflardan: aynı sınıfın iki penceresi aynı kod yolunu
     # sınıyor, çeşitlilik daha çok kanal/ölçek kombinasyonuna dokunuyor.
-    kus_karisik = rng.permutation(kus)
-    gorulen: set[int] = set()
-    for i in kus_karisik:
-        s = int(etiket[i])
-        if s in gorulen:
+    bird_karisik = rng.permutation(bird)
+    seen: set[int] = set()
+    for i in bird_karisik:
+        s = int(label[i])
+        if s in seen:
             continue
-        gorulen.add(s)
-        secim.append(int(i))
-        if len(secim) == adet:
+        seen.add(s)
+        selection.append(int(i))
+        if len(selection) == count:
             break
-    secim.sort()
-    return secim
+    selection.sort()
+    return selection
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--adet", type=int, default=8,
+    ap.add_argument("--count", type=int, default=8,
                     help="pencere sayisi (varsayilan 8; her biri 11.968 bayt FLASH)")
-    ap.add_argument("--tohum", type=int, default=20260802)
+    ap.add_argument("--seed", type=int, default=20260802)
     args = ap.parse_args()
 
     try:
@@ -104,14 +104,14 @@ def main() -> None:
     if not MODEL.exists():
         sys.exit(f"{MODEL} yok — once tools/train_species.py calistirin.")
 
-    secim = ornek_sec(args.adet, args.tohum)
-    pencereler = np.load(EGITIM / "pencereler.npy", mmap_mode="r")
-    etiket = np.load(EGITIM / "etiket.npy")
+    selection = sample_pick(args.count, args.seed)
+    windows = np.load(TRAIN / "pencereler.npy", mmap_mode="r")
+    label = np.load(TRAIN / "etiket.npy")
 
-    ad = {}
-    with open(EGITIM / "siniflar.csv", encoding="utf-8") as f:
+    name = {}
+    with open(TRAIN / "siniflar.csv", encoding="utf-8") as f:
         for s in csv.DictReader(f):
-            ad[int(s["sinif"])] = (s["ebird_kodu"], s["turkce_ad"])
+            name[int(s["sinif"])] = (s["ebird_kodu"], s["turkce_ad"])
 
     # ⚠ BUILTIN_REF — varsayılanı KULLANMAYIN.
     #
@@ -135,50 +135,50 @@ def main() -> None:
     # bağlıyor; kayarsa doğrulama seti de anlamsız olur.
     if gd["dtype"] != np.int8 or gd["quantization"] != (1.0, 0):
         sys.exit(f"girdi sozlesmesi bozuk: {gd['dtype']} {gd['quantization']}")
-    if tuple(gd["shape"]) != (1, KARE, BANT, 1):
-        sys.exit(f"girdi sekli {gd['shape']}, beklenen (1,{KARE},{BANT},1)")
+    if tuple(gd["shape"]) != (1, KARE, BAND, 1):
+        sys.exit(f"girdi sekli {gd['shape']}, beklenen (1,{KARE},{BAND},1)")
 
-    cikti_olcek, cikti_sifir = cd["quantization"]
-    sinif_sayisi = int(cd["shape"][-1])
+    output_scale, output_sifir = cd["quantization"]
+    cls_count = int(cd["shape"][-1])
 
-    girdiler = np.empty((len(secim), KARE, BANT), dtype=np.int8)
-    logitler = np.empty((len(secim), sinif_sayisi), dtype=np.int8)
-    tahmin = []
-    for k, i in enumerate(secim):
-        p = np.asarray(pencereler[i], dtype=np.int8)
+    girdiler = np.empty((len(selection), KARE, BAND), dtype=np.int8)
+    logitler = np.empty((len(selection), cls_count), dtype=np.int8)
+    pred = []
+    for k, i in enumerate(selection):
+        p = np.asarray(windows[i], dtype=np.int8)
         girdiler[k] = p
-        interp.set_tensor(gd["index"], p.reshape(1, KARE, BANT, 1))
+        interp.set_tensor(gd["index"], p.reshape(1, KARE, BAND, 1))
         interp.invoke()
         q = interp.get_tensor(cd["index"])[0].astype(np.int8)
         logitler[k] = q
-        tahmin.append(int(np.argmax(q.astype(np.int32))))
+        pred.append(int(np.argmax(q.astype(np.int32))))
 
-    dogru = sum(1 for k, i in enumerate(secim) if tahmin[k] == int(etiket[i]))
-    print(f"{len(secim)} pencere secildi (test bolumu)")
-    print(f"PC tarafi top-1: {dogru}/{len(secim)} "
+    dogru = sum(1 for k, i in enumerate(selection) if pred[k] == int(label[i]))
+    print(f"{len(selection)} pencere secildi (test bolumu)")
+    print(f"PC tarafi top-1: {dogru}/{len(selection)} "
           f"(dusuk olmasi NORMAL — pencere basina dogruluk %58)")
-    for k, i in enumerate(secim):
-        g, t = int(etiket[i]), tahmin[k]
-        print(f"  satir {i:6d}  gercek {g:3d} {ad.get(g, ('?', '?'))[1]:<24s}"
-              f"  tahmin {t:3d} {ad.get(t, ('?', '?'))[1]}")
+    for k, i in enumerate(selection):
+        g, t = int(label[i]), pred[k]
+        print(f"  satir {i:6d}  gercek {g:3d} {name.get(g, ('?', '?'))[1]:<24s}"
+              f"  tahmin {t:3d} {name.get(t, ('?', '?'))[1]}")
 
     def dizi(v: np.ndarray) -> str:
-        s, satir = [], []
+        s, row = [], []
         for x in v:
-            satir.append(f"{int(x):4d}")
-            if len(satir) == 16:
-                s.append("    " + ",".join(satir) + ",")
-                satir = []
-        if satir:
-            s.append("    " + ",".join(satir) + ",")
+            row.append(f"{int(x):4d}")
+            if len(row) == 16:
+                s.append("    " + ",".join(row) + ",")
+                row = []
+        if row:
+            s.append("    " + ",".join(row) + ",")
         return "\n".join(s)
 
-    with open(CIKTI, "w", encoding="utf-8", newline="\n") as f:
+    with open(OUTPUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(f"""/* Uretilmis dosya — tools/validation_set.py. ELLE DUZENLEMEYIN.
  *
  * CIHAZ-ICI DOGRULAMA SETI (M6 §9l madde 7).
  *
- * {len(secim)} pencere data/egitim/pencereler.npy'nin TEST bolumunden secildi;
+ * {len(selection)} pencere data/egitim/pencereler.npy'nin TEST bolumunden secildi;
  * beklenen logit'ler PC'deki TFLite yorumlayicisinin ayni pencereye verdigi
  * int8 ciktisi. Cihaz ayni girdiye BIREBIR ayni cikti vermeli.
  *
@@ -189,26 +189,26 @@ def main() -> None:
  * Fark cikarsa sorun mel hattinda DEGIL (ses yolu bu teste hic girmiyor):
  * TFLM cekirdekleri, CMSIS-NN, arena ya da nicelestirme tarafindadir.
  *
- * Cikti nicelestirmesi: logit = (q - {int(cikti_sifir)}) * {float(cikti_olcek):.9f}
+ * Cikti nicelestirmesi: logit = (q - {int(output_sifir)}) * {float(output_scale):.9f}
  */
 #ifndef POKEBIRD_VALIDATION_SET_H
 #define POKEBIRD_VALIDATION_SET_H
 
 #include <stdint.h>
 
-#define PB_VALIDATION_COUNT   {len(secim)}
+#define PB_VALIDATION_COUNT   {len(selection)}
 #define PB_VALIDATION_FRAMES   {KARE}
-#define PB_VALIDATION_BANDS   {BANT}
-#define PB_VALIDATION_CLASSES  {sinif_sayisi}
+#define PB_VALIDATION_BANDS   {BAND}
+#define PB_VALIDATION_CLASSES  {cls_count}
 
 /* Gercek sinif indeksi (dogruluk icin degil, raporu okunur kilmak icin). */
 static const int16_t pb_validation_class[PB_VALIDATION_COUNT] = {{
-{dizi(np.array([etiket[i] for i in secim]))}
+{dizi(np.array([label[i] for i in selection]))}
 }};
 
 /* PC'nin ayni pencereye verdigi tahmin (argmax). */
 static const int16_t pb_validation_pc_pred[PB_VALIDATION_COUNT] = {{
-{dizi(np.array(tahmin))}
+{dizi(np.array(pred))}
 }};
 
 /* Girdi pencereleri: kare disar (eskiden yeniye), bant icerde —
@@ -216,17 +216,17 @@ static const int16_t pb_validation_pc_pred[PB_VALIDATION_COUNT] = {{
 static const int8_t pb_validation_input[PB_VALIDATION_COUNT]
                                       [PB_VALIDATION_FRAMES * PB_VALIDATION_BANDS] = {{
 """)
-        for k in range(len(secim)):
+        for k in range(len(selection)):
             f.write("  {\n" + dizi(girdiler[k].reshape(-1)) + "\n  },\n")
         f.write("};\n\n/* PC'nin ham int8 logit'leri. */\nstatic const int8_t "
                 "pb_validation_logit[PB_VALIDATION_COUNT][PB_VALIDATION_CLASSES] = {\n")
-        for k in range(len(secim)):
+        for k in range(len(selection)):
             f.write("  {\n" + dizi(logitler[k]) + "\n  },\n")
         f.write("};\n\n#endif /* POKEBIRD_VALIDATION_SET_H */\n")
 
-    boyut = CIKTI.stat().st_size
-    print(f"\n{CIKTI.relative_to(KOK)} yazildi ({boyut/1024:.0f} KB kaynak, "
-          f"{len(secim)*KARE*BANT/1024:.0f} KB flash)")
+    size = OUTPUT.stat().st_size
+    print(f"\n{OUTPUT.relative_to(ROOT)} yazildi ({size/1024:.0f} KB kaynak, "
+          f"{len(selection)*KARE*BAND/1024:.0f} KB flash)")
 
 
 if __name__ == "__main__":

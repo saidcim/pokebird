@@ -18,28 +18,28 @@ import os
 import subprocess
 import sys
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CSV_YOL = os.path.join(KOK, "data", "species_istanbul.csv")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CSV_PATH = os.path.join(ROOT, "data", "species_istanbul.csv")
 PY = sys.executable
 
 
 def calistir(args):
     print(f"\n$ {' '.join(args)}\n", flush=True)
-    p = subprocess.run([PY] + args, cwd=KOK)
+    p = subprocess.run([PY] + args, cwd=ROOT)
     if p.returncode != 0:
         sys.exit(f"[!] komut basarisiz (cikis {p.returncode}): {' '.join(args)}")
 
 
-def dahil_sayisi():
-    with open(CSV_YOL, encoding="utf-8") as f:
+def include_count():
+    with open(CSV_PATH, encoding="utf-8") as f:
         return sum(1 for r in csv.DictReader(f) if r["durum"] == "dahil")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hedef-tur", type=int, default=120)
-    ap.add_argument("--adet", type=int, default=60)
-    ap.add_argument("--yaygin-esik", type=int, default=30)
+    ap.add_argument("--target-species", type=int, default=120)
+    ap.add_argument("--count", type=int, default=60)
+    ap.add_argument("--common-threshold", type=int, default=30)
     args = ap.parse_args()
 
     # 1. Havuzu tazele (GBIF/eBird önbellekten, saniyeler sürer)
@@ -48,26 +48,26 @@ def main():
     # 2. Sayım + eleme. Nadir tür eşiğini hedefe en yakın sonucu verecek
     #    şekilde ara: sayım önbelleğe alındığı için tekrarlar bedava.
     adaylar = [100, 125, 150, 175, 200, 250, 300]
-    en_iyi, en_iyi_fark, en_iyi_sayi = None, 10**9, 0
+    best, max_iyi_fark, max_iyi_count = None, 10**9, 0
 
-    for nadir in adaylar:
+    for rare in adaylar:
         calistir(["tools/xc_fetch.py", "--say",
-                  "--esik", str(args.yaygin_esik), "--nadir-esik", str(nadir)])
-        sayi = dahil_sayisi()
-        fark = abs(sayi - args.hedef_tur)
-        print(f"\n>>> nadir-esik {nadir} -> {sayi} tur (hedef {args.hedef_tur}, "
+                  "--esik", str(args.common_threshold), "--nadir-esik", str(rare)])
+        count = include_count()
+        fark = abs(count - args.target_species)
+        print(f"\n>>> nadir-esik {rare} -> {count} tur (hedef {args.target_species}, "
               f"fark {fark})\n", flush=True)
-        if fark < en_iyi_fark:
-            en_iyi, en_iyi_fark, en_iyi_sayi = nadir, fark, sayi
+        if fark < max_iyi_fark:
+            best, max_iyi_fark, max_iyi_count = rare, fark, count
         # Havuz her turda daralıyor; bir sonraki eşik için tazele.
         calistir(["tools/species_list.py", "--aylik"])
 
-    print(f"\n=== SECILEN: nadir-esik {en_iyi} -> {en_iyi_sayi} tur ===\n", flush=True)
+    print(f"\n=== SECILEN: nadir-esik {best} -> {max_iyi_count} tur ===\n", flush=True)
     calistir(["tools/xc_fetch.py", "--say",
-              "--esik", str(args.yaygin_esik), "--nadir-esik", str(en_iyi)])
+              "--esik", str(args.common_threshold), "--nadir-esik", str(best)])
 
     # 3. İndirme
-    calistir(["tools/xc_fetch.py", "--indir", "--adet", str(args.adet)])
+    calistir(["tools/xc_fetch.py", "--indir", "--adet", str(args.count)])
     print("\n=== M4 VERI HATTI TAMAM ===", flush=True)
 
 

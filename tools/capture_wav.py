@@ -207,7 +207,7 @@ def main():
                          "j=imlec konumlandirma testi (goz gerekir, etkilesimli), "
                          "x=tur agi cihaz ici dogrulama, k=gercek zamanli tanima, "
                          "c=SONUC EKRANI: tanima karti + spektrogram (goz gerekir)")
-    ap.add_argument("--sure", type=float, default=0.0,
+    ap.add_argument("--duration", type=float, default=0.0,
                     help="m/a/c/k icin: bu kadar saniye akit, sonra cihazdan cik")
     ap.add_argument("--spectrum", action="store_true",
                     help="bant enerjisi analizi (yavas, numpy'siz DFT)")
@@ -235,7 +235,7 @@ def main():
                 print("\n")
             return
 
-        if args.cmd in ("d", "b", "v", "t", "u", "y", "z", "j", "C") or (args.cmd in ("m", "a", "c", "k", "K") and args.sure <= 0):
+        if args.cmd in ("d", "b", "v", "t", "u", "y", "z", "j", "C") or (args.cmd in ("m", "a", "c", "k", "K") and args.duration <= 0):
             # Etkilesimli teshis: canli akis + klavyeyi cihaza ilet.
             run_interactive(ser, args.cmd)
             return
@@ -245,7 +245,7 @@ def main():
             # ve ozeti al. Goz gerektirmeyen dogrulama icin.
             ser.write(args.cmd.encode())
             ser.flush()
-            bitis = time.time() + args.sure
+            bitis = time.time() + args.duration
             while time.time() < bitis:
                 data = ser.read(4096).decode("utf-8", errors="replace")
                 if data:

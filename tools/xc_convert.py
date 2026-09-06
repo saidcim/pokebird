@@ -27,8 +27,8 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(KOK, "data")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = os.path.join(ROOT, "data")
 XC_DIR = os.path.join(DATA, "xc")
 WAV_DIR = os.path.join(DATA, "wav")
 ORNEKLEME = 24000
@@ -38,8 +38,8 @@ def ffmpeg_var():
     return shutil.which("ffmpeg") is not None
 
 
-def cevir(is_):
-    mp3, wav, mp3_sil = is_
+def convert(is_):
+    mp3, wav, mp3_delete = is_
     os.makedirs(os.path.dirname(wav), exist_ok=True)
     p = subprocess.run(
         ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", mp3,
@@ -47,7 +47,7 @@ def cevir(is_):
         capture_output=True, text=True)
     if p.returncode != 0:
         return (mp3, False, (p.stderr or "").strip()[:120])
-    if mp3_sil:
+    if mp3_delete:
         try:
             os.remove(mp3)
         except OSError:
@@ -57,11 +57,11 @@ def cevir(is_):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--adet", type=int, default=40,
+    ap.add_argument("--count", type=int, default=40,
                     help="tur basina tutulacak kayit (varsayilan 40)")
-    ap.add_argument("--mp3-sakla", action="store_true",
+    ap.add_argument("--mp3-keep", action="store_true",
                     help="donusen mp3'leri silme (disk iki katina cikar)")
-    ap.add_argument("--is-parcacigi", type=int, default=4,
+    ap.add_argument("--threads", type=int, default=4,
                     help="es zamanli ffmpeg sayisi")
     args = ap.parse_args()
 
@@ -71,60 +71,60 @@ def main():
         sys.exit(f"[!] {XC_DIR} yok. Once: python tools/xc_fetch.py --indir")
 
     isler, atilan = [], 0
-    for tur in sorted(os.listdir(XC_DIR)):
-        tur_yolu = os.path.join(XC_DIR, tur)
-        if not os.path.isdir(tur_yolu):
+    for species in sorted(os.listdir(XC_DIR)):
+        species_yolu = os.path.join(XC_DIR, species)
+        if not os.path.isdir(species_yolu):
             continue
-        mp3ler = sorted(f for f in os.listdir(tur_yolu) if f.endswith(".mp3"))
+        mp3ler = sorted(f for f in os.listdir(species_yolu) if f.endswith(".mp3"))
 
         # Zaten çevrilmiş olanları say: tekrar çalıştırılabilir olsun.
-        wav_tur = os.path.join(WAV_DIR, tur)
-        mevcut = len([f for f in os.listdir(wav_tur)
-                      if f.endswith(".wav")]) if os.path.isdir(wav_tur) else 0
+        wav_species = os.path.join(WAV_DIR, species)
+        mevcut = len([f for f in os.listdir(wav_species)
+                      if f.endswith(".wav")]) if os.path.isdir(wav_species) else 0
 
-        yer = max(0, args.adet - mevcut)
-        for f in mp3ler[:yer]:
-            isler.append((os.path.join(tur_yolu, f),
-                          os.path.join(wav_tur, f[:-4] + ".wav"),
-                          not args.mp3_sakla))
+        place = max(0, args.count - mevcut)
+        for f in mp3ler[:place]:
+            isler.append((os.path.join(species_yolu, f),
+                          os.path.join(wav_species, f[:-4] + ".wav"),
+                          not args.mp3_keep))
         # Kotanın üstündeki mp3'ler: çevrilmeyecek, yer kaplamasın.
-        for f in mp3ler[yer:]:
-            if not args.mp3_sakla:
+        for f in mp3ler[place:]:
+            if not args.mp3_keep:
                 try:
-                    os.remove(os.path.join(tur_yolu, f))
+                    os.remove(os.path.join(species_yolu, f))
                     atilan += 1
                 except OSError:
                     pass
 
     if atilan:
-        print(f"{atilan:,} fazla mp3 silindi (tur basina kota {args.adet})")
+        print(f"{atilan:,} fazla mp3 silindi (tur basina kota {args.count})")
     if not isler:
         print("Cevrilecek yeni dosya yok.")
         return
 
     print(f"{len(isler):,} dosya cevriliyor -> 24 kHz mono WAV\n", flush=True)
-    ok = hata = 0
-    with ThreadPoolExecutor(max_workers=args.is_parcacigi) as ex:
-        for i, (mp3, basarili, mesaj) in enumerate(ex.map(cevir, isler), 1):
+    ok = error = 0
+    with ThreadPoolExecutor(max_workers=args.threads) as ex:
+        for i, (mp3, basarili, mesaj) in enumerate(ex.map(convert, isler), 1):
             if basarili:
                 ok += 1
             else:
-                hata += 1
+                error += 1
                 print(f"  [!] {os.path.basename(mp3)}: {mesaj}")
             if i % 250 == 0 or i == len(isler):
                 print(f"  {i:,}/{len(isler):,}", flush=True)
 
     # Boşalan tür dizinlerini temizle
-    for tur in os.listdir(XC_DIR):
-        d = os.path.join(XC_DIR, tur)
+    for species in os.listdir(XC_DIR):
+        d = os.path.join(XC_DIR, species)
         if os.path.isdir(d) and not os.listdir(d):
             os.rmdir(d)
 
-    boyut = sum(os.path.getsize(os.path.join(r, f))
+    size = sum(os.path.getsize(os.path.join(r, f))
                 for r, _, fs in os.walk(WAV_DIR) for f in fs if f.endswith(".wav"))
-    sayi = sum(1 for r, _, fs in os.walk(WAV_DIR) for f in fs if f.endswith(".wav"))
-    print(f"\nCevrildi {ok:,}, hata {hata}")
-    print(f"{WAV_DIR}: {sayi:,} WAV, {boyut/1e9:.1f} GB")
+    count = sum(1 for r, _, fs in os.walk(WAV_DIR) for f in fs if f.endswith(".wav"))
+    print(f"\nCevrildi {ok:,}, hata {error}")
+    print(f"{WAV_DIR}: {count:,} WAV, {size/1e9:.1f} GB")
 
 
 if __name__ == "__main__":

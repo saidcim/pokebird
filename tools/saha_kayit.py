@@ -28,7 +28,7 @@ CIKTI
 --------------------------------------------------------------------------
 saha/<TARIH>_<yer>/cihaz.log   ham seri akis (her satir duvar saatli)
 saha/<TARIH>_<yer>/cihaz.csv   ayristirilmis kararlar + ISARET satirlari
-saha/<TARIH>_<yer>/oturum.txt  port, firmware git surumu, kullanicinin notu
+saha/<TARIH>_<yer>/oturum.txt  port, firmware git surumu, kullanicinin note_text
 """
 
 import argparse
@@ -54,14 +54,14 @@ try:
 except (AttributeError, ValueError):
     pass
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # src/main.c'deki printf ile birebir:
 #   printf("  [%lu ms] %-14s %s %s  %%%.1f\n", ms, kip, kod, ad, guven*100)
 # kip icinde bosluk olabilen tek deger "SES ALGILANDI"; o yuzden alternatif
 # listesi acikca yaziliyor, \S+ ile yakalanamaz.
 KIPLER = ("SES ALGILANDI", "dinliyor", "olabilir", "TUR")
-SATIR = re.compile(
+ROW = re.compile(
     r"^\s*\[(?P<ms>\d+) ms\]\s+"
     r"(?P<kip>" + "|".join(re.escape(k) for k in KIPLER) + r"|\?)\s+"
     r"(?P<kod>\S+)\s*"
@@ -90,13 +90,13 @@ def bekleyen_tus():
 def git_surum():
     try:
         return subprocess.check_output(
-            ["git", "-C", KOK, "describe", "--always", "--dirty"],
+            ["git", "-C", ROOT, "describe", "--always", "--dirty"],
             stderr=subprocess.DEVNULL, text=True).strip()
     except Exception:
         return "bilinmiyor"
 
 
-def ekrana_gir(ser, log_yaz):
+def ekrana_gir(ser, log_write):
     """Sonuc ekranina gir. Firmware iki surumde de olabilir:
 
     - HEAD: main() komut dongusune duser, '> ' istemi gelir -> 'c' gonder.
@@ -107,13 +107,13 @@ def ekrana_gir(ser, log_yaz):
     1,5 sn icinde '> ' gorursek istem var demektir."""
     print("[i] firmware yoklaniyor (1,5 sn)...")
     biriken = ""
-    son = time.time() + 1.5
-    while time.time() < son:
-        ham = ser.read(256)
-        if ham:
-            metin = ham.decode("utf-8", errors="replace")
-            biriken += metin
-            log_yaz(metin)
+    last = time.time() + 1.5
+    while time.time() < last:
+        raw = ser.read(256)
+        if raw:
+            text = raw.decode("utf-8", errors="replace")
+            biriken += text
+            log_write(text)
     if "> " in biriken[-200:] or biriken.rstrip().endswith(">"):
         print("[i] komut istemi goruldu -> 'c' gonderiliyor.")
         ser.write(b"c")
@@ -127,30 +127,30 @@ def ekrana_gir(ser, log_yaz):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", required=True, help="ornek: COM13 veya /dev/ttyACM0")
-    ap.add_argument("--yer", required=True, help="ornek: belgrad, validebag")
-    ap.add_argument("--not", dest="notu", default="", help="hava, saat, kim vs.")
-    ap.add_argument("--dizin", default=os.path.join(KOK, "saha"))
+    ap.add_argument("--place", required=True, help="ornek: belgrad, validebag")
+    ap.add_argument("--note", dest="note_text", default="", help="hava, saat, kim vs.")
+    ap.add_argument("--directory", default=os.path.join(ROOT, "saha"))
     args = ap.parse_args()
 
     damga = dt.datetime.now().strftime("%Y%m%d_%H%M")
-    oturum = os.path.join(args.dizin, f"{damga}_{args.yer}")
-    os.makedirs(oturum, exist_ok=True)
+    session = os.path.join(args.directory, f"{damga}_{args.place}")
+    os.makedirs(session, exist_ok=True)
 
-    log_yolu = os.path.join(oturum, "cihaz.log")
-    csv_yolu = os.path.join(oturum, "cihaz.csv")
+    log_yolu = os.path.join(session, "cihaz.log")
+    csv_yolu = os.path.join(session, "cihaz.csv")
 
-    with open(os.path.join(oturum, "oturum.txt"), "w", encoding="utf-8") as f:
+    with open(os.path.join(session, "oturum.txt"), "w", encoding="utf-8") as f:
         f.write(f"baslangic : {dt.datetime.now().isoformat(timespec='seconds')}\n")
-        f.write(f"yer       : {args.yer}\n")
+        f.write(f"yer       : {args.place}\n")
         f.write(f"port      : {args.port}\n")
         f.write(f"firmware  : {git_surum()}\n")
-        f.write(f"not       : {args.notu}\n")
+        f.write(f"not       : {args.note_text}\n")
 
-    print(f"\n  oturum: {oturum}")
+    print(f"\n  oturum: {session}")
     print("  ENTER = ISARET (basarken ELINIZI CIRPIN) · Ctrl+C = bitir\n")
 
-    kayit_sayisi = {"tur": 0, "isaret": 0}
-    satir_tamponu = ""
+    record_count = {"tur": 0, "isaret": 0}
+    row_tamponu = ""
 
     with open(log_yolu, "w", encoding="utf-8", newline="") as flog, \
          open(csv_yolu, "w", encoding="utf-8", newline="") as fcsv, \
@@ -160,11 +160,11 @@ def main():
         yazar.writerow(["duvar_saati", "cihaz_ms", "kip", "ebird_kodu",
                         "turkce_ad", "guven_yuzde"])
 
-        def log_yaz(metin):
-            flog.write(metin)
+        def log_write(text):
+            flog.write(text)
             flog.flush()
 
-        ekrana_gir(ser, log_yaz)
+        ekrana_gir(ser, log_write)
 
         try:
             while True:
@@ -172,36 +172,36 @@ def main():
                     simdi = dt.datetime.now().isoformat(timespec="milliseconds")
                     yazar.writerow([simdi, "", "ISARET", "", "", ""])
                     fcsv.flush()
-                    log_yaz(f"\n### ISARET {simdi}\n")
-                    kayit_sayisi["isaret"] += 1
-                    print(f"  >>> ISARET {kayit_sayisi['isaret']} @ {simdi}  (CIRP!)")
+                    log_write(f"\n### ISARET {simdi}\n")
+                    record_count["isaret"] += 1
+                    print(f"  >>> ISARET {record_count['isaret']} @ {simdi}  (CIRP!)")
 
-                ham = ser.read(512)
-                if not ham:
+                raw = ser.read(512)
+                if not raw:
                     continue
-                metin = ham.decode("utf-8", errors="replace")
-                log_yaz(metin)
+                text = raw.decode("utf-8", errors="replace")
+                log_write(text)
 
-                satir_tamponu += metin
-                while "\n" in satir_tamponu:
-                    satir, satir_tamponu = satir_tamponu.split("\n", 1)
-                    m = SATIR.match(satir.rstrip("\r"))
+                row_tamponu += text
+                while "\n" in row_tamponu:
+                    row, row_tamponu = row_tamponu.split("\n", 1)
+                    m = ROW.match(row.rstrip("\r"))
                     if not m:
                         continue
                     simdi = dt.datetime.now().isoformat(timespec="milliseconds")
-                    kod = m.group("kod")
-                    ad = m.group("ad").strip()
+                    code = m.group("kod")
+                    name = m.group("ad").strip()
                     yazar.writerow([simdi, m.group("ms"), m.group("kip"),
-                                    "" if kod == "-" else kod, ad, m.group("guven")])
+                                    "" if code == "-" else code, name, m.group("guven")])
                     fcsv.flush()
                     if m.group("kip") == "TUR":
-                        kayit_sayisi["tur"] += 1
-                        print(f"  [{kayit_sayisi['tur']:3d}] {ad or kod}  "
+                        record_count["tur"] += 1
+                        print(f"  [{record_count['tur']:3d}] {name or code}  "
                               f"%{m.group('guven')}")
 
         except KeyboardInterrupt:
-            print(f"\n\n  bitti. TUR olayi: {kayit_sayisi['tur']}, "
-                  f"isaret: {kayit_sayisi['isaret']}")
+            print(f"\n\n  bitti. TUR olayi: {record_count['tur']}, "
+                  f"isaret: {record_count['isaret']}")
             print(f"  {csv_yolu}")
 
 

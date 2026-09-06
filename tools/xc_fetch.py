@@ -67,12 +67,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(KOK, "data")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = os.path.join(ROOT, "data")
 XC_DIR = os.path.join(DATA, "xc")
 WAV_DIR = os.path.join(DATA, "wav")      # xc_convert.py ciktisi
 CACHE = os.path.join(DATA, "cache")
-CSV_YOL = os.path.join(DATA, "species_istanbul.csv")
+CSV_PATH = os.path.join(DATA, "species_istanbul.csv")
 
 API = "https://xeno-canto.org/api/3/recordings"
 UA = {"User-Agent": "PokeBird/0.1 (kisisel arastirma projesi)"}
@@ -92,9 +92,9 @@ UA = {"User-Agent": "PokeBird/0.1 (kisisel arastirma projesi)"}
 # Bu yüzden iki boyut birleştiriliyor: İstanbul'da YAYGIN türler düşük ses
 # verisiyle de listede kalır (kullanıcı onları gerçekten duyacak), NADİR
 # türler ise ancak bol ses verisi varsa girer (yoksa sınıf zaten öğrenilemez).
-YAYGIN_GBIF = 800     # bu kadar İstanbul kaydı olan tür "yaygın" sayılır
-VARSAYILAN_ESIK = 30  # yaygın türler için asgari XC A/B kaydı
-NADIR_ESIK = 100      # yaygın olmayan türler için asgari XC A/B kaydı
+COMMON_GBIF = 800     # bu kadar İstanbul kaydı olan tür "yaygın" sayılır
+VARSAYILAN_THRESHOLD = 30  # yaygın türler için asgari XC A/B kaydı
+RARE_THRESHOLD = 100      # yaygın olmayan türler için asgari XC A/B kaydı
 
 # Türev eser yasaklayan lisanslar — eğitim verisine alınmıyor (bkz. başlık).
 ND_ISARETI = "-nd"
@@ -108,12 +108,12 @@ def nd_mi(lisans_url):
     u = lisans_url.lower()
     if "publicdomain" in u or "zero" in u:
         return False
-    kod = u.rstrip("/").split("/licenses/")[-1].split("/")[0] if "/licenses/" in u else u
-    return "nd" in kod.split("-")
+    code = u.rstrip("/").split("/licenses/")[-1].split("/")[0] if "/licenses/" in u else u
+    return "nd" in code.split("-")
 
 
-def http_json(url, deneme=3):
-    for i in range(deneme):
+def http_json(url, attempt=3):
+    for i in range(attempt):
         try:
             req = urllib.request.Request(url, headers=UA)
             with urllib.request.urlopen(req, timeout=90) as r:
@@ -125,11 +125,11 @@ def http_json(url, deneme=3):
                          f"    {govde}\n"
                          f"    https://xeno-canto.org/account adresinden alin,\n"
                          f"    XC_KEY ortam degiskenine koyun ya da --key ile verin.\n")
-            if i == deneme - 1:
+            if i == attempt - 1:
                 raise
             time.sleep(2 * (i + 1))
         except (urllib.error.URLError, TimeoutError):
-            if i == deneme - 1:
+            if i == attempt - 1:
                 raise
             time.sleep(2 * (i + 1))
 
@@ -141,28 +141,28 @@ def xc_sorgu(key, sorgu, sayfa=1, per_page=1):
 
 
 def csv_oku():
-    if not os.path.exists(CSV_YOL):
-        sys.exit(f"[!] {CSV_YOL} yok. Once: python tools/species_list.py")
-    with open(CSV_YOL, encoding="utf-8") as f:
+    if not os.path.exists(CSV_PATH):
+        sys.exit(f"[!] {CSV_PATH} yok. Once: python tools/species_list.py")
+    with open(CSV_PATH, encoding="utf-8") as f:
         r = csv.DictReader(f)
         return list(r), list(r.fieldnames)
 
 
-def csv_yaz(satirlar, sutunlar):
-    with open(CSV_YOL, "w", newline="", encoding="utf-8") as f:
+def csv_write(rows, sutunlar):
+    with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=sutunlar, extrasaction="ignore")
         w.writeheader()
-        w.writerows(satirlar)
+        w.writerows(rows)
 
 
 # ── Sayım ──────────────────────────────────────────────────────────────────
 
-def komut_say(key, esik, nadir_esik=NADIR_ESIK, yaygin_gbif=YAYGIN_GBIF):
-    satirlar, sutunlar = csv_oku()
-    havuz = [s for s in satirlar if s["durum"] == "dahil"]
+def komut_count(key, threshold, rare_threshold=RARE_THRESHOLD, common_gbif=COMMON_GBIF):
+    rows, sutunlar = csv_oku()
+    havuz = [s for s in rows if s["durum"] == "dahil"]
     print(f"Havuzda {len(havuz)} tur. Xeno-canto kayit sayilari cekiliyor...")
-    print(f"(Avrupa, kalite A/B. Yaygin tur [GBIF>={YAYGIN_GBIF}] icin >={esik} kayit,\n"
-          f" nadir tur icin >={NADIR_ESIK} kayit gerekiyor)\n")
+    print(f"(Avrupa, kalite A/B. Yaygin tur [GBIF>={COMMON_GBIF}] icin >={threshold} kayit,\n"
+          f" nadir tur icin >={RARE_THRESHOLD} kayit gerekiyor)\n")
 
     os.makedirs(CACHE, exist_ok=True)
     for i, s in enumerate(havuz, 1):
@@ -199,7 +199,7 @@ def komut_say(key, esik, nadir_esik=NADIR_ESIK, yaygin_gbif=YAYGIN_GBIF):
     # Nihai eleme — birleşik kural (gerekçe: dosya başındaki sabitler).
     # Ses verisi ölçütü Avrupa A/B sayısı; Avrupa'da hiç kayıt yoksa
     # (İstanbul'da görülen Asya/Afrika türleri) dünya geneline düşülüyor.
-    for s in satirlar:
+    for s in rows:
         if s["durum"] != "dahil":
             for k in ("xc_ab", "xc_ab_eu", "xc_ab_sa"):
                 s.setdefault(k, "")
@@ -207,26 +207,26 @@ def komut_say(key, esik, nadir_esik=NADIR_ESIK, yaygin_gbif=YAYGIN_GBIF):
         eu = int(s.get("xc_ab_eu") or 0)
         dunya = int(s.get("xc_ab") or 0)
         etkin = eu if eu > 0 else dunya
-        yaygin = int(s.get("gbif_kayit") or 0) >= yaygin_gbif
-        gereken = esik if yaygin else nadir_esik
+        common = int(s.get("gbif_kayit") or 0) >= common_gbif
+        gereken = threshold if common else rare_threshold
 
         if etkin < gereken:
             s["durum"] = "elendi"
             s["gerekce"] = (
-                f"{'yaygin' if yaygin else 'nadir'} tur, XC'de {etkin} A/B kayit "
+                f"{'yaygin' if common else 'nadir'} tur, XC'de {etkin} A/B kayit "
                 f"(gereken {gereken}; Avrupa {eu}, dunya {dunya})")
 
     for k in ("xc_ab", "xc_ab_eu", "xc_ab_sa"):
         if k not in sutunlar:
             sutunlar.append(k)
-    csv_yaz(satirlar, sutunlar)
+    csv_write(rows, sutunlar)
 
-    nihai = [s for s in satirlar if s["durum"] == "dahil"]
-    print(f"\n{CSV_YOL}")
+    nihai = [s for s in rows if s["durum"] == "dahil"]
+    print(f"\n{CSV_PATH}")
     print(f"  NIHAI LISTE: {len(nihai)} tur")
     if nihai:
-        toplam_kayit = sum(int(s["xc_ab_eu"] or 0) or int(s["xc_ab"] or 0) for s in nihai)
-        print(f"  Toplam kullanilabilir A/B kayit: {toplam_kayit:,}")
+        total_record = sum(int(s["xc_ab_eu"] or 0) or int(s["xc_ab"] or 0) for s in nihai)
+        print(f"  Toplam kullanilabilir A/B kayit: {total_record:,}")
         print("\n  En az ses kaydi olan 10 tur (veri riski burada):")
         for s in sorted(nihai, key=lambda x: int(x["xc_ab_eu"] or 0) or int(x["xc_ab"] or 0))[:10]:
             eu, dw = int(s["xc_ab_eu"] or 0), int(s["xc_ab"] or 0)
@@ -240,48 +240,48 @@ def komut_say(key, esik, nadir_esik=NADIR_ESIK, yaygin_gbif=YAYGIN_GBIF):
 
 # ── İndirme ────────────────────────────────────────────────────────────────
 
-def komut_indir(key, tur_basina, sadece_ab, nd_dahil):
-    satirlar, _ = csv_oku()
-    nihai = [s for s in satirlar if s["durum"] == "dahil"]
+def komut_download(key, species_basina, only_ab, nd_include):
+    rows, _ = csv_oku()
+    nihai = [s for s in rows if s["durum"] == "dahil"]
     if not nihai:
         sys.exit("[!] Nihai listede tur yok. Once: python tools/xc_fetch.py --say")
 
     os.makedirs(XC_DIR, exist_ok=True)
-    kayit_csv = os.path.join(XC_DIR, "kayitlar.csv")
-    yeni_dosya = not os.path.exists(kayit_csv)
+    record_csv = os.path.join(XC_DIR, "kayitlar.csv")
+    fresh_file = not os.path.exists(record_csv)
 
-    print(f"{len(nihai)} tur, tur basina en fazla {tur_basina} kayit indirilecek.\n")
-    toplam_indi = 0
+    print(f"{len(nihai)} tur, tur basina en fazla {species_basina} kayit indirilecek.\n")
+    total_indi = 0
 
-    with open(kayit_csv, "a", newline="", encoding="utf-8") as kf:
+    with open(record_csv, "a", newline="", encoding="utf-8") as kf:
         w = csv.writer(kf)
-        if yeni_dosya:
+        if fresh_file:
             w.writerow(["dosya", "bilimsel_ad", "ebird_kodu", "xc_id",
                         "kalite", "lisans", "kaydeden", "ulke", "sure_sn"])
 
-        toplam_nd_atlandi = 0
+        total_nd_atlandi = 0
 
         for s in nihai:
             sci = s["bilimsel_ad"]
-            tur_kodu = s["ebird_kodu"] or sci.replace(" ", "_")
-            hedef_dizin = os.path.join(XC_DIR, tur_kodu)
+            species_code = s["ebird_kodu"] or sci.replace(" ", "_")
+            target_directory = os.path.join(XC_DIR, species_code)
 
             # Kotası zaten dolu olan türü hiç sorgulama. Eskiden her tür için
             # boş dizin açılıyordu; "bu tür yeniden iniyor" izlenimi veriyor
             # ve her turda gereksiz API sorgusu yapılıyordu.
-            wav_dizin = os.path.join(WAV_DIR, tur_kodu)
+            wav_directory = os.path.join(WAV_DIR, species_code)
             mevcut = 0
-            if os.path.isdir(wav_dizin):
-                mevcut += len([f for f in os.listdir(wav_dizin) if f.endswith(".wav")])
-            if os.path.isdir(hedef_dizin):
-                mevcut += len([f for f in os.listdir(hedef_dizin) if f.endswith(".mp3")])
-            if mevcut >= tur_basina:
+            if os.path.isdir(wav_directory):
+                mevcut += len([f for f in os.listdir(wav_directory) if f.endswith(".wav")])
+            if os.path.isdir(target_directory):
+                mevcut += len([f for f in os.listdir(target_directory) if f.endswith(".mp3")])
+            if mevcut >= species_basina:
                 print(f"  {s['turkce_ad'] or sci}: {mevcut} kayit zaten var, atlandi")
                 continue
 
-            os.makedirs(hedef_dizin, exist_ok=True)
+            os.makedirs(target_directory, exist_ok=True)
 
-            kalite = ' q:">C"' if sadece_ab else ""
+            quality = ' q:">C"' if only_ab else ""
             # Kademeli gevşetme: en alakalı/en ucuz kayıtlardan başla, tür
             # başına hedef dolmazsa kısıtları sırayla kaldır.
             #
@@ -298,90 +298,90 @@ def komut_indir(key, tur_basina, sadece_ab, nd_dahil):
             #                          18 MB'a çıkabiliyor ve indirmeyi
             #                          8 kat yavaşlatıyor.
             sorgular = [
-                f'sp:"{sci}"{kalite} area:europe len:5-60',
-                f'sp:"{sci}"{kalite} area:europe len:5-120',
-                f'sp:"{sci}"{kalite} area:europe',
-                f'sp:"{sci}"{kalite}',
+                f'sp:"{sci}"{quality} area:europe len:5-60',
+                f'sp:"{sci}"{quality} area:europe len:5-120',
+                f'sp:"{sci}"{quality} area:europe',
+                f'sp:"{sci}"{quality}',
             ]
 
-            alinan, gorulen = [], set()
+            alinan, seen = [], set()
             for sorgu in sorgular:
                 sayfa = 1
-                while len(alinan) < tur_basina:
+                while len(alinan) < species_basina:
                     d = xc_sorgu(key, sorgu, sayfa=sayfa, per_page=100)
-                    kayitlar = d.get("recordings", [])
-                    if not kayitlar:
+                    records = d.get("recordings", [])
+                    if not records:
                         break
-                    for k in kayitlar:
-                        if k.get("id") in gorulen:
+                    for k in records:
+                        if k.get("id") in seen:
                             continue
-                        gorulen.add(k.get("id"))
+                        seen.add(k.get("id"))
                         alinan.append(k)
                     if sayfa >= int(d.get("numPages", 1)):
                         break
                     sayfa += 1
                     time.sleep(0.34)
-                if len(alinan) >= tur_basina:
+                if len(alinan) >= species_basina:
                     break
 
             indi, nd_atlandi = 0, 0
             for k in alinan:
-                if indi >= tur_basina:
+                if indi >= species_basina:
                     break
-                if not nd_dahil and nd_mi(k.get("lic", "")):
+                if not nd_include and nd_mi(k.get("lic", "")):
                     nd_atlandi += 1
                     continue
                 xc_id = k.get("id", "")
                 url = k.get("file", "")
                 if not url:
                     continue
-                yol = os.path.join(hedef_dizin, f"XC{xc_id}.mp3")
+                path = os.path.join(target_directory, f"XC{xc_id}.mp3")
                 # Çevrilmiş WAV'a da bak: xc_convert.py mp3'ü silip WAV
                 # bırakıyor. Yalnızca mp3'e bakılırsa çevrilmiş her tür
                 # sıfırdan yeniden inerdi (bir turda 26 GB boşa gidiyordu).
-                wav_yol = os.path.join(WAV_DIR, os.path.basename(hedef_dizin),
+                wav_path = os.path.join(WAV_DIR, os.path.basename(target_directory),
                                        f"XC{xc_id}.wav")
-                if os.path.exists(yol) or os.path.exists(wav_yol):
+                if os.path.exists(path) or os.path.exists(wav_path):
                     indi += 1
                     continue
                 try:
                     req = urllib.request.Request(url, headers=UA)
                     with urllib.request.urlopen(req, timeout=120) as r, \
-                         open(yol, "wb") as out:
+                         open(path, "wb") as out:
                         out.write(r.read())
                 except Exception as e:
                     print(f"    [!] XC{xc_id} indirilemedi: {type(e).__name__}")
                     continue
-                w.writerow([os.path.relpath(yol, KOK), sci, s["ebird_kodu"], xc_id,
+                w.writerow([os.path.relpath(path, ROOT), sci, s["ebird_kodu"], xc_id,
                             k.get("q", ""), k.get("lic", ""), k.get("rec", ""),
                             k.get("cnt", ""), k.get("length", "")])
                 indi += 1
-                toplam_indi += 1
+                total_indi += 1
                 time.sleep(0.1)
 
-            toplam_nd_atlandi += nd_atlandi
+            total_nd_atlandi += nd_atlandi
             print(f"  {s['turkce_ad'] or sci}: {indi} kayit"
                   f"{f' (ND atlandi: {nd_atlandi})' if nd_atlandi else ''}")
             kf.flush()
 
-    print(f"\nToplam {toplam_indi} yeni kayit -> {XC_DIR}")
-    if toplam_nd_atlandi:
-        print(f"ND (turev yasak) lisansli {toplam_nd_atlandi} kayit atlandi.")
-    print(f"Lisans ve atif bilgisi: {kayit_csv}")
+    print(f"\nToplam {total_indi} yeni kayit -> {XC_DIR}")
+    if total_nd_atlandi:
+        print(f"ND (turev yasak) lisansli {total_nd_atlandi} kayit atlandi.")
+    print(f"Lisans ve atif bilgisi: {record_csv}")
 
 
-ANAHTAR_DOSYA = os.path.join(DATA, ".xc_key")
+KEY_FILE = os.path.join(DATA, ".xc_key")
 
 
-def anahtar_bul(parametre):
+def key_bul(parametre):
     """Anahtarı üç kaynaktan sırayla ara. Dosya yöntemi tercih edilir:
     anahtar komut geçmişine ya da ekrana düşmez."""
     if parametre:
         return parametre.strip()
     if os.environ.get("XC_KEY"):
         return os.environ["XC_KEY"].strip()
-    if os.path.exists(ANAHTAR_DOSYA):
-        with open(ANAHTAR_DOSYA, encoding="utf-8-sig") as f:
+    if os.path.exists(KEY_FILE):
+        with open(KEY_FILE, encoding="utf-8-sig") as f:
             return f.read().strip()
     return ""
 
@@ -390,21 +390,21 @@ def main():
     ap = argparse.ArgumentParser(description="PokeBird M4: Xeno-canto")
     ap.add_argument("--key", default="",
                     help="Xeno-canto API anahtari (yoksa XC_KEY ya da data/.xc_key)")
-    ap.add_argument("--say", action="store_true", help="kayit sayilarini cek ve nihai listeyi olustur")
-    ap.add_argument("--indir", action="store_true", help="nihai listedeki turlerin kayitlarini indir")
-    ap.add_argument("--esik", type=int, default=VARSAYILAN_ESIK,
-                    help=f"yaygin turler icin asgari A/B kayit (varsayilan {VARSAYILAN_ESIK})")
-    ap.add_argument("--nadir-esik", type=int, default=NADIR_ESIK,
-                    help=f"nadir turler icin asgari A/B kayit (varsayilan {NADIR_ESIK})")
-    ap.add_argument("--yaygin-gbif", type=int, default=YAYGIN_GBIF,
-                    help=f"bu kadar GBIF kaydi olan tur 'yaygin' sayilir (varsayilan {YAYGIN_GBIF})")
-    ap.add_argument("--adet", type=int, default=60, help="tur basina indirilecek kayit (varsayilan 60)")
-    ap.add_argument("--tum-kalite", action="store_true", help="A/B disinda C/D/E kayitlari da indir")
-    ap.add_argument("--nd-dahil", action="store_true",
+    ap.add_argument("--count", action="store_true", help="kayit sayilarini cek ve nihai listeyi olustur")
+    ap.add_argument("--download", action="store_true", help="nihai listedeki turlerin kayitlarini indir")
+    ap.add_argument("--threshold", type=int, default=VARSAYILAN_THRESHOLD,
+                    help=f"yaygin turler icin asgari A/B kayit (varsayilan {VARSAYILAN_THRESHOLD})")
+    ap.add_argument("--rare-threshold", type=int, default=RARE_THRESHOLD,
+                    help=f"nadir turler icin asgari A/B kayit (varsayilan {RARE_THRESHOLD})")
+    ap.add_argument("--common-gbif", type=int, default=COMMON_GBIF,
+                    help=f"bu kadar GBIF kaydi olan tur 'yaygin' sayilir (varsayilan {COMMON_GBIF})")
+    ap.add_argument("--count", type=int, default=60, help="tur basina indirilecek kayit (varsayilan 60)")
+    ap.add_argument("--all-quality", action="store_true", help="A/B disinda C/D/E kayitlari da indir")
+    ap.add_argument("--nd-include", action="store_true",
                     help="ND (turev yasak) lisansli kayitlari da indir — sorumluluk sizde")
     args = ap.parse_args()
 
-    key = anahtar_bul(args.key)
+    key = key_bul(args.key)
     if not key:
         sys.exit(
             "\n[!] Xeno-canto API anahtari bulunamadi.\n\n"
@@ -415,10 +415,10 @@ def main():
             "           \"ANAHTAR\" | Out-File -Encoding ascii -NoNewline data\\.xc_key\n\n"
             "    Alternatif:  $env:XC_KEY = \"ANAHTAR\"   ya da   --key ANAHTAR\n")
 
-    if args.say:
-        komut_say(key, args.esik, args.nadir_esik, args.yaygin_gbif)
-    elif args.indir:
-        komut_indir(key, args.adet, not args.tum_kalite, args.nd_dahil)
+    if args.count:
+        komut_count(key, args.threshold, args.rare_threshold, args.common_gbif)
+    elif args.download:
+        komut_download(key, args.count, not args.all_quality, args.nd_include)
     else:
         ap.print_help()
 

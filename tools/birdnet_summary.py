@@ -37,15 +37,15 @@ import sys
 import wave
 from collections import defaultdict
 
-KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(KOK, "data")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = os.path.join(ROOT, "data")
 WAV_DIR = os.path.join(DATA, "wav")
-SONUC_DIR = os.path.join(DATA, "birdnet_sonuc")
+RESULT_DIR = os.path.join(DATA, "birdnet_sonuc")
 
 # Etiket dosyasindan cikarildi: "Ad_Ad" bicimindeki, bilimsel adi olmayan
 # siniflar. Gryllus/Miogryllus (cirtlak) disarida birakildi — onlar gercek
 # canli sesi, gurultu degil.
-KUS_DISI = {
+BIRD_DISI = {
     "Dog", "Engine", "Environmental", "Fireworks", "Gun",
     "Human non-vocal", "Human vocal", "Human whistle",
     "Noise", "Power tools", "Siren",
@@ -54,7 +54,7 @@ KUS_DISI = {
 ESIKLER = (0.1, 0.25, 0.5)
 
 
-def tur_haritasi(harita_yolu):
+def species_haritasi(map_yolu):
     """ebird_kodu -> (BirdNET'in kullandigi bilimsel ad, turkce ad)
 
     !! BIZIM CSV'DEKI ADI KULLANMAYIN. BirdNET iki turde eski cins adinda
@@ -65,64 +65,64 @@ def tur_haritasi(harita_yolu):
 
     Harita eBird kodu uzerinden tools/birdnet_slist.py tarafindan uretiliyor.
     """
-    if not os.path.exists(harita_yolu):
+    if not os.path.exists(map_yolu):
         sys.exit(
-            f"ad haritasi yok: {harita_yolu}\n"
+            f"ad haritasi yok: {map_yolu}\n"
             "once calistirin:  .venv-birdnet\\Scripts\\python tools/birdnet_slist.py"
         )
-    with open(harita_yolu, encoding="utf-8") as f:
+    with open(map_yolu, encoding="utf-8") as f:
         return {
             r["ebird_kodu"]: (r["birdnet_bilimsel_ad"], r["turkce_ad"])
             for r in csv.DictReader(f)
         }
 
 
-def wav_suresi(yol):
+def wav_suresi(path):
     try:
-        with wave.open(yol, "rb") as w:
+        with wave.open(path, "rb") as w:
             return w.getnframes() / w.getframerate()
     except Exception:
         return None
 
 
-def dosya_oku(yol):
+def file_oku(path):
     """sonuc CSV -> {(bas, bit): [(bilimsel_ad, guven), ...]}"""
-    dilim = defaultdict(list)
-    with open(yol, encoding="utf-8") as f:
+    slice = defaultdict(list)
+    with open(path, encoding="utf-8") as f:
         for r in csv.DictReader(f):
-            dilim[(float(r["Start (s)"]), float(r["End (s)"]))].append(
+            slice[(float(r["Start (s)"]), float(r["End (s)"]))].append(
                 (r["Scientific name"], float(r["Confidence"]))
             )
-    return dilim
+    return slice
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sonuc", default=SONUC_DIR)
+    ap.add_argument("--result", default=RESULT_DIR)
     ap.add_argument("--wav", default=WAV_DIR)
-    ap.add_argument("--harita", default=os.path.join(DATA, "birdnet_ad_haritasi.csv"))
+    ap.add_argument("--name-map", default=os.path.join(DATA, "birdnet_ad_haritasi.csv"))
     ap.add_argument("--out", default=os.path.join(DATA, "segmentler.csv"))
     ap.add_argument(
-        "--zayif-esik", type=int, default=100,
+        "--zayif-threshold", type=int, default=100,
         help="bu sayidan az dilimi olan turler zayif diye bildirilir"
     )
     a = ap.parse_args()
 
-    if not os.path.isdir(a.sonuc):
-        sys.exit(f"sonuc dizini yok: {a.sonuc} — once tools/birdnet_run.py")
+    if not os.path.isdir(a.result):
+        sys.exit(f"sonuc dizini yok: {a.result} — once tools/birdnet_run.py")
 
-    kod_ad = tur_haritasi(a.harita)  # kod -> (BirdNET bilimsel adi, turkce ad)
+    code_name = species_haritasi(a.name_map)  # kod -> (BirdNET bilimsel adi, turkce ad)
 
-    turler = sorted(d for d in os.listdir(a.sonuc)
-                    if os.path.isdir(os.path.join(a.sonuc, d)))
+    species = sorted(d for d in os.listdir(a.result)
+                    if os.path.isdir(os.path.join(a.result, d)))
 
-    say = {e: defaultdict(int) for e in ESIKLER}
-    hedef_en_iyi = defaultdict(int)   # hedefin en yuksek skor oldugu dilim
+    count = {e: defaultdict(int) for e in ESIKLER}
+    target_max_iyi = defaultdict(int)   # hedefin en yuksek skor oldugu dilim
     tespitli = defaultdict(int)       # en az bir tespit alan dilim
-    toplam_dilim = defaultdict(int)   # kayitlardaki tum 3 sn'lik dilimler
-    kus_disi_say = defaultdict(int)
-    eksik_dosya = defaultdict(int)
-    satir = 0
+    total_slice = defaultdict(int)   # kayitlardaki tum 3 sn'lik dilimler
+    bird_disi_count = defaultdict(int)
+    missing_file = defaultdict(int)
+    row = 0
 
     with open(a.out, "w", encoding="utf-8", newline="") as f:
         y = csv.writer(f)
@@ -131,13 +131,13 @@ def main():
             "en_iyi_tur", "en_iyi_guven", "kus_disi_tur", "kus_disi_guven",
         ])
 
-        for kod in turler:
-            if kod not in kod_ad:
-                print(f"!! {kod} species_istanbul.csv'de 'dahil' degil, atlandi")
+        for code in species:
+            if code not in code_name:
+                print(f"!! {code} species_istanbul.csv'de 'dahil' degil, atlandi")
                 continue
-            hedef_ad = kod_ad[kod][0]
-            sdir = os.path.join(a.sonuc, kod)
-            wdir = os.path.join(a.wav, kod)
+            target_name = code_name[code][0]
+            sdir = os.path.join(a.result, code)
+            wdir = os.path.join(a.wav, code)
 
             for wf in sorted(os.listdir(wdir)) if os.path.isdir(wdir) else []:
                 if not wf.endswith(".wav"):
@@ -145,61 +145,61 @@ def main():
                 temel = wf[:-4]
                 sf = os.path.join(sdir, temel + ".BirdNET.results.csv")
                 if not os.path.exists(sf):
-                    eksik_dosya[kod] += 1
+                    missing_file[code] += 1
                     continue
 
-                sure = wav_suresi(os.path.join(wdir, wf))
-                if sure:
-                    toplam_dilim[kod] += max(1, int(sure // 3) + (sure % 3 > 0))
+                duration = wav_suresi(os.path.join(wdir, wf))
+                if duration:
+                    total_slice[code] += max(1, int(duration // 3) + (duration % 3 > 0))
 
-                for (bas, bit), tahmin in sorted(dosya_oku(sf).items()):
-                    tespitli[kod] += 1
-                    d = dict(tahmin)
-                    hedef = d.get(hedef_ad, 0.0)
-                    en_iyi_tur, en_iyi = max(tahmin, key=lambda x: x[1])
-                    kd = [(n, c) for n, c in tahmin if n in KUS_DISI]
-                    kd_tur, kd_guven = max(kd, key=lambda x: x[1]) if kd else ("", 0.0)
+                for (start, end), pred in sorted(file_oku(sf).items()):
+                    tespitli[code] += 1
+                    d = dict(pred)
+                    target = d.get(target_name, 0.0)
+                    max_iyi_species, best = max(pred, key=lambda x: x[1])
+                    kd = [(n, c) for n, c in pred if n in BIRD_DISI]
+                    kd_species, kd_guven = max(kd, key=lambda x: x[1]) if kd else ("", 0.0)
                     if kd:
-                        kus_disi_say[kod] += 1
-                    if en_iyi_tur == hedef_ad:
-                        hedef_en_iyi[kod] += 1
+                        bird_disi_count[code] += 1
+                    if max_iyi_species == target_name:
+                        target_max_iyi[code] += 1
                     for e in ESIKLER:
-                        if hedef >= e:
-                            say[e][kod] += 1
+                        if target >= e:
+                            count[e][code] += 1
 
                     y.writerow([
-                        kod, temel, f"{bas:.1f}", f"{bit:.1f}", f"{hedef:.4f}",
-                        en_iyi_tur, f"{en_iyi:.4f}", kd_tur,
+                        code, temel, f"{start:.1f}", f"{end:.1f}", f"{target:.4f}",
+                        max_iyi_species, f"{best:.4f}", kd_species,
                         f"{kd_guven:.4f}" if kd else "",
                     ])
-                    satir += 1
+                    row += 1
 
     # ---------------- ozet ----------------
-    print(f"\n{len(turler)} tur · {satir} dilim satiri -> {a.out}")
+    print(f"\n{len(species)} tur · {row} dilim satiri -> {a.out}")
     for e in ESIKLER:
-        t = sum(say[e].values())
-        print(f"  hedef guven >= {e}: {t} dilim  ({t / max(len(turler), 1):.0f}/tur)")
+        t = sum(count[e].values())
+        print(f"  hedef guven >= {e}: {t} dilim  ({t / max(len(species), 1):.0f}/tur)")
     print(f"  en az bir tespit alan dilim : {sum(tespitli.values())}")
-    print(f"  kayitlardaki toplam dilim   : {sum(toplam_dilim.values())}")
-    print(f"  kus disi ses iceren dilim   : {sum(kus_disi_say.values())}"
+    print(f"  kayitlardaki toplam dilim   : {sum(total_slice.values())}")
+    print(f"  kus disi ses iceren dilim   : {sum(bird_disi_count.values())}"
           f"  (negatif madenciligi icin, §9f-4)")
 
-    if eksik_dosya:
-        n = sum(eksik_dosya.values())
-        print(f"\n!! {n} WAV'in sonucu yok ({len(eksik_dosya)} turde)"
+    if missing_file:
+        n = sum(missing_file.values())
+        print(f"\n!! {n} WAV'in sonucu yok ({len(missing_file)} turde)"
               f" — birdnet_run.py'yi tekrar calistirin (kaldigi yerden devam eder)")
-        for k, v in sorted(eksik_dosya.items(), key=lambda x: -x[1])[:10]:
+        for k, v in sorted(missing_file.items(), key=lambda x: -x[1])[:10]:
             print(f"   {k:10s} {v}")
 
     zayif = sorted(
-        ((say[0.25][k], k) for k in turler if k in kod_ad),
+        ((count[0.25][k], k) for k in species if k in code_name),
     )
-    az = [(n, k) for n, k in zayif if n < a.zayif_esik]
-    print(f"\n0.25 esiginde {a.zayif_esik} dilimin altinda kalan tur: {len(az)}")
+    az = [(n, k) for n, k in zayif if n < a.zayif_threshold]
+    print(f"\n0.25 esiginde {a.zayif_threshold} dilimin altinda kalan tur: {len(az)}")
     print("(M5'te sinif dengesizligi — focal loss ve veri artirma bunlari hedefleyecek)")
     for n, k in az[:25]:
-        tr = kod_ad[k][1]
-        pay = hedef_en_iyi[k] / tespitli[k] if tespitli[k] else 0
+        tr = code_name[k][1]
+        pay = target_max_iyi[k] / tespitli[k] if tespitli[k] else 0
         print(f"   {k:10s} {tr:28s} {n:5d} dilim   hedef en yuksek: %{pay * 100:.0f}")
 
 
