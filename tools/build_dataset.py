@@ -213,8 +213,8 @@ def checksum():
                         b = int(round(float(r["start"]) * SR))
                         if len(s) >= b + WINDOW_SAMPLES:
                             sample = s[b:b + WINDOW_SAMPLES]
-                            print(f"girdi: {r['ebird_kodu']}/{r['dosya']} "
-                                  f"@{r['baslangic']}s (guven {r['hedef_guven']})")
+                            print(f"girdi: {r['ebird_code']}/{r['file']} "
+                                  f"@{r['start']}s (guven {r['target_confidence']})")
                             break
     if sample is None:
         t = np.arange(WINDOW_SAMPLES) / SR
@@ -342,7 +342,7 @@ def output_verify(out, n):
     for i in sorted(selection.tolist()):
         s = rows[i]
         if int(s["index"]) != i:
-            print(f"KALDI: satir {i} indeks sutununda {s['indeks']} yaziyor")
+            print(f"KALDI: satir {i} indeks sutununda {s['index']} yaziyor")
             return 1
         path = _row_audio(s)
         if not path or not os.path.exists(path):
@@ -354,7 +354,7 @@ def output_verify(out, n):
             ayni += 1
         else:
             d = np.abs(p.astype(int) - X[i].astype(int))
-            print(f"!! satir {i} ({s['ebird_kodu']}/{s['dosya']}@{s['baslangic']}) "
+            print(f"!! satir {i} ({s['ebird_code']}/{s['file']}@{s['start']}) "
                   f"tutmadi — en buyuk fark {d.max()}")
 
     print(f"{kontrol} satir kaynaktan yeniden cikarildi · birebir ayni: {ayni}")
@@ -387,16 +387,16 @@ def listen(out, n):
             continue
         start = int(s["window_samples"])
         audio = wav_oku(path)[start:start + WINDOW_SAMPLES]
-        name = (f"{s['indeks']}_{s['ebird_kodu']}_{s['bolum']}"
+        name = (f"{s['index']}_{s['ebird_code']}_{s['split']}"
               f"{'_BULASIK' if s['bulasik'] == '1' else ''}"
-              f"_{s['dosya']}_{s['baslangic']}s.wav")
+              f"_{s['file']}_{s['start']}s.wav")
         with wave.open(os.path.join(d, name), "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(SR)
             w.writeframes(audio.tobytes())
-        print(f"  {name}   hedef_guven {s['hedef_guven']}  "
-              f"en_iyi {s['en_iyi_tur']}")
+        print(f"  {name}   hedef_guven {s['target_confidence']}  "
+              f"en_iyi {s['best_species']}")
     print(f"\n-> {d}   (dinleyip etiketle karsilastirin)")
     return 0
 

@@ -230,7 +230,7 @@ def komut_count(key, threshold, rare_threshold=RARE_THRESHOLD, common_gbif=COMMO
         print("\n  En az ses kaydi olan 10 tur (veri riski burada):")
         for s in sorted(nihai, key=lambda x: int(x["xc_count_eu"] or 0) or int(x["xc_count"] or 0))[:10]:
             eu, dw = int(s["xc_count_eu"] or 0), int(s["xc_count"] or 0)
-            print(f"    {eu or dw:5} A/B  {s['turkce_ad'] or s['bilimsel_ad']}"
+            print(f"    {eu or dw:5} A/B  {s['turkish_name'] or s['scientific_name']}"
                   f"{'  (dunya geneli)' if not eu else ''}")
     if len(nihai) > 130:
         print(f"\n  [i] {len(nihai)} tur planin ~110'unun uzerinde; --esik yukseltilebilir.")
@@ -276,7 +276,7 @@ def komut_download(key, species_basina, only_ab, nd_include):
             if os.path.isdir(target_directory):
                 mevcut += len([f for f in os.listdir(target_directory) if f.endswith(".mp3")])
             if mevcut >= species_basina:
-                print(f"  {s['turkce_ad'] or sci}: {mevcut} kayit zaten var, atlandi")
+                print(f"  {s['turkish_name'] or sci}: {mevcut} kayit zaten var, atlandi")
                 continue
 
             os.makedirs(target_directory, exist_ok=True)
@@ -360,7 +360,7 @@ def komut_download(key, species_basina, only_ab, nd_include):
                 time.sleep(0.1)
 
             total_nd_atlandi += nd_atlandi
-            print(f"  {s['turkce_ad'] or sci}: {indi} kayit"
+            print(f"  {s['turkish_name'] or sci}: {indi} kayit"
                   f"{f' (ND atlandi: {nd_atlandi})' if nd_atlandi else ''}")
             kf.flush()
 

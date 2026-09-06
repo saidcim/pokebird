@@ -229,7 +229,7 @@ def main():
 
     print(f"\ncevrildi {cevrilen} · zaten vardi {skipped} · hata {error}")
     print(f"format sagalamasi: {dogru}/{len(sample)} dogru (24 kHz mono 16-bit)")
-    print(f"kategori sayisi  : {len(set(k['kategori'] for k in record))}")
+    print(f"kategori sayisi  : {len(set(k['category'] for k in record))}")
     print(f"-> {target_root}")
     if dogru != len(sample):
         sys.exit("!! format sagalamasi kaldi")

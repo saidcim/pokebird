@@ -255,7 +255,7 @@ def main():
     if include:
         print("\nEn cok kaydi olan 10 tur:")
         for s in [x for x in rows if x["status"] == "included"][:10]:
-            print(f"  {s['gbif_kayit']:7,}  {s['turkce_ad'] or s['bilimsel_ad']}")
+            print(f"  {s['gbif_records']:7,}  {s['turkish_name'] or s['scientific_name']}")
 
     # Plan ~110 tür öngörüyor. Buradaki liste HAVUZ; nihai daraltmayı
     # xc_fetch.py yapacak.

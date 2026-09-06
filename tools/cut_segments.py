@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """
-segment_kes.py — segmentler.csv'deki dilimleri dinlenebilir WAV'lara kes.
+cut_segments.py — cut the slices listed in segments.csv into playable WAVs.
 
-    python tools/cut_segments.py --adet 10            # rastgele 10 dilim
-    python tools/cut_segments.py --tur eurbla --adet 5
+    python tools/cut_segments.py --count 10           # 10 random slices
+    python tools/cut_segments.py --species eurbla --count 5
 
-NEDEN VAR: segmentasyonun dogru calistigina dair TEK dogrudan gozlem
-dinlemektir. Bu projede dolayli olcume fazla guvenmek iki kez pahaliya
-patladi (lastsession §5.10) — TE hattini dinleyip "panel sagir" demek ve
-dokunmatigi kimse ekrana dokunmadan test etmek. Segmentasyonda ayni hataya
-dusmemek icin ornekler kesilip DINLENMELI.
+WHY THIS EXISTS: the ONLY direct evidence that the segmentation works is
+listening to it. Trusting indirect measurement too far has cost this project
+dearly twice — declaring the panel deaf from the TE line alone, and testing
+touch without anyone ever touching the screen. To avoid the same mistake in
+segmentation, samples must be cut and HEARD.
 
-Tum dilimleri kesmek icin degil: ~10 GB eder (bkz. birdnet_ozet.py). Egitim
-dilimleri dogrudan orijinal WAV'dan ofsetle okuyacak.
+It is not meant for cutting every slice: that would be about 10 GB (see
+birdnet_summary.py). Training reads its slices straight from the original WAV
+at an offset.
 
-Ses 24 kHz mono 16-bit oldugu icin kesme stdlib `wave` ile yapiliyor;
-ffmpeg gerekmiyor, yeniden kodlama yok — baytlar birebir kopyalaniyor.
+Because the audio is 24 kHz mono 16-bit, the cutting is done with the stdlib
+`wave` module — no ffmpeg, no re-encoding, the bytes are copied through
+unchanged.
 """
 
 import argparse
-import csv
 import os
 import random
 import wave
@@ -49,27 +50,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--segments", default=os.path.join(DATA, "segments.csv"))
     ap.add_argument("--wav", default=os.path.join(DATA, "wav"))
-    ap.add_argument("--out", default=os.path.join(DATA, "segment_ornek"))
-    ap.add_argument("--species", nargs="*", help="yalnizca bu ebird kodlari")
-    ap.add_argument("--threshold", type=float, default=0.5, help="en az hedef_guven")
+    ap.add_argument("--out", default=os.path.join(DATA, "segment_samples"))
+    ap.add_argument("--species", nargs="*", help="only these eBird codes")
+    ap.add_argument("--threshold", type=float, default=0.5,
+                    help="minimum target confidence")
     ap.add_argument("--count", type=int, default=10)
-    ap.add_argument("--seed", type=int, default=0, help="tekrarlanabilirlik")
+    ap.add_argument("--seed", type=int, default=0, help="for reproducibility")
     a = ap.parse_args()
 
-    with open(a.segments, encoding="utf-8") as f:
+    with open(csv_compat.resolve(a.segments), encoding="utf-8") as f:
         row = [
             r for r in csv_compat.reader(f)
             if float(r["target_confidence"]) >= a.threshold
             and (not a.species or r["ebird_code"] in a.species)
         ]
     if not row:
-        raise SystemExit(f"esik {a.threshold} ustunde dilim yok")
+        raise SystemExit(f"no slices above threshold {a.threshold}")
 
     random.seed(a.seed)
     selection = random.sample(row, min(a.count, len(row)))
     os.makedirs(a.out, exist_ok=True)
 
-    print(f"{len(row)} uygun dilimden {len(selection)} tanesi kesiliyor -> {a.out}\n")
+    print(f"cutting {len(selection)} of {len(row)} eligible slices -> {a.out}\n")
     for r in sorted(selection, key=lambda x: (x["ebird_code"], x["file"])):
         code, file = r["ebird_code"], r["file"]
         start, end = float(r["start"]), float(r["end"])
@@ -77,9 +79,10 @@ def main():
         name = f"{code}_{file}_{start:06.1f}.wav"
         cut(source, os.path.join(a.out, name), start, end)
         print(
-            f"{name}\n    hedef {float(r['hedef_guven']):.2f}   "
-            f"en iyi: {r['en_iyi_tur']} {float(r['en_iyi_guven']):.2f}"
-            + (f"   kus disi: {r['kus_disi_tur']}" if r["non_bird_species"] else "")
+            f"{name}\n    target {float(r['target_confidence']):.2f}   "
+            f"best: {r['best_species']} {float(r['best_confidence']):.2f}"
+            + (f"   non-bird: {r['non_bird_species']}"
+               if r["non_bird_species"] else "")
         )
 
 

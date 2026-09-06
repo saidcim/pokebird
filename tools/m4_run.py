@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-m4_run.py — M4 veri boru hattını uçtan uca, gözetimsiz çalıştır.
+m4_run.py — run the data pipeline end to end, unattended.
 
-  1. Xeno-canto kayıt sayımı (doğru kalite filtresiyle: q:">C" = A/B)
-  2. Nihai tür listesi — hedef tür sayısına en yakın eşiği kendi bulur
-  3. Tür başına kayıt indirme
+  1. Count Xeno-canto recordings (with the right quality filter: q:">C" = A/B)
+  2. Build the final species list — it finds the threshold closest to the
+     target species count by itself
+  3. Download recordings per species
 
-Neden ayrı script: sayım bitmeden nihai listenin kaç tür olacağı bilinmiyor,
-indirme de o listeye bağlı. Üçünü elle zincirlemek yerine tek komut.
+Why this is a separate script: until the counting pass finishes, nobody knows
+how many species the final list will hold, and the download depends on that
+list. Rather than chaining the three by hand, this is one command.
 
-    python tools/m4_run.py --hedef-tur 120 --adet 60
+    python tools/m4_run.py --target-species 120 --count 60
 """
 
 import argparse
-import csv
 import os
 import subprocess
 import sys
 
-import os as _os, sys as _sys
-_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,11 +27,11 @@ CSV_PATH = os.path.join(ROOT, "data", "species_istanbul.csv")
 PY = sys.executable
 
 
-def calistir(args):
+def run(args):
     print(f"\n$ {' '.join(args)}\n", flush=True)
     p = subprocess.run([PY] + args, cwd=ROOT)
     if p.returncode != 0:
-        sys.exit(f"[!] komut basarisiz (cikis {p.returncode}): {' '.join(args)}")
+        sys.exit(f"[!] command failed (exit {p.returncode}): {' '.join(args)}")
 
 
 def include_count():
@@ -46,33 +46,36 @@ def main():
     ap.add_argument("--common-threshold", type=int, default=30)
     args = ap.parse_args()
 
-    # 1. Havuzu tazele (GBIF/eBird önbellekten, saniyeler sürer)
-    calistir(["tools/species_list.py", "--monthly"])
+    # 1. Refresh the pool (from the GBIF/eBird cache; takes seconds)
+    run(["tools/species_list.py", "--monthly"])
 
-    # 2. Sayım + eleme. Nadir tür eşiğini hedefe en yakın sonucu verecek
-    #    şekilde ara: sayım önbelleğe alındığı için tekrarlar bedava.
-    adaylar = [100, 125, 150, 175, 200, 250, 300]
-    best, max_iyi_fark, max_iyi_count = None, 10**9, 0
+    # 2. Count and filter. Search for the rare-species threshold that lands
+    #    closest to the target: the counts are cached, so repeats are free.
+    candidates = [100, 125, 150, 175, 200, 250, 300]
+    best, best_diff, best_count = None, 10**9, 0
 
-    for rare in adaylar:
-        calistir(["tools/xc_fetch.py", "--survey",
-                  "--threshold", str(args.common_threshold), "--rare-threshold", str(rare)])
+    for rare in candidates:
+        run(["tools/xc_fetch.py", "--survey",
+             "--threshold", str(args.common_threshold),
+             "--rare-threshold", str(rare)])
         count = include_count()
-        fark = abs(count - args.target_species)
-        print(f"\n>>> nadir-esik {rare} -> {count} tur (hedef {args.target_species}, "
-              f"fark {fark})\n", flush=True)
-        if fark < max_iyi_fark:
-            best, max_iyi_fark, max_iyi_count = rare, fark, count
-        # Havuz her turda daralıyor; bir sonraki eşik için tazele.
-        calistir(["tools/species_list.py", "--monthly"])
+        diff = abs(count - args.target_species)
+        print(f"\n>>> rare-threshold {rare} -> {count} species "
+              f"(target {args.target_species}, off by {diff})\n", flush=True)
+        if diff < best_diff:
+            best, best_diff, best_count = rare, diff, count
+        # The pool narrows each round; refresh it for the next threshold.
+        run(["tools/species_list.py", "--monthly"])
 
-    print(f"\n=== SECILEN: nadir-esik {best} -> {max_iyi_count} tur ===\n", flush=True)
-    calistir(["tools/xc_fetch.py", "--survey",
-              "--threshold", str(args.common_threshold), "--rare-threshold", str(best)])
+    print(f"\n=== CHOSEN: rare-threshold {best} -> {best_count} species ===\n",
+          flush=True)
+    run(["tools/xc_fetch.py", "--survey",
+         "--threshold", str(args.common_threshold),
+         "--rare-threshold", str(best)])
 
-    # 3. İndirme
-    calistir(["tools/xc_fetch.py", "--download", "--per-species", str(args.count)])
-    print("\n=== M4 VERI HATTI TAMAM ===", flush=True)
+    # 3. Download
+    run(["tools/xc_fetch.py", "--download", "--per-species", str(args.count)])
+    print("\n=== DATA PIPELINE COMPLETE ===", flush=True)
 
 
 if __name__ == "__main__":
