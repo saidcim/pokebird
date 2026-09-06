@@ -1200,74 +1200,79 @@ static void cmd_orientation(void) {
         printf("  %s\n", corner[i].name);
     }
 
-    printf("\nCihazi USB soketi ASAGI bakacak sekilde tutun ve her rengin\n");
-    printf("hangi kosede oldugunu soyleyin (sol ust / sag ust / sol alt / sag alt).\n\n");
+    printf("\nHold the device with the USB socket pointing DOWN and note which\n");
+    printf("corner each colour is in (top-left / top-right / bottom-left /\n");
+    printf("bottom-right).\n\n");
 }
 
-/* ── §9n: ekran hatası — QSPI zamanlama ve melez yol teşhisleri ───────────
+/* ── The display bug: QSPI timing and hybrid-path diagnostics ─────────────
  *
- * §9n'in birinci hipotezi: `QSPI_WaitIdle`'ın 50 ms'lik zaman aşımı SESSİZ.
- * Zaman aşımına giriyorsa fonksiyon hiçbir şey beklemiyordur, §5.9'un hatası
- * geri gelmiştir (CS, veri hatta çıkmadan yükselir) ve düzeltme kâğıt üstünde
- * kalmıştır. Aşağıdaki `w` bunu ölçüyor — göz gerekmiyor. */
+ * The first hypothesis was that `QSPI_WaitIdle`'s 50 ms timeout is SILENT. If
+ * it is timing out then the function is not waiting for anything, the old
+ * bug has returned (CS rises before the data reaches the bus), and the fix
+ * only ever existed on paper. The `w` command below measures that — no eyes
+ * required. */
 
 static void qspi_counter_print(void) {
-    printf("     WaitIdle cagrisi         : %lu\n",
+    printf("     WaitIdle calls           : %lu\n",
            (unsigned long)pb_qspi_wait_calls);
-    printf("     ZAMAN ASIMI (sessiz hata): %lu%s\n",
+    printf("     TIMEOUTS (silent failure): %lu%s\n",
            (unsigned long)pb_qspi_wait_timeout,
-           pb_qspi_wait_timeout ? "   <<< HIPOTEZ DOGRU: beklemiyor" : "   (0 = beklendi)");
-    printf("     girerken SM kapali       : %lu%s\n",
+           pb_qspi_wait_timeout ? "   <<< HYPOTHESIS CONFIRMED: not waiting"
+                                : "   (0 = it did wait)");
+    printf("     SM off on entry          : %lu%s\n",
            (unsigned long)pb_qspi_wait_sm_off,
-           pb_qspi_wait_sm_off ? "   <<< SM KAPALI" : "");
-    printf("     girerken FIFO doluydu    : %lu   (en yuksek seviye %lu/4)\n",
+           pb_qspi_wait_sm_off ? "   <<< SM IS OFF" : "");
+    printf("     FIFO full on entry       : %lu   (peak level %lu/4)\n",
            (unsigned long)pb_qspi_wait_fifo_full,
            (unsigned long)pb_qspi_wait_fifo_max);
-    printf("     gercekten bekledi        : %lu   (en cok %lu dongu, en uzun %lu us)\n",
+    printf("     actually waited          : %lu   (max %lu spins, longest %lu us)\n",
            (unsigned long)pb_qspi_wait_waited,
            (unsigned long)pb_qspi_wait_spin_max,
            (unsigned long)pb_qspi_wait_us_max);
-    printf("     CIKARKEN FIFO hala dolu  : %lu%s\n",
+    printf("     FIFO still full on exit  : %lu%s\n",
            (unsigned long)pb_qspi_wait_residue,
-           pb_qspi_wait_residue ? "   <<< BEKLEME ISE YARAMADI" : "   (0 = FIFO bosaldi)");
-    printf("     toplam bekleme           : %lu us\n\n",
+           pb_qspi_wait_residue ? "   <<< THE WAIT DID NOT HELP"
+                                : "   (0 = the FIFO drained)");
+    printf("     total wait               : %lu us\n\n",
            (unsigned long)pb_qspi_wait_us_total);
 }
 
 /**
- * QSPI zamanlama teşhisi — `QSPI_WaitIdle` gerçekten bekliyor mu? (§9n)
+ * QSPI timing diagnostic — is `QSPI_WaitIdle` actually waiting?
  *
- * GÖZ GEREKMİYOR. Cihaz kendi yanıtını yazıyor. Dört ölçüm:
+ * NO EYES REQUIRED. The device prints its own answer. Four measurements:
  *
- *   1) Yalnızca pencere komutları — FIFO'ya CPU yazıyor, DMA yok.
- *   2) Tek satır blit — piksel yolu, DMA'lı.
- *   3) Tam ekran doldurma + geçen süre. PIO'nun kuramsal tabanıyla
- *      karşılaştırılıyor: her WaitIdle zaman aşımına girseydi 640 satır x
- *      4 işlem x 50 ms = ~2 dakika sürerdi, yani süre tek başına da bir kanıt.
- *   4) CS yükseldikten SONRA hat hâlâ kıpırdıyor mu — §5.9'un imzasının
- *      DOĞRUDAN gözlemi. PIO saati kalıntı baytlar CPU'nun örneklemesine
- *      yetecek kadar yavaşlatılıyor; `QSPI_Deselect` döndükten sonra SCLK'te
- *      geçiş varsa veri CS yüksekken hatta çıkıyor demektir.
+ *   1) Window commands only — the CPU writes the FIFO, no DMA.
+ *   2) A single-row blit — the pixel path, with DMA.
+ *   3) A full-screen fill plus elapsed time, compared against PIO's
+ *      theoretical floor. If every WaitIdle were timing out, 640 rows x 4
+ *      operations x 50 ms would take about two minutes, so the duration alone
+ *      is evidence.
+ *   4) Is the bus still moving AFTER CS rises — a DIRECT observation of the
+ *      old bug's signature. The PIO clock is slowed enough for the CPU to
+ *      sample any residual bytes; if SCLK transitions after `QSPI_Deselect`
+ *      returns, data is reaching the bus while CS is high.
  *
- * Bu komut PIO durum makinesini KAPALI BIRAKMIYOR; ardından ekran testi
- * çalıştırmak güvenli (bkz. `d`'nin bit-bang varyantı, §9n uyarısı).
+ * This command does NOT leave the PIO state machine disabled, so running a
+ * display test afterwards is safe (unlike `d`'s bit-bang variant).
  */
 static void cmd_qspi_timing(void) {
-    printf("\nQSPI zamanlama teshisi — WaitIdle gercekten bekliyor mu? (goz GEREKMEZ)\n");
-    printf("======================================================================\n\n");
+    printf("\nQSPI timing diagnostic - is WaitIdle really waiting? (NO EYES NEEDED)\n");
+    printf("=====================================================================\n\n");
 
-    printf("0) PIO durumu: sm%u %s, PC %u, sys clk %lu Hz\n\n",
+    printf("0) PIO state: sm%u %s, PC %u, sys clk %lu Hz\n\n",
            (unsigned)qspi.sm,
-           ((qspi.pio->ctrl >> qspi.sm) & 1u) ? "ETKIN" : "KAPALI (!)",
+           ((qspi.pio->ctrl >> qspi.sm) & 1u) ? "ENABLED" : "DISABLED (!)",
            (unsigned)pio_sm_get_pc(qspi.pio, qspi.sm),
            (unsigned long)clock_get_hz(clk_sys));
 
-    printf("1) Pencere komutlari — SetWindows, 3 CS islemi, DMA yok\n");
+    printf("1) Window commands - SetWindows, 3 CS transactions, no DMA\n");
     pb_qspi_counters_reset();
     LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, 1);
     qspi_counter_print();
 
-    printf("2) Tek satir blit — pencere + DMA piksel, 4 CS islemi\n");
+    printf("2) Single-row blit - window + DMA pixels, 4 CS transactions\n");
     {
         static uint16_t row[PB_PANEL_W];
         for (uint32_t i = 0; i < PB_PANEL_W; i++) row[i] = 0x0000;
@@ -1276,28 +1281,28 @@ static void cmd_qspi_timing(void) {
         qspi_counter_print();
     }
 
-    printf("3) Tam ekran doldurma — 640 satir\n");
+    printf("3) Full-screen fill - 640 rows\n");
     {
         pb_qspi_counters_reset();
         absolute_time_t t0 = get_absolute_time();
         pb_lcd_fill(0x0000);
         int64_t elapsed = absolute_time_diff_us(t0, get_absolute_time());
 
-        /* PIO tabani: tek gecis oldugu icin yalnizca piksel verisi —
-         * W*H*2 bayt, bayt basina 4 PIO cevrimi. (§9n duzeltmesinden once
-         * satir basina ayri pencere+RAMWR vardi ve taban 440 bayt/satirdi.) */
+        /* The PIO floor: being a single pass, this is pixel data only —
+         * W*H*2 bytes at 4 PIO cycles per byte. (Before the fix there was a
+         * separate window+RAMWR per row and the floor was 440 bytes/row.) */
         uint32_t pio_hz = (uint32_t)(clock_get_hz(clk_sys) / 2);
         uint64_t base_us = (uint64_t)PB_PANEL_W * PB_PANEL_H * 2ull
                             * 4ull * 1000000ull / pio_hz;
 
         qspi_counter_print();
-        printf("     gecen sure               : %lu us\n", (unsigned long)elapsed);
-        printf("     PIO tabani (kuramsal)    : %lu us\n", (unsigned long)base_us);
-        printf("     her cagri zaman asiminda : ~%lu us olurdu\n\n",
+        printf("     elapsed                  : %lu us\n", (unsigned long)elapsed);
+        printf("     PIO floor (theoretical)  : %lu us\n", (unsigned long)base_us);
+        printf("     if every call timed out  : ~%lu us\n\n",
                (unsigned long)((uint64_t)pb_qspi_wait_calls * 50000ull));
     }
 
-    printf("4) CS yukseldikten SONRA hat hala kipirdiyor mu? (§5.9'un imzasi)\n");
+    printf("4) Is the bus still moving AFTER CS rises? (the old bug's signature)\n");
     {
         pio_sm_set_clkdiv(qspi.pio, qspi.sm, 1000.0f);   /* ~150 kHz PIO */
         pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
@@ -1311,7 +1316,7 @@ static void cmd_qspi_timing(void) {
         QSPI_DATA_Write(qspi, (PB_PANEL_W - 1) & 0xff);
         QSPI_Deselect(qspi);
 
-        /* Deselect dondu, CS yuksek. Hat susmus OLMALI. */
+        /* Deselect has returned and CS is high. The bus MUST be quiet. */
         uint32_t transition = 0;
         int previous = gpio_get(PIN_SCLK);
         absolute_time_t end = make_timeout_time_ms(10);
@@ -1323,28 +1328,30 @@ static void cmd_qspi_timing(void) {
         pio_sm_set_clkdiv(qspi.pio, qspi.sm, 2.0f);
         pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
 
-        printf("     32 bayt ~150 kHz'te yollandi (islem ~850 us surmeliydi)\n");
+        printf("     32 bytes sent at ~150 kHz (the transaction should take ~850 us)\n");
         qspi_counter_print();
-        printf("     CS yuksekken SCLK gecisi : %lu%s\n\n", (unsigned long)transition,
-               transition ? "   <<< VERI CS YUKSEKKEN CIKIYOR — §5.9 GERI GELMIS"
-                     : "   (0 = hat susmus, CS zamanlamasi DOGRU)");
+        printf("     SCLK transitions, CS high: %lu%s\n\n", (unsigned long)transition,
+               transition ? "   <<< DATA REACHES THE BUS WITH CS HIGH - the bug is back"
+                     : "   (0 = the bus is quiet, CS timing is CORRECT)");
 
-        /* Pencereyi tam ekrana geri al; sonraki cizim dogru yere dussun. */
+        /* Restore the full-screen window so the next draw lands correctly. */
         LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, PB_PANEL_H);
-        pb_lcd_cursor_invalidate();   /* panele disaridan yazildi (lcd_blit.h) */
+        pb_lcd_cursor_invalidate();   /* the panel was written from outside (lcd_blit.h) */
     }
 }
 
-/* ── Melez yol testi: pencere komutu ile piksel verisi AYRI yollardan ──────
+/* ── Hybrid path test: the window command and the pixel data by SEPARATE
+ *    routes ──────────────────────────────────────────────────────────────
  *
- * §9n'in ölçülmüş gerçeği: bit-bang düz renkleri doğru basıyor, PIO/DMA yolu
- * basmıyor. Ama `bb_fill_screen` HEM pencereyi HEM pikselleri bit-bang ile
- * yolluyor, yani hangisinin düştüğünü ayırmıyor.
+ * The measured fact: bit-bang pushes flat colours correctly and the PIO/DMA
+ * path does not. But `bb_fill_screen` sends BOTH the window AND the pixels by
+ * bit-bang, so it does not separate which one is failing.
  *
- * Belirti ("ekran temizlenmiyor, yalnızca EN SON çizilen kare görünüyor")
- * pencere komutlarının düşmesiyle birebir uyuşuyor: pencere hiç değişmezse
- * her RAMWR yazma imlecini aynı yere döndürür ve her çizim bir öncekinin
- * üstüne biner. Bu test o hipotezi ikiye ayırıyor. */
+ * The symptom ("the screen does not clear, only the LAST square drawn is
+ * visible") matches the window commands being dropped exactly: if the window
+ * never changes, every RAMWR returns the write cursor to the same place and
+ * each draw lands on top of the last. This test splits that hypothesis in
+ * two. */
 
 static void bb_window(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     uint8_t caset[] = { (uint8_t)(x >> 8), (uint8_t)x,
@@ -1366,7 +1373,7 @@ static void bb_pixel(uint16_t color, uint32_t pixel) {
 }
 
 static void hybrid_wait(void) {
-    printf("      >>> EKRANA BAKIN. Devam icin tusa basin (10 s sonra kendi gecer).\n");
+    printf("      >>> WATCH THE SCREEN. Press a key to continue (auto after 10 s).\n");
     drain_stdin();
     for (int t = 0; t < 100; t++) {
         if (getchar_timeout_us(0) >= 0) return;
@@ -1374,9 +1381,9 @@ static void hybrid_wait(void) {
     }
 }
 
-/* PIO'ya geri don ve saati ayarla.
- * DIKKAT: QSPI_PIO_Restore, program_init uzerinden clkdiv'i 2.0'a geri
- * cekiyor — saat HER geri donusten SONRA yeniden kurulmali. */
+/* Return to PIO and set the clock.
+ * NOTE: QSPI_PIO_Restore resets clkdiv to 2.0 via program_init, so the clock
+ * must be set again AFTER every restore. */
 static void hybrid_pio_version(float clkdiv) {
     QSPI_PIO_Restore(qspi);
     pio_sm_set_clkdiv(qspi.pio, qspi.sm, clkdiv);
@@ -1386,48 +1393,51 @@ static void hybrid_pio_version(float clkdiv) {
 static void hybrid_phase(bool window_pio, bool pixel_pio, float clkdiv) {
     enum { SQ_X = 66, SQ_Y = 300, SQ_W = 40, SQ_H = 40 };
 
-    /* 1) Tum ekrani koyu maviye boya */
+    /* 1) Fill the whole screen with dark blue */
     if (window_pio) { hybrid_pio_version(clkdiv); LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, PB_PANEL_H); }
     else             { bb_pins_setup();       bb_window(0, 0, PB_PANEL_W, PB_PANEL_H); }
 
     if (pixel_pio)  { hybrid_pio_version(clkdiv); pb_lcd_stream_flat(0x001F, (uint32_t)PB_PANEL_W * PB_PANEL_H); }
     else             { bb_pins_setup();       bb_pixel(0x001F, (uint32_t)PB_PANEL_W * PB_PANEL_H); }
 
-    /* 2) Ekranin ORTASINA 40x40 beyaz kare.
-     *    Pencere komutu dusuyorsa kare ortada degil, EN USTTE tam genislikte
-     *    bir serit olarak cikar — tek bakista ayirt edilir. */
+    /* 2) A 40x40 white square in the MIDDLE of the screen.
+     *    If the window command is being dropped, the square appears not in
+     *    the middle but as a full-width strip at the TOP — distinguishable at
+     *    a glance. */
     if (window_pio) { hybrid_pio_version(clkdiv); LCD_3IN49_SetWindows(SQ_X, SQ_Y, SQ_X + SQ_W, SQ_Y + SQ_H); }
     else             { bb_pins_setup();       bb_window(SQ_X, SQ_Y, SQ_W, SQ_H); }
 
     if (pixel_pio)  { hybrid_pio_version(clkdiv); pb_lcd_stream_flat(0xFFFF, SQ_W * SQ_H); }
     else             { bb_pins_setup();       bb_pixel(0xFFFF, SQ_W * SQ_H); }
 
-    hybrid_pio_version(2.0f);        /* uretim saatiyle birak */
+    hybrid_pio_version(2.0f);        /* leave it at the production clock */
 }
 
 /**
- * `y` — melez yol testi. GÖZ GEREKİR, etkileşimli.
+ * `y` — the hybrid path test. EYES REQUIRED, interactive.
  *
- * Dört bileşim, her birinde aynı desen: ekran koyu mavi + ORTADA 40x40 beyaz
- * kare. Sorulacak tek soru: kare ORTADA mı, yoksa EN ÜSTTE geniş bir şerit mi?
+ * Several combinations, each drawing the same pattern: a dark blue screen
+ * with a 40x40 white square in the MIDDLE. There is one question to answer:
+ * is the square in the MIDDLE, or is it a wide strip at the TOP?
  */
 static void cmd_hybrid_path(void) {
-    printf("\nMelez yol testi — pencere komutu ve piksel verisi ayri yollardan\n");
-    printf("================================================================\n\n");
-    printf("Her adimda ekran MAVI olmali ve ORTASINDA 40x40 BEYAZ KARE.\n");
-    printf("Kare ORTADA ise o bilesim CALISIYOR.\n");
-    printf("Kare EN USTTE genis bir SERIT ise pencere komutu panele ULASMIYOR.\n");
-    printf("Ekran hic mavi olmuyorsa piksel verisi ulasmiyor.\n\n");
+    printf("\nHybrid path test - window command and pixel data by separate routes\n");
+    printf("==================================================================\n\n");
+    printf("At each step the screen should be BLUE with a 40x40 WHITE SQUARE\n");
+    printf("in the MIDDLE.\n");
+    printf("Square in the MIDDLE   -> that combination WORKS.\n");
+    printf("Wide STRIP at the TOP  -> the window command is not REACHING the panel.\n");
+    printf("Screen never goes blue -> the pixel data is not reaching it.\n\n");
 
     backlight_set(true);
 
     const struct { bool window_pio, pixel_pio; float clkdiv; const char *name; } phase[] = {
-        { false, false,  2.0f, "pencere BIT-BANG + piksel BIT-BANG   (kontrol: 9n'e gore CALISIYOR)" },
-        { false, true,   2.0f, "pencere BIT-BANG + piksel PIO/DMA    (SCLK 37,5 MHz)" },
-        { true,  false,  2.0f, "pencere PIO      + piksel BIT-BANG   (SCLK 37,5 MHz)" },
-        { true,  true,   2.0f, "pencere PIO      + piksel PIO/DMA    (URETIM YOLU, 37,5 MHz)" },
-        { true,  true,  20.0f, "pencere PIO      + piksel PIO/DMA    (ayni yol, SCLK 3,75 MHz)" },
-        { true,  true,  80.0f, "pencere PIO      + piksel PIO/DMA    (ayni yol, SCLK 0,94 MHz)" },
+        { false, false,  2.0f, "window BIT-BANG + pixels BIT-BANG  (control: known to WORK)" },
+        { false, true,   2.0f, "window BIT-BANG + pixels PIO/DMA   (SCLK 37.5 MHz)" },
+        { true,  false,  2.0f, "window PIO      + pixels BIT-BANG  (SCLK 37.5 MHz)" },
+        { true,  true,   2.0f, "window PIO      + pixels PIO/DMA   (PRODUCTION PATH, 37.5 MHz)" },
+        { true,  true,  20.0f, "window PIO      + pixels PIO/DMA   (same path, SCLK 3.75 MHz)" },
+        { true,  true,  80.0f, "window PIO      + pixels PIO/DMA   (same path, SCLK 0.94 MHz)" },
     };
 
     for (size_t i = 0; i < sizeof(phase) / sizeof(phase[0]); i++) {
@@ -1437,33 +1447,35 @@ static void cmd_hybrid_path(void) {
         printf("\n");
     }
 
-    printf("Bildirin: hangi adimlarda kare ORTADAYDI, hangilerinde SERIT/yoktu.\n");
-    printf("  [2] calisip [3] calismiyorsa  -> hata PENCERE komutlarinda.\n");
-    printf("  [3] calisip [2] calismiyorsa  -> hata PIKSEL/DMA yolunda.\n");
-    printf("  [4] bozuk ama [5]/[6] duzgunse-> hata SAAT HIZI (37,5 MHz fazla).\n");
-    printf("  [1] disinda hicbiri calismiyorsa -> PIO yolu bastan asagi bozuk.\n\n");
+    printf("Report which steps had the square in the MIDDLE and which had a\n");
+    printf("STRIP or nothing.\n");
+    printf("  [2] works, [3] does not   -> the fault is in the WINDOW commands.\n");
+    printf("  [3] works, [2] does not   -> the fault is in the PIXEL/DMA path.\n");
+    printf("  [4] broken, [5]/[6] fine  -> the fault is CLOCK SPEED (37.5 MHz is\n");
+    printf("                               too fast).\n");
+    printf("  nothing but [1] works     -> the PIO path is broken throughout.\n\n");
 }
 
-/* ── §9n: satır adresleme testi ────────────────────────────────────────────
+/* ── Row addressing test ──────────────────────────────────────────────────
  *
- * `y` altı bileşimin ALTISINDA da aynı sonucu verdi (mavi ekran + kenarda
- * beyaz kutu). Yani hata yolda (PIO/bit-bang) da, saat hızında da DEĞİL —
- * gönderilen komutlarda.
+ * `y` gave the same result in ALL six combinations (blue screen with a white
+ * box at the edge). So the fault is NOT in the route (PIO or bit-bang) and
+ * NOT in the clock speed — it is in the commands we send.
  *
- * Panelin ÇALIŞAN iki bağımsız sürücüsü (rsvpnano'nun ESP32 ve RP2350-PIO
- * sürücüleri) **RASET (0x2B) komutunu hiç yollamıyor**: yalnızca CASET (0x2A)
- * ile sütun aralığı ayarlanıyor, satır ise RAMWR (0x2C, sütun penceresinin
- * en üstünden başla) ve RAMWRC (0x3C, kaldığın yerden devam et) ile
- * belirleniyor. Bizim sürücümüz RASET yollayıp satırın oraya gitmesini
- * bekliyor.
+ * The panel's two independent WORKING drivers (rsvpnano's ESP32 and RP2350-PIO
+ * drivers) **never send the RASET (0x2B) command at all**: only the column
+ * range is set, with CASET (0x2A), and the row is determined by RAMWR (0x2C,
+ * start from the top of the column window) and RAMWRC (0x3C, continue where
+ * you left off). Our driver was sending RASET and expecting the row to go
+ * there.
  *
- * Bu, gözlenen HER ŞEYİ açıklıyor: tam ekran düz dolgu çalışıyor (zaten
- * satır 0'dan başlıyor), ama her kısmi çizim satır 0'a düşüyor —
- * `pb_lcd_fill`'in 640 satırı hep aynı üst satıra biniyor (ekran
- * "temizlenmiyor"), `o`'nun dört karesi üst üste geliyor (yalnızca sonuncusu
- * görünüyor), `a`'da LVGL'in her parçası tepede birikiyor.
+ * That explains EVERYTHING observed: a full-screen flat fill works (it starts
+ * at row 0 anyway), but every partial draw lands on row 0 — `pb_lcd_fill`'s
+ * 640 rows all pile onto the same top row (the screen "does not clear"), `o`'s
+ * four squares land on top of each other (only the last is visible), and in
+ * `a` every LVGL fragment accumulates at the top.
  *
- * `z` bunu doğruluyor: aynı kare, beş farklı yöntemle. */
+ * `z` confirms this: the same square, drawn five different ways. */
 
 static void qspi_reg_write(uint8_t reg, const uint8_t *data, size_t n) {
     QSPI_Select(qspi);
@@ -1482,8 +1494,9 @@ static void qspi_raset(uint16_t y1, uint16_t y2) {
     qspi_reg_write(0x2B, d, 4);
 }
 
-/** Tüm ekranı tek renge boya — panelin gerçek sözleşmesiyle (CASET + RAMWR).
- *  Bu yolun çalıştığı ölçüldü (`y`'nin altı adımında da ekran masmaviydi). */
+/** Fill the whole screen with one colour, using the panel's real contract
+ *  (CASET + RAMWR). This path is measured to work — the screen was solid blue
+ *  in all six steps of `y`. */
 static void z_background(uint16_t color) {
     qspi_caset(0, PB_PANEL_W - 1);
     pb_lcd_stream_begin(0x2C);
@@ -1492,28 +1505,29 @@ static void z_background(uint16_t color) {
 }
 
 /**
- * `z` — satır adresleme testi. GÖZ GEREKİR, etkileşimli.
+ * `z` — the row addressing test. EYES REQUIRED, interactive.
  *
- * Beş yöntem, hepsinde aynı hedef: panelin (66,300) konumuna, yani TAM
- * ORTASINA 40x40 beyaz kare. Tek soru: kare ORTADA mı, UÇTA mı?
+ * Five methods, all with the same target: a 40x40 white square at the panel's
+ * (66,300), i.e. dead centre. One question: is the square in the MIDDLE or at
+ * the EDGE?
  */
 static void cmd_row_addr(void) {
     enum { SQ_X = 66, SQ_Y = 300, SQ_W = 40, SQ_H = 40 };
     const uint16_t CLR_BLUE = 0x001F, CLR_WHITE = 0xFFFF;
 
-    printf("\nSatir adresleme testi — RASET (0x2B) bu panelde calisiyor mu?\n");
-    printf("=============================================================\n\n");
-    printf("Her adimda ekran MAVI, uzerinde 40x40 BEYAZ kare olacak.\n");
-    printf("Kare panelin TAM ORTASINA cizilmek isteniyor.\n");
-    printf("  ORTADA ise  -> o yontem DOGRU\n");
-    printf("  UCTA/kenarda ise -> satir adresi yok sayiliyor\n\n");
+    printf("\nRow addressing test - does RASET (0x2B) work on this panel?\n");
+    printf("===========================================================\n\n");
+    printf("At each step the screen is BLUE with a 40x40 WHITE square on it.\n");
+    printf("The square is meant to land dead centre on the panel.\n");
+    printf("  in the MIDDLE   -> that method is CORRECT\n");
+    printf("  at the EDGE     -> the row address is being ignored\n\n");
 
     backlight_set(true);
 
     for (int step = 1; step <= 5; step++) {
         switch (step) {
         case 1:
-            printf("  [1] SIMDIKI YOL: CASET + RASET + ciplak 0x2C, sonra RAMWR (kontrol)\n");
+            printf("  [1] CURRENT PATH: CASET + RASET + bare 0x2C, then RAMWR (control)\n");
             z_background(CLR_BLUE);
             LCD_3IN49_SetWindows(SQ_X, SQ_Y, SQ_X + SQ_W, SQ_Y + SQ_H);
             pb_lcd_stream_begin(0x2C);
@@ -1522,7 +1536,7 @@ static void cmd_row_addr(void) {
             break;
 
         case 2:
-            printf("  [2] CASET + RASET, ciplak 0x2C YOK\n");
+            printf("  [2] CASET + RASET, NO bare 0x2C\n");
             z_background(CLR_BLUE);
             qspi_caset(SQ_X, SQ_X + SQ_W - 1);
             qspi_raset(SQ_Y, SQ_Y + SQ_H - 1);
@@ -1532,7 +1546,7 @@ static void cmd_row_addr(void) {
             break;
 
         case 3:
-            printf("  [3] Sira ters: once RASET sonra CASET\n");
+            printf("  [3] Reversed order: RASET first, then CASET\n");
             z_background(CLR_BLUE);
             qspi_raset(SQ_Y, SQ_Y + SQ_H - 1);
             qspi_caset(SQ_X, SQ_X + SQ_W - 1);
@@ -1542,25 +1556,26 @@ static void cmd_row_addr(void) {
             break;
 
         case 4:
-            printf("  [4] REFERANS YOL: yalniz CASET; satir RAMWR'den itibaren\n");
-            printf("      sayiliyor — %d satir mavi atlanip sonra beyaz yaziliyor\n", SQ_Y);
+            printf("  [4] REFERENCE PATH: CASET only; the row is counted from\n");
+            printf("      RAMWR - skip %d rows of blue, then write white\n", SQ_Y);
             z_background(CLR_BLUE);
             qspi_caset(SQ_X, SQ_X + SQ_W - 1);
             pb_lcd_stream_begin(0x2C);
-            pb_lcd_stream_color(CLR_BLUE,  (uint32_t)SQ_Y * SQ_W);   /* atla */
+            pb_lcd_stream_color(CLR_BLUE,  (uint32_t)SQ_Y * SQ_W);   /* skip */
             pb_lcd_stream_color(CLR_WHITE, SQ_W * SQ_H);
             pb_lcd_stream_end();
             break;
 
         case 5:
-            printf("  [5] REFERANS + RAMWRC: atlama ayri islemde, beyaz 0x3C ile\n");
-            printf("      devam ediyor (kalici cozumun ucuz olup olmadigini soyler)\n");
+            printf("  [5] REFERENCE + RAMWRC: the skip is a separate transaction and\n");
+            printf("      the white continues with 0x3C (this tells us whether the\n");
+            printf("      permanent fix is cheap)\n");
             z_background(CLR_BLUE);
             qspi_caset(SQ_X, SQ_X + SQ_W - 1);
             pb_lcd_stream_begin(0x2C);
             pb_lcd_stream_color(CLR_BLUE, (uint32_t)SQ_Y * SQ_W);
             pb_lcd_stream_end();
-            pb_lcd_stream_begin(0x3C);                      /* RAMWRC — devam et */
+            pb_lcd_stream_begin(0x3C);                      /* RAMWRC — continue */
             pb_lcd_stream_color(CLR_WHITE, SQ_W * SQ_H);
             pb_lcd_stream_end();
             break;
@@ -1569,58 +1584,61 @@ static void cmd_row_addr(void) {
         printf("\n");
     }
 
-    printf("Bildirin: hangi adimlarda kare ORTADAYDI?\n");
-    printf("  [4] ortada, [1][2][3] ucta  -> RASET yok sayiliyor. KOK NEDEN BU.\n");
-    printf("  [5] de ortada               -> RAMWRC calisiyor, cozum ucuz:\n");
-    printf("                                 LVGL akisi bastan sona tek gecis.\n");
-    printf("  [5] ucta ama [4] ortada     -> RAMWRC yok, her cizim atlama bedeli oder.\n\n");
+    printf("Report which steps had the square in the MIDDLE.\n");
+    printf("  [4] centre, [1][2][3] edge -> RASET is ignored. THAT IS THE ROOT CAUSE.\n");
+    printf("  [5] centre too             -> RAMWRC works and the fix is cheap:\n");
+    printf("                                the LVGL stream is one pass end to end.\n");
+    printf("  [5] edge but [4] centre    -> no RAMWRC, so every draw pays the skip.\n\n");
 
-    /* Pencereyi tam ekrana geri birak. */
+    /* Leave the window restored to full screen. */
     qspi_caset(0, PB_PANEL_W - 1);
     pb_lcd_cursor_invalidate();
 }
 
 /**
- * `j` — imleç konumlandırma testi. GÖZ GEREKİR, etkileşimli.
+ * `j` — the cursor positioning test. EYES REQUIRED, interactive.
  *
- * `z` şunu kanıtladı: satırı yalnızca RAMWR (en üste dön) ve RAMWRC (kaldığın
- * yerden devam et) belirliyor. Geriye MİMARİYİ belirleyen tek soru kaldı:
+ * `z` proved that the row is determined only by RAMWR (return to the top) and
+ * RAMWRC (continue where you left off). One question remains, and it decides
+ * the ARCHITECTURE:
  *
- *   Sütun penceresi DARALTILIRSA satır daha ucuza ilerletilebilir mi, ve
- *   pencere yeniden genişletilince satır KORUNUR mu?
+ *   If the column window is NARROWED, can the row be advanced more cheaply,
+ *   and is the row PRESERVED when the window is widened again?
  *
- * Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor. Pencere 1
- * piksel genişse `y` satır ilerletmek `y` piksele mal olur — 172*y yerine.
- * Sonra pencere gerçek aralığa alınıp RAMWRC ile devam edilebiliyorsa
- * elimizde **ucuz bir konumlandırma** var:
+ * The row advances as pixels are written, at the width of the window. With a
+ * window one pixel wide, advancing `y` rows costs `y` pixels instead of
+ * 172*y. If the window can then be set to the real range and writing continued
+ * with RAMWRC, we have **cheap positioning**:
  *
- *   ÇALIŞIRSA  `pb_lcd_blit` genel amaçlı kalır; spektrogram ile LVGL aynı
- *              ekranda yaşayabilir (`a` demosu), bedel satır başına 1 piksel.
- *   ÇALIŞMAZSA panel yalnızca yukarıdan aşağı TEK GEÇİŞ çizime izin veriyor
- *              demektir; arayüz katmanı buna göre yeniden kurulmalı.
+ *   IF IT WORKS   `pb_lcd_blit` stays general purpose, and the spectrogram and
+ *                 LVGL can share a screen (the `a` demo) at a cost of one
+ *                 pixel per row.
+ *   IF IT DOES NOT  the panel only permits SINGLE-PASS drawing from top to
+ *                 bottom, and the UI layer has to be rebuilt around that.
  *
- * Atlama verisi CLR_RED: neyin üzerine yazıldığı gözle görülsün.
+ * The skip data is CLR_RED, so what it writes over is visible.
  */
 static void cmd_cursor_seek(void) {
     enum { SQ_X = 66, SQ_Y = 300, SQ_W = 40, SQ_H = 40 };
     const uint16_t CLR_BLUE = 0x001F, CLR_WHITE = 0xFFFF, CLR_RED = 0xF800;
 
-    /* Atlama sütunu genişliği ve o genişlikte SQ_Y satır ilerlemek için gereken
-     * piksel sayısı. İlk turda 1 piksellik pencere denendi ve kare hem
-     * NOKTALI çıktı hem de hedeflenen satırın yarısı kadar ilerledi — bu,
-     * panelin sütun aralığını 2 piksele YUVARLADIĞININ klasik imzası
-     * (CASET(66,66) fiilen 66..67 oluyor, 300 piksel 300 değil 150 satır
-     * ilerletiyor ve RAMWRC tek piksel kaymış hizadan devam ediyor). */
+    /* The skip column's width, and the pixel count needed to advance SQ_Y
+     * rows at that width. The first attempt used a 1-pixel window: the square
+     * came out DOTTED and advanced only half the intended rows — the classic
+     * signature of the panel ROUNDING the column range to 2 pixels
+     * (CASET(66,66) is effectively 66..67, so 300 pixels advance 150 rows
+     * rather than 300, and RAMWRC continues one pixel out of alignment). */
     const struct { uint32_t x1, x2; const char *name; } skip[] = {
-        { SQ_X, SQ_X + 1, "2 piksel HIZALI (x1 cift, x2 tek) — ana hipotez" },
-        { 0,  1,      "2 piksel HIZALI ama BASKA sutunda (x=0..1)"      },
-        { SQ_X, SQ_X,     "1 piksel (ilk turda noktali cikan hal)"          },
+        { SQ_X, SQ_X + 1, "2 pixels ALIGNED (x1 even, x2 odd) - main hypothesis" },
+        { 0,  1,          "2 pixels ALIGNED but in a DIFFERENT column (x=0..1)" },
+        { SQ_X, SQ_X,     "1 pixel (the case that came out dotted)"             },
     };
 
-    printf("\nImlec konumlandirma testi — dar pencereyle ucuz atlama\n");
-    printf("======================================================\n\n");
-    printf("Her adimda hedef ayni: MAVI zemin + ORTADA 40x40 BEYAZ kare.\n");
-    printf("Atlama verisi CLR_RED — nereye yazildigini gorun.\n\n");
+    printf("\nCursor positioning test - cheap skipping with a narrow window\n");
+    printf("============================================================\n\n");
+    printf("The target is the same each step: BLUE background + a 40x40 WHITE\n");
+    printf("square in the MIDDLE. The skip data is RED, so you can see where it\n");
+    printf("is written.\n\n");
 
     backlight_set(true);
 
@@ -1628,18 +1646,18 @@ static void cmd_cursor_seek(void) {
         const uint32_t width = skip[i].x2 - skip[i].x1 + 1;
         z_background(CLR_BLUE);
 
-        printf("  [%u] DAR ATLAMA: %s\n", (unsigned)(i + 1), skip[i].name);
-        printf("      pencere %lu..%lu, %lu piksel kirmizi (= %d satir),\n",
+        printf("  [%u] NARROW SKIP: %s\n", (unsigned)(i + 1), skip[i].name);
+        printf("      window %lu..%lu, %lu red pixels (= %d rows),\n",
                (unsigned long)skip[i].x1, (unsigned long)skip[i].x2,
                (unsigned long)(SQ_Y * width), SQ_Y);
-        printf("      sonra pencere %d..%d ve RAMWRC ile beyaz\n", SQ_X, SQ_X + SQ_W - 1);
+        printf("      then window %d..%d and white via RAMWRC\n", SQ_X, SQ_X + SQ_W - 1);
 
         qspi_caset(skip[i].x1, skip[i].x2);
         pb_lcd_stream_begin(0x2C);
-        pb_lcd_stream_color(CLR_RED, SQ_Y * width);   /* satir 0 -> SQ_Y */
+        pb_lcd_stream_color(CLR_RED, SQ_Y * width);   /* row 0 -> SQ_Y */
         pb_lcd_stream_end();
         qspi_caset(SQ_X, SQ_X + SQ_W - 1);
-        pb_lcd_stream_begin(0x3C);                    /* RAMWRC — satir korunuyor mu? */
+        pb_lcd_stream_begin(0x3C);                 /* RAMWRC — is the row preserved? */
         pb_lcd_stream_color(CLR_WHITE, SQ_W * SQ_H);
         pb_lcd_stream_end();
 
