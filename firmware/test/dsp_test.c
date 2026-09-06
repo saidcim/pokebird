@@ -19,7 +19,7 @@
 #include "dsp/fft.h"
 #include "dsp/gate.h"
 #include "dsp/mel.h"
-#include "ui/metin.h"
+#include "ui/text.h"
 
 static int g_fail = 0;
 static int g_run  = 0;
@@ -368,53 +368,57 @@ static int dump_window(const char *yol) {
     return 0;
 }
 
-/* ── Türkçe büyük harf ────────────────────────────────────────────────────
+/* ── Uppercasing ─────────────────────────────────────────────
  *
- * NEDEN TEST EDİLİYOR: arayüz tür adlarını BÜYÜK harf gösteriyor (tasarım).
- * Türkçe'de büyütme dile özgü — `i`->`İ` ve `ı`->`I` — ve yanlışı ekranda
- * ancak Türkçe okuyan biri fark eder, yani gözle yakalaması pahalı. Ayrıca
- * dönüşüm bayt uzunluğunu DEĞİŞTİRİYOR (i 1->2 bayt, ı 2->1), tampon sınırı
- * bu yüzden gerçek bir risk.
+ * WHY THIS IS TESTED: the UI shows species names in UPPER CASE. The
+ * conversion is not plain toupper() — it has to leave multi-byte sequences
+ * intact, and it must never cut one in half at the buffer edge.
+ *
+ * REGRESSION: this function used to implement Turkish casing, where `i`
+ * uppercases to the dotted `İ`. Correct for Turkish, wrong for the English
+ * species names the device now shows — it rendered "Common Nightingale" as
+ * "COMMON NİGHTİNGALE". The first two cases below pin that down.
  */
 static void esit_metin(const char *girdi, const char *beklenen) {
     char out[64];
-    pb_turkce_buyut(girdi, out, sizeof(out));
+    pb_text_upper(girdi, out, sizeof(out));
     char ayrinti[160];
-    snprintf(ayrinti, sizeof(ayrinti), "\"%s\" -> \"%s\", beklenen \"%s\"",
+    snprintf(ayrinti, sizeof(ayrinti), "\"%s\" -> \"%s\", expected \"%s\"",
              girdi, out, beklenen);
     check(strcmp(out, beklenen) == 0, girdi, ayrinti);
 }
 
-static void test_turkce_buyut(void) {
-    printf("Turkce buyuk harf\n");
+static void test_text_upper(void) {
+    printf("Uppercasing\n");
 
-    /* ASCII */
-    esit_metin("Karatavuk", "KARATAVUK");
+    /* ASCII `i` must stay a plain `I` — the regression described above. */
+    esit_metin("Common Nightingale", "COMMON NIGHTINGALE");
+    esit_metin("Eurasian Blackbird", "EURASIAN BLACKBIRD");
 
-    /* i -> İ (iki bayt), ı -> I (tek bayt): ikisi de aynı kelimede */
-    esit_metin("Kızılgerdan", "KIZILGERDAN");
-    esit_metin("İskender Papağanı", "İSKENDER PAPAĞANI");
+    /* Plain ASCII, and a hyphenated name. */
+    esit_metin("European Robin", "EUROPEAN ROBIN");
+    esit_metin("Greater White-fronted Goose", "GREATER WHITE-FRONTED GOOSE");
 
-    /* Diğer Türkçe harfler */
-    esit_metin("Bülbül", "BÜLBÜL");
-    esit_metin("Baştankara", "BAŞTANKARA");
-    esit_metin("Şahin çığlığı", "ŞAHİN ÇIĞLIĞI");
-    esit_metin("Ötleğen", "ÖTLEĞEN");
+    /* Scientific names are shown as-is elsewhere, but must survive this. */
+    esit_metin("Anser albifrons", "ANSER ALBIFRONS");
 
-    /* Sınır durumları */
+    /* Multi-byte letters the fonts carry still uppercase correctly. */
+    esit_metin("çğöşü", "ÇĞÖŞÜ");
+    esit_metin("ı", "I");            /* dotless ı -> I: two bytes collapse to one */
+
+    /* Edge cases. */
     esit_metin("", "");
 
-    /* Tampon taşması: 'i' iki bayta çıkıyor, yarım UTF-8 dizisi ÇIKMAMALI.
-     * Beş baytlık tampon: "İ" (2) + "İ" (2) + sonlandırıcı = tam dolu. */
+    /* Buffer overflow must not leave half a UTF-8 sequence behind.
+     * A 5-byte buffer holds "Ç" (2) + "Ç" (2) + terminator = exactly full. */
     char kucuk[5];
-    pb_turkce_buyut("iiii", kucuk, sizeof(kucuk));
-    check(strcmp(kucuk, "İİ") == 0, "tampon tasmasi yarim UTF-8 birakmiyor",
-          kucuk);
+    pb_text_upper("çççç", kucuk, sizeof(kucuk));
+    check(strcmp(kucuk, "ÇÇ") == 0, "overflow leaves no partial UTF-8", kucuk);
 
-    /* NULL girdi çökmemeli, boş string vermeli. */
+    /* NULL input must not crash; it yields an empty string. */
     char nl[8] = "xxx";
-    pb_turkce_buyut(NULL, nl, sizeof(nl));
-    check(nl[0] == '\0', "NULL girdi bos string veriyor", nl);
+    pb_text_upper(NULL, nl, sizeof(nl));
+    check(nl[0] == '\0', "NULL input yields empty string", nl);
 
     printf("\n");
 }
@@ -435,7 +439,7 @@ int main(int argc, char **argv) {
     test_mel_window();
     test_gate();
     test_karar();
-    test_turkce_buyut();
+    test_text_upper();
 
     printf("\n%d test, %d kaldi\n", g_run, g_fail);
     return g_fail ? 1 : 0;

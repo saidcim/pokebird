@@ -5,7 +5,7 @@
 
 #include "pico/stdlib.h"
 
-#include "ui/metin.h"
+#include "ui/text.h"
 #include "ui/tema.h"
 
 /* ── Yerleşim (tam 640) ───────────────────────────────────────────────────
@@ -92,7 +92,7 @@ lv_obj_t *pb_ekran_gunluk_olustur(void)
 
     lv_obj_t *baslik = pb_etiket(s_ekran, &pb_font_kalin_13, PB_RENK_METIN, SOL, 8);
     lv_obj_set_style_text_letter_space(baslik, 3, LV_PART_MAIN);
-    lv_label_set_text(baslik, "BUGÜN · TODAY");
+    lv_label_set_text(baslik, "TODAY");
 
     s_sayi = pb_etiket(s_ekran, &pb_font_dar_11, PB_RENK_SILIK,
                        SAG - 120, 10);
@@ -109,7 +109,7 @@ lv_obj_t *pb_ekran_gunluk_olustur(void)
     s_bos = pb_etiket(s_ekran, &pb_font_dar_11, PB_RENK_SILIK, SOL, 84);
     lv_obj_set_width(s_bos, SAG - SOL);
     lv_obj_set_style_text_align(s_bos, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_label_set_text(s_bos, "Henüz kayıt yok · dinleniyor");
+    lv_label_set_text(s_bos, "No entries yet · listening");
 
     /* Sayaçlar tasarımda YOK; buraya konuldu çünkü §9p'de bilerek ekrana
      * yazılmışlardı (göz gerektirmeyen doğrulama). Dinleme ekranını
@@ -156,9 +156,9 @@ void pb_ekran_gunluk_ekle(const char *ad, const char *latin, float guven)
 static void sure_yaz(uint32_t gecen_ms, char *out, uint32_t n)
 {
     const uint32_t sn = gecen_ms / 1000u;
-    if (sn < 60u)        snprintf(out, n, "az once");
-    else if (sn < 3600u) snprintf(out, n, "%lu dk once", (unsigned long)(sn / 60u));
-    else                 snprintf(out, n, "%lu sa once", (unsigned long)(sn / 3600u));
+    if (sn < 60u)        snprintf(out, n, "just now");
+    else if (sn < 3600u) snprintf(out, n, "%lu min ago", (unsigned long)(sn / 60u));
+    else                 snprintf(out, n, "%lu hr ago", (unsigned long)(sn / 3600u));
 }
 
 void pb_ekran_gunluk_tazele(uint32_t kare_hiz, uint32_t cikarim, uint32_t overrun)
@@ -168,7 +168,7 @@ void pb_ekran_gunluk_tazele(uint32_t kare_hiz, uint32_t cikarim, uint32_t overru
     const uint32_t simdi = to_ms_since_boot(get_absolute_time());
 
     char buf[80];
-    snprintf(buf, sizeof(buf), "%lu kayıt", (unsigned long)s_toplam);
+    snprintf(buf, sizeof(buf), "%lu entries", (unsigned long)s_toplam);
     pb_yaz(s_sayi, s_son_sayi, sizeof(s_son_sayi), buf);
 
     if (s_toplam == 0) {
@@ -194,7 +194,7 @@ void pb_ekran_gunluk_tazele(uint32_t kare_hiz, uint32_t cikarim, uint32_t overru
         sure_yaz(simdi - k->ms, buf, sizeof(buf));
         pb_yaz(s->sure, s->son_sure, sizeof(s->son_sure), buf);
 
-        pb_turkce_buyut(k->ad, buf, sizeof(buf));
+        pb_text_upper(k->ad, buf, sizeof(buf));
         pb_yaz(s->ad, s->son_ad, sizeof(s->son_ad), buf);
 
         pb_yaz(s->latin, s->son_latin, sizeof(s->son_latin), k->latin);
@@ -207,7 +207,7 @@ void pb_ekran_gunluk_tazele(uint32_t kare_hiz, uint32_t cikarim, uint32_t overru
         if (w != s->son_cubuk_w) { s->son_cubuk_w = w; lv_obj_set_width(s->cubuk, w); }
     }
 
-    snprintf(buf, sizeof(buf), "%lu kare/s · cikarim %lu · overrun %lu",
+    snprintf(buf, sizeof(buf), "%lu fps · inference %lu · overrun %lu",
              (unsigned long)kare_hiz, (unsigned long)cikarim,
              (unsigned long)overrun);
     pb_yaz(s_sayac, s_son_sayac, sizeof(s_son_sayac), buf);

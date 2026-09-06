@@ -177,11 +177,11 @@ int main(void) {
     pb_sonuc_gorunum_t g;
     memset(&g, 0, sizeof(g));
     g.kip = PB_KARAR_TUR;
-    g.tur_ad = "Bülbül";
+    g.tur_ad = "Common Nightingale";
     g.guven = 0.94f;
-    g.ilk3_ad[0] = "Bülbül";
-    g.ilk3_ad[1] = "Karatavuk";
-    g.ilk3_ad[2] = "Kızılgerdan";
+    g.ilk3_ad[0] = "Common Nightingale";
+    g.ilk3_ad[1] = "Eurasian Blackbird";
+    g.ilk3_ad[2] = "European Robin";
     g.ilk3_latin[0] = "Luscinia megarhynchos";
     g.ilk3_latin[1] = "Turdus merula";
     g.ilk3_latin[2] = "Erithacus rubecula";
@@ -209,18 +209,18 @@ int main(void) {
     pb_ekran_dinleme_guncelle(&b);
     ciz(dinleme, "ekran0_bosta.ppm", true);
 
-    /* En UZUN tür adı — sarma/kesme en kötü durumu. */
+    /* Longest species name — the worst case for wrapping and truncation. */
     pb_sonuc_gorunum_t u;
     memset(&u, 0, sizeof(u));
     u.kip = PB_KARAR_BELIRSIZ;
-    u.tur_ad = "Uzun Kuyruklu Baştankara";
+    u.tur_ad = "Greater White-fronted Goose";
     u.guven = 0.42f;
-    u.ilk3_ad[0] = "Uzun Kuyruklu Baştankara";
-    u.ilk3_ad[1] = "Ak Karınlı Ebabil";
-    u.ilk3_ad[2] = "İskender Papağanı";
-    u.ilk3_latin[0] = "Aegithalos caudatus";
-    u.ilk3_latin[1] = "Apus melba";
-    u.ilk3_latin[2] = "Psittacula eupatria";
+    u.ilk3_ad[0] = "Greater White-fronted Goose";
+    u.ilk3_ad[1] = "Eastern Olivaceous Warbler";
+    u.ilk3_ad[2] = "Lesser Spotted Woodpecker";
+    u.ilk3_latin[0] = "Anser albifrons";
+    u.ilk3_latin[1] = "Iduna pallida";
+    u.ilk3_latin[2] = "Dryobates minor";
     u.ilk3_olasilik[0] = 0.42f;
     u.ilk3_olasilik[1] = 0.29f;
     u.ilk3_olasilik[2] = 0.11f;
@@ -237,11 +237,11 @@ int main(void) {
 
     /* Saati elle ilerleterek üç farklı yaş üret. */
     pb_onizle_ms = 10u * 1000u;
-    pb_ekran_gunluk_ekle("İskender Papağanı", "Psittacula eupatria", 0.78f);
+    pb_ekran_gunluk_ekle("Alexandrine Parakeet", "Psittacula eupatria", 0.78f);
     pb_onizle_ms = 40u * 60u * 1000u;
-    pb_ekran_gunluk_ekle("Martı", "Larus michahellis", 0.87f);
+    pb_ekran_gunluk_ekle("Yellow-legged Gull", "Larus michahellis", 0.87f);
     pb_onizle_ms = 95u * 60u * 1000u;
-    pb_ekran_gunluk_ekle("Bülbül", "Luscinia megarhynchos", 0.94f);
+    pb_ekran_gunluk_ekle("Common Nightingale", "Luscinia megarhynchos", 0.94f);
 
     pb_onizle_ms = 96u * 60u * 1000u;
     pb_ekran_gunluk_tazele(63, 12, 0);

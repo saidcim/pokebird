@@ -40,7 +40,7 @@ add_executable(pokebird
     firmware/src/ui/spectrogram.c
     firmware/src/ui/lv_port.c
     firmware/src/ui/tema.c
-    firmware/src/ui/metin.c
+    firmware/src/ui/text.c
     firmware/src/ui/ekran_dinleme.c
     firmware/src/ui/ekran_gunluk.c
     firmware/src/ui/arayuz.c

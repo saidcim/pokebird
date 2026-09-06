@@ -24,7 +24,7 @@ add_executable(dsp_test
     # Türkçe büyütme donanımsız: `i`->`İ` ve `ı`->`I` bayt uzunluğunu
     # değiştiriyor, tampon sınırı gerçek bir risk ve hatayı ekranda ancak
     # Türkçe okuyan biri yakalar.
-    ../src/ui/metin.c
+    ../src/ui/text.c
 )
 
 target_include_directories(dsp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../src)

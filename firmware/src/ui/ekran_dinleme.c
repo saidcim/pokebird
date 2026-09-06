@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ui/metin.h"
+#include "ui/text.h"
 #include "ui/tema.h"
 
 /* ── Yerleşim — KAYIT BUTONUNA göre yeniden kuruldu ───────────────────────
@@ -103,7 +103,7 @@ static void buton_kur(void)
     lv_obj_set_style_text_font(s_buton_yazi, &pb_font_kalin_13, LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(s_buton_yazi, 2, LV_PART_MAIN);
     lv_obj_align(s_buton_yazi, LV_ALIGN_TOP_MID, 0, 76);
-    lv_label_set_text(s_buton_yazi, "KAYIT");
+    lv_label_set_text(s_buton_yazi, "RECORD");
 }
 
 lv_obj_t *pb_ekran_dinleme_olustur(void)
@@ -199,7 +199,7 @@ void pb_ekran_dinleme_kayit_ayarla(bool kayitta)
     lv_obj_set_style_radius(s_buton_isaret, kayitta ? 3 : 13, LV_PART_MAIN);
 
     lv_obj_set_style_text_color(s_buton_yazi, lv_color_hex(yazi), LV_PART_MAIN);
-    lv_label_set_text(s_buton_yazi, kayitta ? "DUR" : "KAYIT");
+    lv_label_set_text(s_buton_yazi, kayitta ? "STOP" : "RECORD");
 }
 
 void pb_ekran_dinleme_guncelle(const pb_sonuc_gorunum_t *g)
@@ -212,11 +212,11 @@ void pb_ekran_dinleme_guncelle(const pb_sonuc_gorunum_t *g)
     const bool kayitta  = (s_son_kayit == 1);
 
     /* ── Durum satırı ── */
-    const char *durum = !kayitta ? "BOŞTA"
-                      : tur ? "TANINDI"
-                      : belirsiz ? "OLABİLİR..."
-                      : ses ? "SES ALGILANDI"
-                            : "DİNLİYOR";
+    const char *durum = !kayitta ? "IDLE"
+                      : tur ? "IDENTIFIED"
+                      : belirsiz ? "MAYBE..."
+                      : ses ? "SOUND DETECTED"
+                            : "LISTENING";
     const uint32_t vurgu = !kayitta ? PB_RENK_KENAR
                          : tur ? PB_RENK_TEPE
                          : belirsiz ? PB_RENK_VURGU
@@ -241,13 +241,13 @@ void pb_ekran_dinleme_guncelle(const pb_sonuc_gorunum_t *g)
         /* Türkçe yazılabiliyor: üretilen yazı tipleri (tools/font_uret.py)
          * ç ğ ı İ ö ş ü içeriyor ve üretimde doğrulanıyor. */
         lv_label_set_text(s_bos,
-            kayitta ? "dinleniyor..." : "kayıt için butona basın");
+            kayitta ? "listening..." : "press the button to record");
         return;
     }
 
     /* ── 1. tahmin ── */
     char buf[80];
-    pb_turkce_buyut(g->ilk3_ad[0], buf, sizeof(buf));
+    pb_text_upper(g->ilk3_ad[0], buf, sizeof(buf));
 
     /* Sığmayan adı KESMEK yerine önce KÜÇÜLT: 178 türün birkaçı 18 px'e
      * sığmıyor ve bir kademe küçük yazıyla tamamı okunuyor. */
@@ -284,7 +284,7 @@ void pb_ekran_dinleme_guncelle(const pb_sonuc_gorunum_t *g)
         char satir[80];
         if (ham) {
             char b2[64];
-            pb_turkce_buyut(ham, b2, sizeof(b2));
+            pb_text_upper(ham, b2, sizeof(b2));
             snprintf(satir, sizeof(satir), "%d. %s", i + 2, b2);
         } else {
             satir[0] = '\0';
