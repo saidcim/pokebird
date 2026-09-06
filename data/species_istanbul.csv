@@ -1,4 +1,4 @@
-ebird_code,scientific_name,turkish_name,english_name,gbif_records,gbif_species_key,status,reason,month_01,month_02,month_03,month_04,month_05,month_06,month_07,month_08,month_09,month_10,month_11,month_12,xc_count,xc_count_eu,xc_count_world
+ebird_code,scientific_name,turkish_name,english_name,gbif_records,gbif_species_key,status,reason,month_01,month_02,month_03,month_04,month_05,month_06,month_07,month_08,month_09,month_10,month_11,month_12,xc_count,xc_count_eu,xc_count_sa
 hoocro1,Corvus cornix,Leş Kargası,Hooded Crow,25861,2482515,included,,2024,1787,2765,3193,3105,1473,1104,1275,2427,2755,1915,2037,3830,3799,3669
 yelgul1,Larus michahellis,Gümüş Martı,Yellow-legged Gull,23292,9413670,included,,2162,1669,2369,2688,2726,1271,1066,1200,2128,2391,1770,1851,569,565,524
 eurjac,Coloeus monedula,Küçük Karga,Eurasian Jackdaw,17929,6100954,included,,1546,1339,1888,2133,2237,891,502,790,1717,2006,1380,1499,940,927,762

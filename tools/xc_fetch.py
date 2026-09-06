@@ -1,60 +1,68 @@
 #!/usr/bin/env python3
 r"""
-xc_fetch.py — M4 adım 1b+2: Xeno-canto'dan ses kaydı sayımı ve indirme.
+xc_fetch.py — count and download Xeno-canto recordings.
 
-İki iş yapar:
+It does two jobs:
 
-  --say      Havuzdaki her tür için Xeno-canto'da kaç kayıt var, sayar ve
-             species_istanbul.csv'yi `xc_kayit` + nihai `durum` sütunlarıyla
-             günceller. NİHAİ ~110 TÜRLÜK LİSTE BURADA OLUŞUYOR.
+  --survey   Count how many Xeno-canto recordings exist for every species in
+             the pool and update species_istanbul.csv with the xc_count_*
+             columns and the final `status`. THE FINAL ~110-SPECIES LIST IS
+             DECIDED HERE.
 
-  --indir    Nihai listedeki türlerin kayıtlarını indirir (kalite A/B önce).
+  --download Download the recordings of the species on the final list
+             (quality A/B first).
 
-NEDEN DARALTMA ÖLÇÜTÜ BU: GBIF kayıt sayısı "kaç kişi görüp bildirdi"yi
-ölçüyor, sesle tanınabilirliği değil — su kuşları açıkta ve kolay görülüyor,
-orman ötücüleri duyuluyor ama görülmüyor. GBIF eşiğini yükselterek 110'a
-inmek Guguk / Sarıasma / Orman Alaca Ağaçkakan gibi tam da hedeflediğimiz
-türleri eliyordu (ölçüldü, bkz. species_list.py sonundaki not). Xeno-canto
-kayıt sayısı iki soruyu birden yanıtlıyor: tür sesle tanınıyor mu, ve o sesi
-öğretecek verimiz var mı.
+WHY THIS IS THE NARROWING CRITERION: the GBIF record count measures "how many
+people saw and reported it", not how recognisable a species is by sound —
+waterbirds sit in the open and are easy to see, while forest songbirds are
+heard and not seen. Getting down to 110 by raising the GBIF threshold cut
+exactly the species we were aiming for, such as the Common Cuckoo, the
+Eurasian Golden Oriole and the Middle Spotted Woodpecker (measured; see the
+note at the end of species_list.py). The Xeno-canto count answers two
+questions at once: is the species recognised by sound, and do we have the
+data to teach that sound.
 
-API ANAHTARI GEREKİYOR:
-  Xeno-canto API v2 kapandı; v3 anahtar istiyor. Ücretsiz:
+AN API KEY IS REQUIRED:
+  The Xeno-canto API v2 was shut down; v3 wants a key. It is free:
   https://xeno-canto.org/account
 
-  Anahtar üç yerden okunuyor, bu sırayla:
-      1. --key parametresi
-      2. XC_KEY ortam değişkeni
-      3. data/.xc_key dosyası        <- TERCİH EDİLEN
+  The key is read from three places, in this order:
+      1. the --key argument
+      2. the XC_KEY environment variable
+      3. the data/.xc_key file        <- PREFERRED
 
-  Dosya yöntemi tercih edilir: anahtar komut geçmişine, ekran görüntüsüne
-  ya da sohbet kaydına düşmez. .gitignore'da olduğu için depoya da girmez.
-  Oluşturmak için (PowerShell):
+  The file is preferred because the key then never lands in shell history, a
+  screenshot or a chat log. It is in .gitignore, so it does not reach the
+  repository either. To create it (PowerShell):
 
-      "ANAHTARINIZ" | Out-File -Encoding ascii -NoNewline data\.xc_key
+      "YOUR-KEY" | Out-File -Encoding ascii -NoNewline data\.xc_key
 
-LİSANS — ND KAYITLARI ALINMIYOR:
-  Xeno-canto kayıtları Creative Commons ama hepsi aynı değil. Guguk'un ilk
-  300 A/B kaydında ölçülen dağılım:
-      by-nc-sa 201 · by-nc-nd 34 · by-nc 4 · CC0 2 · by 1 · by-sa 1
-  **ND = NoDerivatives**, yani eseri işleyip dağıtmak yasak. Modeli o kayıtla
-  eğitmenin türev eser sayılıp sayılmayacağı tartışmalı; %14'lük veri için
-  bu riski almaya değmez. Bu yüzden ND lisanslı kayıtlar İNDİRİLMİYOR
-  (`--nd-dahil` ile açılabilir, sorumluluk kullanıcıda).
+LICENCE — ND RECORDINGS ARE NOT TAKEN:
+  Xeno-canto recordings are Creative Commons but not all alike. Measured over
+  the Common Cuckoo's first 300 A/B recordings:
+      by-nc-sa 201 / by-nc-nd 34 / by-nc 4 / CC0 2 / by 1 / by-sa 1
+  **ND = NoDerivatives**, so processing the work and distributing the result
+  is forbidden. Whether training a model on such a recording counts as a
+  derivative work is arguable; for 14% of the data that risk is not worth
+  taking. ND-licensed recordings are therefore NOT DOWNLOADED (--nd-include
+  turns them on, at the user's own responsibility).
 
-  Kalan lisansların ezici çoğunluğu BY-NC-SA: gayriticari + aynı lisansla
-  paylaşım. Projenin kişisel kullanımıyla uyumlu, ticari dağıtımıyla değil —
-  BirdNET'in CC BY-NC-SA kısıtıyla aynı sınıftan sorun (ARCHITECTURE §6).
+  The overwhelming majority of what remains is BY-NC-SA: non-commercial plus
+  share-alike. Compatible with the project's personal use but not with
+  commercial distribution — the same class of problem as BirdNET's CC
+  BY-NC-SA restriction.
 
-  İndirilen her dosyanın lisansı, kaydedeni ve XC kimliği
-  `data/xc/kayitlar.csv`'ye yazılıyor — atıf yükümlülüğü için saklayın.
+  The licence, recordist and XC id of every downloaded file are written to
+  `data/xc/records.csv` — keep it, for the attribution obligation.
 
-COĞRAFYA — AVRUPA ÖNCELİKLİ:
-  Türkiye kayıtları pratikte yok (ölçüldü: Guguk 1, Kızılgerdan 0, Büyük
-  Baştankara 4). Ama Avrupa kayıtları bol ve dünya toplamının ~%90'ı zaten
-  Avrupa. Kuş sesinde bölgesel lehçe gerçek bir olgu olduğu için üreme
-  bölgesi kayıtları tercih ediliyor: `area:europe`. Avrupa'da yeterli kayıt
-  bulunmayan tür için dünya geneline düşülüyor.
+GEOGRAPHY — EUROPE FIRST:
+  There are practically no recordings from Turkey (measured: 1 for the Common
+  Cuckoo, 0 for the European Robin, 4 for the Great Tit). But European
+  recordings are plentiful and about 90% of the world total is European
+  anyway. Since regional dialect in bird song is a real phenomenon,
+  recordings from the breeding range are preferred: `area:europe`. For a
+  species without enough European recordings it falls back to the whole
+  world.
 """
 
 import argparse
@@ -67,45 +75,49 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 XC_DIR = os.path.join(DATA, "xc")
-WAV_DIR = os.path.join(DATA, "wav")      # xc_convert.py ciktisi
+WAV_DIR = os.path.join(DATA, "wav")      # the output of xc_convert.py
 CACHE = os.path.join(DATA, "cache")
 CSV_PATH = os.path.join(DATA, "species_istanbul.csv")
 
 API = "https://xeno-canto.org/api/3/recordings"
-UA = {"User-Agent": "PokeBird/0.1 (kisisel arastirma projesi)"}
+UA = {"User-Agent": "PokeBird/0.1 (personal research project)"}
 
-# ── Nihai eleme kuralı ────────────────────────────────────────────────────
+# == The final elimination rule ===========================================
 #
-# Tek eşik ÇALIŞMIYOR, iki yönden de ölçüldü:
+# A single threshold DOES NOT WORK, and that was measured from both sides:
 #
-#   Sadece GBIF (görülme) eşiği: 912'de Guguk / Sarıasma / Orman Alaca
-#     Ağaçkakan eleniyor, Flamingo ve martılar kalıyor — GBIF "kaç kişi görüp
-#     bildirdi"yi ölçüyor, "ötüyor mu"yu değil.
+#   GBIF (sightings) alone: at 912 the Common Cuckoo, the Eurasian Golden
+#     Oriole and the Middle Spotted Woodpecker are cut while flamingos and
+#     gulls stay — GBIF measures "how many people saw and reported it", not
+#     "does it sing".
 #
-#   Sadece XC (ses verisi) eşiği: 60'ta İbibik (1.680 GBIF, son derece ayırt
-#     edici "hüd-hüd" sesi), Kerkenez, Yeşilbaş, Küçük Ağaçkakan eleniyor —
-#     İstanbul'da yaygın ama Xeno-canto'da az kaydı olan türler.
+#   XC (audio data) alone: at 60 the Common Hoopoe (1,680 GBIF records and an
+#     extremely distinctive "hoo-poo" call), the Eurasian Kestrel, the
+#     Mallard and the Lesser Spotted Woodpecker are cut — species that are
+#     common in Istanbul but thin on Xeno-canto.
 #
-# Bu yüzden iki boyut birleştiriliyor: İstanbul'da YAYGIN türler düşük ses
-# verisiyle de listede kalır (kullanıcı onları gerçekten duyacak), NADİR
-# türler ise ancak bol ses verisi varsa girer (yoksa sınıf zaten öğrenilemez).
-COMMON_GBIF = 800     # bu kadar İstanbul kaydı olan tür "yaygın" sayılır
-VARSAYILAN_THRESHOLD = 30  # yaygın türler için asgari XC A/B kaydı
-RARE_THRESHOLD = 100      # yaygın olmayan türler için asgari XC A/B kaydı
+# So the two dimensions are combined: species that are COMMON in Istanbul
+# stay on the list even with little audio (the user really will hear them),
+# while RARE species get in only when there is plenty of audio (without it
+# the class cannot be learned anyway).
+COMMON_GBIF = 800       # a species with this many Istanbul records is "common"
+DEFAULT_THRESHOLD = 30  # minimum XC A/B recordings for a common species
+RARE_THRESHOLD = 100    # minimum XC A/B recordings for a species that is not
 
-# Türev eser yasaklayan lisanslar — eğitim verisine alınmıyor (bkz. başlık).
-ND_ISARETI = "-nd"
 
-
-def nd_mi(lisans_url):
-    """Lisans ND (NoDerivatives) mi? URL biçimi:
+def is_nd(licence_url):
+    """Is the licence ND (NoDerivatives)? The URL looks like
     https://creativecommons.org/licenses/by-nc-nd/4.0/"""
-    if not lisans_url:
-        return False           # lisansı bilinmeyen kayıt: metadata'da 'lic' boş
-    u = lisans_url.lower()
+    if not licence_url:
+        return False       # licence unknown: 'lic' is empty in the metadata
+    u = licence_url.lower()
     if "publicdomain" in u or "zero" in u:
         return False
     code = u.rstrip("/").split("/licenses/")[-1].split("/")[0] if "/licenses/" in u else u
@@ -119,12 +131,13 @@ def http_json(url, attempt=3):
             with urllib.request.urlopen(req, timeout=90) as r:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            govde = e.read(300).decode("utf-8", errors="replace")
+            body = e.read(300).decode("utf-8", errors="replace")
             if e.code in (401, 403):
-                sys.exit(f"\n[!] Xeno-canto anahtari reddedildi (HTTP {e.code}).\n"
-                         f"    {govde}\n"
-                         f"    https://xeno-canto.org/account adresinden alin,\n"
-                         f"    XC_KEY ortam degiskenine koyun ya da --key ile verin.\n")
+                sys.exit(f"\n[!] the Xeno-canto key was rejected "
+                         f"(HTTP {e.code}).\n"
+                         f"    {body}\n"
+                         f"    Get one from https://xeno-canto.org/account,\n"
+                         f"    put it in XC_KEY or pass it with --key.\n")
             if i == attempt - 1:
                 raise
             time.sleep(2 * (i + 1))
@@ -134,181 +147,205 @@ def http_json(url, attempt=3):
             time.sleep(2 * (i + 1))
 
 
-def xc_sorgu(key, sorgu, sayfa=1, per_page=1):
-    p = urllib.parse.urlencode({"query": sorgu, "key": key,
-                                "page": sayfa, "per_page": per_page})
+def xc_query(key, query, page=1, per_page=1):
+    p = urllib.parse.urlencode({"query": query, "key": key,
+                                "page": page, "per_page": per_page})
     return http_json(f"{API}?{p}")
 
 
-def csv_oku():
+def read_csv():
     if not os.path.exists(CSV_PATH):
-        sys.exit(f"[!] {CSV_PATH} yok. Once: python tools/species_list.py")
+        sys.exit(f"[!] {CSV_PATH} is missing. Run tools/species_list.py first.")
     with open(CSV_PATH, encoding="utf-8") as f:
         r = csv.DictReader(f)
         return list(r), list(r.fieldnames)
 
 
-def csv_write(rows, sutunlar):
+def csv_write(rows, columns):
     with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=sutunlar, extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
 
-# ── Sayım ──────────────────────────────────────────────────────────────────
+# == Survey ==============================================================
 
-def komut_count(key, threshold, rare_threshold=RARE_THRESHOLD, common_gbif=COMMON_GBIF):
-    rows, sutunlar = csv_oku()
-    havuz = [s for s in rows if s["status"] == "included"]
-    print(f"Havuzda {len(havuz)} tur. Xeno-canto kayit sayilari cekiliyor...")
-    print(f"(Avrupa, kalite A/B. Yaygin tur [GBIF>={COMMON_GBIF}] icin >={threshold} kayit,\n"
-          f" nadir tur icin >={RARE_THRESHOLD} kayit gerekiyor)\n")
+def command_survey(key, threshold, rare_threshold=RARE_THRESHOLD,
+                   common_gbif=COMMON_GBIF):
+    rows, columns = read_csv()
+    pool = [s for s in rows if s["status"] == "included"]
+    print(f"{len(pool)} species in the pool. Fetching Xeno-canto counts...")
+    print(f"(Europe, quality A/B. A common species [GBIF>={COMMON_GBIF}] needs\n"
+          f" >={threshold} recordings, a rare one >={RARE_THRESHOLD})\n")
 
     os.makedirs(CACHE, exist_ok=True)
-    for i, s in enumerate(havuz, 1):
+    for i, s in enumerate(pool, 1):
         sci = s["scientific_name"]
-        onbellek = os.path.join(CACHE, f"xc_{sci.replace(' ', '_')}.json")
+        cache = os.path.join(CACHE, f"xc_{sci.replace(' ', '_')}.json")
 
-        if os.path.exists(onbellek):
-            with open(onbellek, encoding="utf-8") as f:
+        if os.path.exists(cache):
+            with open(cache, encoding="utf-8") as f:
                 d = json.load(f)
         else:
-            # Sadece kayıt SAYISI lazım: per_page=1 ile tek kayıt isteyip
-            # numRecordings alanını okuyoruz. Tüm sayfaları çekmek gereksiz.
+            # Only the COUNT is needed: ask for a single recording with
+            # per_page=1 and read the numRecordings field. Pulling every page
+            # would be pointless.
             #
-            # Üç sayı: dünya A/B, Avrupa A/B, Avrupa BY-NC-SA. Üçüncüsü
-            # lisans payını gösteriyor — negatif lisans filtresi (-lic:) API
-            # tarafından desteklenmiyor (400 dönüyor), o yüzden ND'yi burada
-            # değil indirme sırasında metadata'dan eliyoruz.
+            # Three numbers: world A/B, Europe A/B, Europe BY-NC-SA. The
+            # third shows the licence share — a negative licence filter
+            # (-lic:) is not supported by the API (it returns 400), so ND is
+            # filtered out from the metadata at download time, not here.
             d = {
-                "ab":     xc_sorgu(key, f'sp:"{sci}" q:">C"').get("numRecordings", "0"),
-                "ab_eu":  xc_sorgu(key, f'sp:"{sci}" q:">C" area:europe').get("numRecordings", "0"),
-                "ab_sa":  xc_sorgu(key, f'sp:"{sci}" q:">C" area:europe lic:"BY-NC-SA"').get("numRecordings", "0"),
+                "ab": xc_query(
+                    key, f'sp:"{sci}" q:">C"').get("numRecordings", "0"),
+                "ab_eu": xc_query(
+                    key,
+                    f'sp:"{sci}" q:">C" area:europe').get("numRecordings", "0"),
+                "ab_sa": xc_query(
+                    key, f'sp:"{sci}" q:">C" area:europe lic:"BY-NC-SA"'
+                ).get("numRecordings", "0"),
             }
-            with open(onbellek, "w", encoding="utf-8") as f:
+            with open(cache, "w", encoding="utf-8") as f:
                 json.dump(d, f)
-            time.sleep(0.34)      # API'ye nazik davran
+            time.sleep(0.34)      # be polite to the API
 
-        s["xc_count"] = int(d["ab"])
-        s["xc_count_eu"] = int(d["ab_eu"])
-        s["xc_count_world"] = int(d["ab_sa"])
+        s["xc_count"] = int(d["ab"])          # world, A/B
+        s["xc_count_eu"] = int(d["ab_eu"])    # Europe, A/B
+        s["xc_count_sa"] = int(d["ab_sa"])    # Europe, A/B, BY-NC-SA only
 
-        if i % 20 == 0 or i == len(havuz):
-            print(f"  {i}/{len(havuz)}")
+        if i % 20 == 0 or i == len(pool):
+            print(f"  {i}/{len(pool)}")
 
-    # Nihai eleme — birleşik kural (gerekçe: dosya başındaki sabitler).
-    # Ses verisi ölçütü Avrupa A/B sayısı; Avrupa'da hiç kayıt yoksa
-    # (İstanbul'da görülen Asya/Afrika türleri) dünya geneline düşülüyor.
+    # The final elimination - the combined rule (the reasoning is with the
+    # constants at the top of the file). The audio criterion is the European
+    # A/B count; where there is nothing in Europe (Asian/African species seen
+    # in Istanbul) it falls back to the world total.
     for s in rows:
         if s["status"] != "included":
-            for k in ("xc_count", "xc_count_eu", "xc_count_world"):
+            for k in ("xc_count", "xc_count_eu", "xc_count_sa"):
                 s.setdefault(k, "")
             continue
         eu = int(s.get("xc_count_eu") or 0)
-        dunya = int(s.get("xc_count") or 0)
-        etkin = eu if eu > 0 else dunya
+        world = int(s.get("xc_count") or 0)
+        effective = eu if eu > 0 else world
         common = int(s.get("gbif_records") or 0) >= common_gbif
-        gereken = threshold if common else rare_threshold
+        needed = threshold if common else rare_threshold
 
-        if etkin < gereken:
+        if effective < needed:
             s["status"] = "excluded"
             s["reason"] = (
-                f"{'yaygin' if common else 'nadir'} tur, XC'de {etkin} A/B kayit "
-                f"(gereken {gereken}; Avrupa {eu}, dunya {dunya})")
+                f"{'common' if common else 'rare'} species, {effective} A/B "
+                f"recordings on XC (need {needed}; Europe {eu}, "
+                f"world {world})")
 
-    for k in ("xc_count", "xc_count_eu", "xc_count_world"):
-        if k not in sutunlar:
-            sutunlar.append(k)
-    csv_write(rows, sutunlar)
+    for k in ("xc_count", "xc_count_eu", "xc_count_sa"):
+        if k not in columns:
+            columns.append(k)
+    csv_write(rows, columns)
 
-    nihai = [s for s in rows if s["status"] == "included"]
+    final = [s for s in rows if s["status"] == "included"]
     print(f"\n{CSV_PATH}")
-    print(f"  NIHAI LISTE: {len(nihai)} tur")
-    if nihai:
-        total_record = sum(int(s["xc_count_eu"] or 0) or int(s["xc_count"] or 0) for s in nihai)
-        print(f"  Toplam kullanilabilir A/B kayit: {total_record:,}")
-        print("\n  En az ses kaydi olan 10 tur (veri riski burada):")
-        for s in sorted(nihai, key=lambda x: int(x["xc_count_eu"] or 0) or int(x["xc_count"] or 0))[:10]:
+    print(f"  FINAL LIST: {len(final)} species")
+    if final:
+        total_record = sum(int(s["xc_count_eu"] or 0) or int(s["xc_count"] or 0)
+                           for s in final)
+        print(f"  Total usable A/B recordings: {total_record:,}")
+        print("\n  The 10 species with the least audio (the data risk is "
+              "here):")
+        for s in sorted(final, key=lambda x: int(x["xc_count_eu"] or 0)
+                        or int(x["xc_count"] or 0))[:10]:
             eu, dw = int(s["xc_count_eu"] or 0), int(s["xc_count"] or 0)
-            print(f"    {eu or dw:5} A/B  {s['turkish_name'] or s['scientific_name']}"
-                  f"{'  (dunya geneli)' if not eu else ''}")
-    if len(nihai) > 130:
-        print(f"\n  [i] {len(nihai)} tur planin ~110'unun uzerinde; --esik yukseltilebilir.")
-    elif len(nihai) < 90:
-        print(f"\n  [i] {len(nihai)} tur planin ~110'unun altinda; --esik dusurulebilir.")
+            print(f"    {eu or dw:5} A/B  "
+                  f"{s['english_name'] or s['scientific_name']}"
+                  f"{'  (world-wide)' if not eu else ''}")
+    if len(final) > 130:
+        print(f"\n  [i] {len(final)} species is above the ~110 planned; "
+              "--threshold can go up.")
+    elif len(final) < 90:
+        print(f"\n  [i] {len(final)} species is below the ~110 planned; "
+              "--threshold can come down.")
 
 
-# ── İndirme ────────────────────────────────────────────────────────────────
+# == Download ============================================================
 
-def komut_download(key, species_basina, only_ab, nd_include):
-    rows, _ = csv_oku()
-    nihai = [s for s in rows if s["status"] == "included"]
-    if not nihai:
-        sys.exit("[!] Nihai listede tur yok. Once: python tools/xc_fetch.py --say")
+def command_download(key, per_species, only_ab, nd_include):
+    rows, _ = read_csv()
+    final = [s for s in rows if s["status"] == "included"]
+    if not final:
+        sys.exit("[!] the final list is empty. Run "
+                 "tools/xc_fetch.py --survey first.")
 
     os.makedirs(XC_DIR, exist_ok=True)
-    record_csv = os.path.join(XC_DIR, "kayitlar.csv")
+    record_csv = csv_compat.resolve(os.path.join(XC_DIR, "records.csv"))
     fresh_file = not os.path.exists(record_csv)
 
-    print(f"{len(nihai)} tur, tur basina en fazla {species_basina} kayit indirilecek.\n")
-    total_indi = 0
+    print(f"{len(final)} species, at most {per_species} recordings each.\n")
+    total_downloaded = 0
 
     with open(record_csv, "a", newline="", encoding="utf-8") as kf:
         w = csv.writer(kf)
         if fresh_file:
             w.writerow(["file", "scientific_name", "ebird_code", "xc_id",
-                        "kalite", "lisans", "recordist", "ulke", "sure_sn"])
+                        "quality", "licence", "recordist", "country",
+                        "length_s"])
 
-        total_nd_atlandi = 0
+        total_nd_skipped = 0
 
-        for s in nihai:
+        for s in final:
             sci = s["scientific_name"]
             species_code = s["ebird_code"] or sci.replace(" ", "_")
             target_directory = os.path.join(XC_DIR, species_code)
 
-            # Kotası zaten dolu olan türü hiç sorgulama. Eskiden her tür için
-            # boş dizin açılıyordu; "bu tür yeniden iniyor" izlenimi veriyor
-            # ve her turda gereksiz API sorgusu yapılıyordu.
+            # Do not query a species whose quota is already full. It used to
+            # open an empty directory for every species, which gave the
+            # impression that the species was downloading again and cost a
+            # pointless API query on every round.
             wav_directory = os.path.join(WAV_DIR, species_code)
-            mevcut = 0
+            have = 0
             if os.path.isdir(wav_directory):
-                mevcut += len([f for f in os.listdir(wav_directory) if f.endswith(".wav")])
+                have += len([f for f in os.listdir(wav_directory)
+                             if f.endswith(".wav")])
             if os.path.isdir(target_directory):
-                mevcut += len([f for f in os.listdir(target_directory) if f.endswith(".mp3")])
-            if mevcut >= species_basina:
-                print(f"  {s['turkish_name'] or sci}: {mevcut} kayit zaten var, atlandi")
+                have += len([f for f in os.listdir(target_directory)
+                             if f.endswith(".mp3")])
+            if have >= per_species:
+                print(f"  {s['english_name'] or sci}: {have} recordings "
+                      "already here, skipped")
                 continue
 
             os.makedirs(target_directory, exist_ok=True)
 
             quality = ' q:">C"' if only_ab else ""
-            # Kademeli gevşetme: en alakalı/en ucuz kayıtlardan başla, tür
-            # başına hedef dolmazsa kısıtları sırayla kaldır.
+            # Gradual relaxation: start with the most relevant and cheapest
+            # recordings, and drop the constraints one at a time if the
+            # per-species target is not met.
             #
-            #   1. Avrupa + 5-120 sn   üreme bölgesi, kısa kayıt. Uzun kayıtlar
-            #                          çoğunlukla sessizlik; hem disk hem
-            #                          segmentasyon süresi israfı (ölçüldü:
-            #                          ortalama 24 sn'ye karşı 32 sn).
-            #   2. Avrupa              az kayıtlı türlerde uzunluk filtresi
-            #                          havuzu fazla daraltıyor (İbibik 37).
-            #   3. dünya geneli        Avrupa'da kaydı olmayan türler için.
-            #   0. Avrupa + 5-60 sn    ÖNCE BU: BirdNET nasılsa 3 sn'lik
-            #                          dilimlere bölecek, 2 dakikalık kayda
-            #                          ihtiyaç yok. Ölçüldü — uzun kayıtlar
-            #                          18 MB'a çıkabiliyor ve indirmeyi
-            #                          8 kat yavaşlatıyor.
-            sorgular = [
+            #   0. Europe + 5-60 s   THIS FIRST: BirdNET is going to cut it
+            #                        into 3-second slices anyway, so a
+            #                        two-minute recording is not needed.
+            #                        Measured - long recordings can reach
+            #                        18 MB and slow the download down
+            #                        eightfold.
+            #   1. Europe + 5-120 s  the breeding range, short recordings.
+            #                        Long recordings are mostly silence, a
+            #                        waste of both disk and segmentation time
+            #                        (measured: 32 s average against 24 s).
+            #   2. Europe            for species with few recordings the
+            #                        length filter narrows the pool too far
+            #                        (the Common Hoopoe drops to 37).
+            #   3. world-wide        for species with nothing in Europe.
+            queries = [
                 f'sp:"{sci}"{quality} area:europe len:5-60',
                 f'sp:"{sci}"{quality} area:europe len:5-120',
                 f'sp:"{sci}"{quality} area:europe',
                 f'sp:"{sci}"{quality}',
             ]
 
-            alinan, seen = [], set()
-            for sorgu in sorgular:
-                sayfa = 1
-                while len(alinan) < species_basina:
-                    d = xc_sorgu(key, sorgu, sayfa=sayfa, per_page=100)
+            found, seen = [], set()
+            for query in queries:
+                page = 1
+                while len(found) < per_species:
+                    d = xc_query(key, query, page=page, per_page=100)
                     records = d.get("recordings", [])
                     if not records:
                         break
@@ -316,33 +353,35 @@ def komut_download(key, species_basina, only_ab, nd_include):
                         if k.get("id") in seen:
                             continue
                         seen.add(k.get("id"))
-                        alinan.append(k)
-                    if sayfa >= int(d.get("numPages", 1)):
+                        found.append(k)
+                    if page >= int(d.get("numPages", 1)):
                         break
-                    sayfa += 1
+                    page += 1
                     time.sleep(0.34)
-                if len(alinan) >= species_basina:
+                if len(found) >= per_species:
                     break
 
-            indi, nd_atlandi = 0, 0
-            for k in alinan:
-                if indi >= species_basina:
+            downloaded, nd_skipped = 0, 0
+            for k in found:
+                if downloaded >= per_species:
                     break
-                if not nd_include and nd_mi(k.get("lic", "")):
-                    nd_atlandi += 1
+                if not nd_include and is_nd(k.get("lic", "")):
+                    nd_skipped += 1
                     continue
                 xc_id = k.get("id", "")
                 url = k.get("file", "")
                 if not url:
                     continue
                 path = os.path.join(target_directory, f"XC{xc_id}.mp3")
-                # Çevrilmiş WAV'a da bak: xc_convert.py mp3'ü silip WAV
-                # bırakıyor. Yalnızca mp3'e bakılırsa çevrilmiş her tür
-                # sıfırdan yeniden inerdi (bir turda 26 GB boşa gidiyordu).
-                wav_path = os.path.join(WAV_DIR, os.path.basename(target_directory),
-                                       f"XC{xc_id}.wav")
+                # Look at the converted WAV as well: xc_convert.py deletes
+                # the mp3 and leaves the WAV. Looking only for the mp3 would
+                # re-download every converted species from scratch (26 GB
+                # went to waste in one round that way).
+                wav_path = os.path.join(WAV_DIR,
+                                        os.path.basename(target_directory),
+                                        f"XC{xc_id}.wav")
                 if os.path.exists(path) or os.path.exists(wav_path):
-                    indi += 1
+                    downloaded += 1
                     continue
                 try:
                     req = urllib.request.Request(url, headers=UA)
@@ -350,34 +389,36 @@ def komut_download(key, species_basina, only_ab, nd_include):
                          open(path, "wb") as out:
                         out.write(r.read())
                 except Exception as e:
-                    print(f"    [!] XC{xc_id} indirilemedi: {type(e).__name__}")
+                    print(f"    [!] XC{xc_id} could not be downloaded: "
+                          f"{type(e).__name__}")
                     continue
                 w.writerow([os.path.relpath(path, ROOT), sci, s["ebird_code"], xc_id,
                             k.get("q", ""), k.get("lic", ""), k.get("rec", ""),
                             k.get("cnt", ""), k.get("length", "")])
-                indi += 1
-                total_indi += 1
+                downloaded += 1
+                total_downloaded += 1
                 time.sleep(0.1)
 
-            total_nd_atlandi += nd_atlandi
-            print(f"  {s['turkish_name'] or sci}: {indi} kayit"
-                  f"{f' (ND atlandi: {nd_atlandi})' if nd_atlandi else ''}")
+            total_nd_skipped += nd_skipped
+            print(f"  {s['english_name'] or sci}: {downloaded} recordings"
+                  f"{f' (ND skipped: {nd_skipped})' if nd_skipped else ''}")
             kf.flush()
 
-    print(f"\nToplam {total_indi} yeni kayit -> {XC_DIR}")
-    if total_nd_atlandi:
-        print(f"ND (turev yasak) lisansli {total_nd_atlandi} kayit atlandi.")
-    print(f"Lisans ve atif bilgisi: {record_csv}")
+    print(f"\n{total_downloaded} new recordings in total -> {XC_DIR}")
+    if total_nd_skipped:
+        print(f"{total_nd_skipped} ND-licensed (no-derivatives) recordings "
+              "were skipped.")
+    print(f"Licence and attribution information: {record_csv}")
 
 
 KEY_FILE = os.path.join(DATA, ".xc_key")
 
 
-def key_bul(parametre):
-    """Anahtarı üç kaynaktan sırayla ara. Dosya yöntemi tercih edilir:
-    anahtar komut geçmişine ya da ekrana düşmez."""
-    if parametre:
-        return parametre.strip()
+def find_key(argument):
+    """Look for the key in three places, in order. The file is preferred: the
+    key then never lands in shell history or on screen."""
+    if argument:
+        return argument.strip()
     if os.environ.get("XC_KEY"):
         return os.environ["XC_KEY"].strip()
     if os.path.exists(KEY_FILE):
@@ -387,40 +428,50 @@ def key_bul(parametre):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="PokeBird M4: Xeno-canto")
+    ap = argparse.ArgumentParser(description="PokeBird: Xeno-canto")
     ap.add_argument("--key", default="",
-                    help="Xeno-canto API anahtari (yoksa XC_KEY ya da data/.xc_key)")
+                    help="the Xeno-canto API key (otherwise XC_KEY or "
+                         "data/.xc_key)")
     ap.add_argument("--survey", action="store_true",
                     help="fetch recording counts and build the final species list")
-    ap.add_argument("--download", action="store_true", help="nihai listedeki turlerin kayitlarini indir")
-    ap.add_argument("--threshold", type=int, default=VARSAYILAN_THRESHOLD,
-                    help=f"yaygin turler icin asgari A/B kayit (varsayilan {VARSAYILAN_THRESHOLD})")
+    ap.add_argument("--download", action="store_true",
+                    help="download the recordings of the final list")
+    ap.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD,
+                    help="minimum A/B recordings for a common species "
+                         f"(default {DEFAULT_THRESHOLD})")
     ap.add_argument("--rare-threshold", type=int, default=RARE_THRESHOLD,
-                    help=f"nadir turler icin asgari A/B kayit (varsayilan {RARE_THRESHOLD})")
+                    help="minimum A/B recordings for a rare species "
+                         f"(default {RARE_THRESHOLD})")
     ap.add_argument("--common-gbif", type=int, default=COMMON_GBIF,
-                    help=f"bu kadar GBIF kaydi olan tur 'yaygin' sayilir (varsayilan {COMMON_GBIF})")
+                    help="a species with this many GBIF records counts as "
+                         f"'common' (default {COMMON_GBIF})")
     ap.add_argument("--per-species", type=int, default=60,
                     help="recordings to download per species (default 60)")
-    ap.add_argument("--all-quality", action="store_true", help="A/B disinda C/D/E kayitlari da indir")
+    ap.add_argument("--all-quality", action="store_true",
+                    help="download C/D/E recordings as well as A/B")
     ap.add_argument("--nd-include", action="store_true",
-                    help="ND (turev yasak) lisansli kayitlari da indir — sorumluluk sizde")
+                    help="download ND-licensed (no-derivatives) recordings "
+                         "too - at your own responsibility")
     args = ap.parse_args()
 
-    key = key_bul(args.key)
+    key = find_key(args.key)
     if not key:
         sys.exit(
-            "\n[!] Xeno-canto API anahtari bulunamadi.\n\n"
-            "    API v2 kapandi, v3 anahtar istiyor. Ucretsiz almak icin:\n"
-            "      1. https://xeno-canto.org/account adresinde hesap acin\n"
-            "      2. Ayni sayfadan API anahtarinizi kopyalayin\n"
-            "      3. Anahtari dosyaya yazin (PowerShell):\n"
-            "           \"ANAHTAR\" | Out-File -Encoding ascii -NoNewline data\\.xc_key\n\n"
-            "    Alternatif:  $env:XC_KEY = \"ANAHTAR\"   ya da   --key ANAHTAR\n")
+            "\n[!] no Xeno-canto API key was found.\n\n"
+            "    API v2 was shut down and v3 wants a key. To get one free:\n"
+            "      1. open an account at https://xeno-canto.org/account\n"
+            "      2. copy your API key from that same page\n"
+            "      3. write the key into the file (PowerShell):\n"
+            "           \"KEY\" | Out-File -Encoding ascii -NoNewline "
+            "data\\.xc_key\n\n"
+            "    Alternatively:  $env:XC_KEY = \"KEY\"   or   --key KEY\n")
 
     if args.survey:
-        komut_count(key, args.threshold, args.rare_threshold, args.common_gbif)
+        command_survey(key, args.threshold, args.rare_threshold,
+                       args.common_gbif)
     elif args.download:
-        komut_download(key, args.per_species, not args.all_quality, args.nd_include)
+        command_download(key, args.per_species, not args.all_quality,
+                         args.nd_include)
     else:
         ap.print_help()
 

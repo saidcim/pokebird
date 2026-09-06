@@ -51,11 +51,14 @@ LEGACY = {
     "gerekce": "reason",
     "xc_ab": "xc_count",
     "xc_ab_eu": "xc_count_eu",
-    "xc_ab_sa": "xc_count_world",
+    "xc_ab_sa": "xc_count_sa",
     "gbif_kayit": "gbif_records",
     "esc50_dosya": "esc50_file",
     "kaynak": "source",
     "lisans": "licence",
+    "kalite": "quality",
+    "ulke": "country",
+    "sure_sn": "length_s",
 }
 for _m in range(1, 13):
     LEGACY["ay_%02d" % _m] = "month_%02d" % _m
@@ -125,6 +128,7 @@ LEGACY_FILES = {
     "birdnet_result": "birdnet_sonuc",
     "segment_samples": "segment_ornek",
     "esc50_records.csv": "esc50_kayitlar.csv",
+    "records.csv": "kayitlar.csv",
 }
 
 
