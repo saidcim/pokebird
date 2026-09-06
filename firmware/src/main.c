@@ -2296,7 +2296,7 @@ static void cmd_datapath_probe(void) {
             { 0x0A, "RDDPM  (power mode)" },
             { 0x0C, "RDDCOLMOD (piksel bicimi)" },
         };
-        int anlamli = 0;
+        int meaningful = 0;
         for (size_t i = 0; i < sizeof(reads) / sizeof(reads[0]); i++) {
             uint8_t buf[6] = {0};
             bb_read(reads[i].reg, buf, sizeof(buf));
@@ -2304,46 +2304,47 @@ static void cmd_datapath_probe(void) {
             for (size_t j = 0; j < sizeof(buf); j++) printf(" %02x", buf[j]);
             printf("\n");
             for (size_t j = 0; j < sizeof(buf); j++) {
-                if (buf[j] != 0x00 && buf[j] != 0xFF) anlamli = 1;
+                if (buf[j] != 0x00 && buf[j] != 0xFF) meaningful = 1;
             }
         }
-        printf("   -> %s\n\n", anlamli
-               ? "PANEL YANIT VERIYOR. Veri hatti iki yonlu calisiyor."
-               : "PANELDEN HIC YANIT YOK (hep 00 ya da FF). Panel bu hattan\n"
-                 "      bizi duymuyor: pin haritasi ya da kablolama yanlis.");
+        printf("   -> %s\n\n", meaningful
+               ? "THE PANEL RESPONDS. The data line works in both directions."
+               : "NO RESPONSE AT ALL (always 00 or FF). The panel does not hear\n"
+                 "      us on this bus: the pin map or the wiring is wrong.");
 
-        /* PIO'yu geri ac — SM'i de sifirliyor (FIFO/kaydirma sayaci dahil),
-         * eski elle yapilan geri alma bunlari birakiyordu. */
+        /* Re-enable PIO — this also resets the SM (FIFO and shift counter
+         * included), which the old manual restore left behind. */
         QSPI_GPIO_Init(qspi);
         QSPI_PIO_Restore(qspi);
     }
 
-    /* ── 7. Yedek: gozle komut yolu testi ─────────────────────────────────
-     * Olculebilir testler sonucsuz kalirsa diye duruyor. */
+    /* ── 7. Fallback: the command path test by eye ────────────────────────
+     * Kept in case the measurable tests come back inconclusive. */
     {
-        printf("7) Komut yolu testi — EKRANA BAKIN.\n");
-        printf("   Karincalanmada HERHANGI bir degisiklik (sonme, renklerin\n");
-        printf("   tersine donmesi, parlaklik oynamasi) gorurseniz TUSA BASIN.\n\n");
+        printf("7) Command path test - WATCH THE SCREEN.\n");
+        printf("   If you see ANY change in the snow (it going dark, colours\n");
+        printf("   inverting, brightness shifting), PRESS A KEY.\n\n");
 
         backlight_set(true);
         drain_stdin();
 
         const struct { uint8_t cmd; const char *name; } steps[] = {
-            { 0x28, "DISPOFF  (ekran sonmeli)" },
-            { 0x29, "DISPON   (geri gelmeli)" },
-            { 0x21, "INVON    (renkler terslenmeli)" },
-            { 0x20, "INVOFF   (geri donmeli)" },
-            { 0x28, "DISPOFF  (ekran sonmeli)" },
-            { 0x29, "DISPON   (geri gelmeli)" },
+            { 0x28, "DISPOFF  (the screen should go dark)" },
+            { 0x29, "DISPON   (it should come back)" },
+            { 0x21, "INVON    (colours should invert)" },
+            { 0x20, "INVOFF   (they should revert)" },
+            { 0x28, "DISPOFF  (the screen should go dark)" },
+            { 0x29, "DISPON   (it should come back)" },
         };
         for (size_t i = 0; i < sizeof(steps) / sizeof(steps[0]); i++) {
             LCD_3IN49_SendSimpleCmd(steps[i].cmd);
             printf("   0x%02x %s\n", steps[i].cmd, steps[i].name);
             for (int t = 0; t < 20; t++) {
                 if (getchar_timeout_us(0) >= 0) {
-                    printf("\n   >>> KOMUT YOLU CALISIYOR — degisiklik 0x%02x sonrasi <<<\n",
+                    printf("\n   >>> THE COMMAND PATH WORKS - change after 0x%02x <<<\n",
                            steps[i].cmd);
-                    printf("   Komutlar panele ulasiyor; sorun yalnizca piksel yolunda.\n\n");
+                    printf("   Commands reach the panel; the problem is only in the\n");
+                    printf("   pixel path.\n\n");
                     LCD_3IN49_SendSimpleCmd(0x29);
                     return;
                 }
@@ -2351,42 +2352,43 @@ static void cmd_datapath_probe(void) {
             }
         }
         LCD_3IN49_SendSimpleCmd(0x29);
-        printf("\n   Hicbir degisiklik bildirilmedi — panele HICBIR komut\n");
-        printf("   ulasmiyor. Sorun QSPI hattinin kendisinde (pin/CS/saat).\n\n");
+        printf("\n   No change was reported - NO command is reaching the panel.\n");
+        printf("   The problem is in the QSPI bus itself (pins/CS/clock).\n\n");
     }
 }
 
 /**
- * Arka ışık teşhisi — hangi pin kombinasyonu ışığı yakıyor?
+ * Backlight diagnostic — which pin combination lights it?
  *
- * Reset sonrası (hiçbir kodumuz çalışmadan) ışık yanıyor, bizim kod
- * çalışınca sönüyor. Demek ki iki pinden biri yanlış sürülüyor:
- *   GPIO36 (LCD_BL)  — parlaklık, PWM
- *   GPIO37 (BL_EN)   — yükseltici enable
- * Ama polariteyi ve hangisinin gerçekten enable olduğunu varsaymak yerine
- * dört kombinasyonu tek tek deneyip hangisinde ışık yandığını soruyoruz.
+ * After a reset (before any of our code runs) the light is on, and it goes
+ * out once our code runs. So one of the two pins is being driven wrongly:
+ *   GPIO36 (LCD_BL)  — brightness, PWM
+ *   GPIO37 (BL_EN)   — boost converter enable
+ * Rather than assuming the polarity, or which one is really the enable, we
+ * try each combination in turn and ask which one lit the backlight.
  *
- * Ayrıca GPIO36'yı PWM yerine düz GPIO olarak da deniyoruz: PWM işlevi
- * QSPI_GPIO_Init tarafından ezilmiş olabilir.
+ * GPIO36 is also tried as a plain GPIO rather than PWM: the PWM function may
+ * have been overridden by QSPI_GPIO_Init.
  */
 static void cmd_backlight_probe(void) {
-    /* Kendi kendini raporlayan sürüm: durumları sırayla dener, ışığı
-     * gördüğünüzde bir tuşa basın; cihaz o anki durumu yazar. Önceki
-     * sürümde adımları göz kararı saymak gerekiyordu ve karışıyordu. */
-    printf("\nArka isik teshisi (etkilesimli).\n");
-    printf("EKRANA BAKIN. Isik yandigi anda bir tusa basin.\n");
-    printf("Her durum 5 saniye. Hicbiri yanmazsa test kendiliginden biter.\n\n");
+    /* A self-reporting version: it steps through the states, and when you
+     * see the light you press a key and the device prints the state it was
+     * in. The previous version required counting the steps by eye, which was
+     * easy to lose track of. */
+    printf("\nBacklight diagnostic (interactive).\n");
+    printf("WATCH THE SCREEN. Press a key the moment the light comes on.\n");
+    printf("Each state lasts 5 seconds. If none light it, the test ends by itself.\n\n");
 
     gpio_init(PB_PIN_BL_EN);
     gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
 
     const struct { int bl_en; int bl; int pwm_duty; const char *name; } state[] = {
-        { 1, 0, -1, "BL_EN=1  LCD_BL=0 (duz GPIO)" },
-        { 1, 1, -1, "BL_EN=1  LCD_BL=1 (duz GPIO)" },
-        { 0, 0, -1, "BL_EN=0  LCD_BL=0 (duz GPIO)" },
-        { 0, 1, -1, "BL_EN=0  LCD_BL=1 (duz GPIO)" },
-        { 1, 0,  5, "BL_EN=1  PWM duty %5   (aktif-dusuk ise PARLAK)" },
-        { 1, 0, 95, "BL_EN=1  PWM duty %95  (aktif-yuksek ise PARLAK)" },
+        { 1, 0, -1, "BL_EN=1  LCD_BL=0 (plain GPIO)" },
+        { 1, 1, -1, "BL_EN=1  LCD_BL=1 (plain GPIO)" },
+        { 0, 0, -1, "BL_EN=0  LCD_BL=0 (plain GPIO)" },
+        { 0, 1, -1, "BL_EN=0  LCD_BL=1 (plain GPIO)" },
+        { 1, 0,  5, "BL_EN=1  PWM duty 5%%   (BRIGHT if active-low)" },
+        { 1, 0, 95, "BL_EN=1  PWM duty 95%%  (BRIGHT if active-high)" },
     };
 
     for (size_t i = 0; i < sizeof(state) / sizeof(state[0]); i++) {
@@ -2404,47 +2406,48 @@ static void cmd_backlight_probe(void) {
 
         for (int t = 0; t < 50; t++) {
             if (getchar_timeout_us(0) >= 0) {
-                printf("\n  >>> ISIK YANAN DURUM: [%u] %s <<<\n\n",
+                printf("\n  >>> THE STATE THAT LIT IT: [%u] %s <<<\n\n",
                        (unsigned)(i + 1), state[i].name);
                 return;
             }
             sleep_ms(100);
         }
     }
-    printf("  hicbir durumda tus basilmadi\n\n");
+    printf("  no key was pressed in any state\n\n");
 }
 
 
-/* ── x: cihaz-içi doğrulama seti + arena + çıkarım süresi ──────────────────
+/* ── x: the on-device validation set + arena + inference time ─────────────
  *
- * M6'nın kabul ölçütü bu komut. Üç şeyi birden ölçüyor ve üçü de TAHMİN
- * DEĞİL ÖLÇÜM olsun diye buraya kondu (§9l madde 2, 4, 7):
+ * This command is the acceptance test for the inference work. It measures
+ * three things at once, all of them MEASUREMENTS rather than estimates:
  *
- *   1. arena_used_bytes()  — belgedeki 141 KB bir tahmindi, bu gerçeği verir
- *   2. Invoke() süresi     — 1 s'lik pencere adımına sığmalı
- *   3. logit karşılaştırma — "PC'de çalışıyor cihazda çalışmıyor"u yakalar
+ *   1. arena_used_bytes()  — the documented 141 KB was an estimate; this is
+ *                            the real figure
+ *   2. Invoke() duration   — it has to fit inside the 1 s window step
+ *   3. logit comparison    — catches "works on the PC, not on the device"
  *
- * Ses yolu bilerek İŞİN DIŞINDA: girdi, eğitim kümesinden gömülmüş hazır bir
- * pencere. Fark çıkarsa mel'e bakmaya gerek yok, hata alanı TFLM/CMSIS-NN/
- * niceleştirme ile sınırlı. Mikrofon da gerekmiyor — kulaklık kuralı (§5.5)
- * bu testi hiç ilgilendirmiyor.
+ * The audio path is deliberately OUT OF SCOPE: the input is a ready-made
+ * window embedded from the training set. If there is a discrepancy there is
+ * no need to look at mel; the fault is confined to TFLM, CMSIS-NN or the
+ * quantisation. No microphone is needed either.
  */
 static void cmd_ai_verify(void) {
-    printf("\n=== TUR AGI — cihaz ici dogrulama ===\n");
+    printf("\n=== SPECIES NET - on-device validation ===\n");
 
     const uint32_t t_init0 = time_us_32();
     if (!pb_species_net_init()) {
-        printf("[!] model baslatilamadi.\n");
+        printf("[!] the model could not be started.\n");
         return;
     }
     const uint32_t t_init = time_us_32() - t_init0;
 
-    printf("baslatma      %lu us\n", (unsigned long)t_init);
-    printf("arena         %u / %u bayt kullanildi  (%.1f%%)\n",
+    printf("startup       %lu us\n", (unsigned long)t_init);
+    printf("arena         %u / %u bytes used  (%.1f%%)\n",
            (unsigned)pb_species_net_arena_used(),
            (unsigned)pb_species_net_arena_total(),
            100.0 * pb_species_net_arena_used() / pb_species_net_arena_total());
-    printf("cikti nicel.  olcek %.9f  sifir %d\n",
+    printf("output quant. scale %.9f  zero %d\n",
            (double)pb_species_net_output_scale(), pb_species_net_output_zero());
 
     int8_t *input = pb_species_net_input();
@@ -2459,7 +2462,7 @@ static void cmd_ai_verify(void) {
         memcpy(input, pb_validation_input[k],
                (size_t)PB_VALIDATION_FRAMES * PB_VALIDATION_BANDS);
         if (!pb_species_net_run()) {
-            printf("[!] pencere %d: Invoke basarisiz\n", k);
+            printf("[!] window %d: Invoke failed\n", k);
             return;
         }
         const uint32_t us = pb_species_net_last_time_us();
@@ -2480,58 +2483,61 @@ static void cmd_ai_verify(void) {
         if (diff_max > max_diff) max_diff = diff_max;
         if (best == pb_validation_pc_pred[k]) pred_matches++;
 
-        printf("  pencere %d  sinif %3d  cihaz-tahmin %3d  PC-tahmin %3d  "
-               "logit max fark %d  %lu us\n",
+        printf("  window %d  class %3d  device-pred %3d  PC-pred %3d  "
+               "max logit diff %d  %lu us\n",
                k, (int)pb_validation_class[k], best,
                (int)pb_validation_pc_pred[k], diff_max, (unsigned long)us);
     }
 
-    printf("\nsure          min %lu  ort %lu  max %lu us   (hedef < 1.000.000)\n",
+    printf("\ntime          min %lu  avg %lu  max %lu us   (target < 1,000,000)\n",
            (unsigned long)time_min,
            (unsigned long)(time_total / PB_VALIDATION_COUNT),
            (unsigned long)time_max);
-    printf("logit         %d/%d pencere BIREBIR ayni, en buyuk fark %d, "
-           "ort mutlak fark %.4f\n",
+    printf("logits        %d/%d windows EXACTLY equal, largest diff %d, "
+           "mean absolute diff %.4f\n",
            exact, PB_VALIDATION_COUNT, max_diff,
            (double)diff_total / (double)diff_count);
-    printf("tahmin        %d/%d pencere ayni sinifi sectik\n",
+    printf("prediction    %d/%d windows chose the same class\n",
            pred_matches, PB_VALIDATION_COUNT);
 
     if (exact == PB_VALIDATION_COUNT) {
-        printf("\nSONUC: cihaz PC ile BIREBIR ayni. TFLM hatti dogru.\n");
+        printf("\nRESULT: the device matches the PC EXACTLY. The TFLM path is correct.\n");
     } else if (pred_matches == PB_VALIDATION_COUNT) {
-        printf("\nSONUC: logit'lerde kucuk sapma var ama tahminler ayni.\n"
-               "       Sapma 1-2 adimi asiyorsa cekirdek farki arayin.\n");
+        printf("\nRESULT: the logits deviate slightly but the predictions match.\n"
+               "        If the deviation exceeds 1-2 steps, look for a kernel\n"
+               "        difference.\n");
     } else {
-        printf("\n[!] SONUC: cihaz PC'den FARKLI tahmin uretti. TFLM/CMSIS-NN\n"
-               "    veya nicelestirme tarafinda sorun var. Ses yolu bu teste\n"
-               "    hic girmedi, o yuzden mel'e bakmayin.\n");
+        printf("\n[!] RESULT: the device produced a DIFFERENT prediction from the\n"
+               "    PC. Something is wrong in TFLM/CMSIS-NN or the quantisation.\n"
+               "    The audio path was never exercised here, so do not look at\n"
+               "    mel.\n");
     }
 }
 
-/* ── X: IKILI AG — cihaz ici dogrulama (M7, §9o adim 3) ───────────────────
+/* ── X: BINARY NET — on-device validation ─────────────────────────────────
  *
- * `x`'in Asama-1 ikili ag karsiligi: ayni pencereleri PC (BUILTIN_REF) ve
- * cihazda modelden gecirip ham int8 logit'i BIREBIR karsilastirir. Ses yolu
- * (mikrofon, mel) bu teste hic girmiyor — fark cikarsa sorun TFLM/CMSIS-NN
- * veya nicelestirme tarafinda demektir.
+ * The stage-1 binary net's counterpart to `x`: it runs the same windows
+ * through the model on the PC (BUILTIN_REF) and on the device and compares
+ * the raw int8 logit EXACTLY. The audio path (microphone, mel) is never
+ * exercised here — a discrepancy means the fault is in TFLM/CMSIS-NN or the
+ * quantisation.
  */
 static void cmd_binary_ai_verify(void) {
-    printf("\n=== IKILI AG — cihaz ici dogrulama ===\n");
+    printf("\n=== BINARY NET - on-device validation ===\n");
 
     const uint32_t t_init0 = time_us_32();
     if (!pb_binary_net_init()) {
-        printf("[!] model baslatilamadi.\n");
+        printf("[!] the model could not be started.\n");
         return;
     }
     const uint32_t t_init = time_us_32() - t_init0;
 
-    printf("baslatma      %lu us\n", (unsigned long)t_init);
-    printf("arena         %u / %u bayt kullanildi  (%.1f%%)\n",
+    printf("startup       %lu us\n", (unsigned long)t_init);
+    printf("arena         %u / %u bytes used  (%.1f%%)\n",
            (unsigned)pb_binary_net_arena_used(),
            (unsigned)pb_binary_net_arena_total(),
            100.0 * pb_binary_net_arena_used() / pb_binary_net_arena_total());
-    printf("cikti nicel.  olcek %.9f  sifir %d\n",
+    printf("output quant. scale %.9f  zero %d\n",
            (double)pb_binary_net_output_scale(), pb_binary_net_output_zero());
 
     int8_t *input = pb_binary_net_input();
@@ -2543,7 +2549,7 @@ static void cmd_binary_ai_verify(void) {
         memcpy(input, pb_binary_validation_input[k],
                (size_t)PB_BINARY_VALIDATION_FRAMES * PB_BINARY_VALIDATION_BANDS);
         if (!pb_binary_net_run()) {
-            printf("[!] pencere %d: Invoke basarisiz\n", k);
+            printf("[!] window %d: Invoke failed\n", k);
             return;
         }
         const uint32_t us = pb_binary_net_last_time_us();
@@ -2551,65 +2557,65 @@ static void cmd_binary_ai_verify(void) {
         if (us > time_max) time_max = us;
         time_total += us;
 
-        const int8_t cihaz_logit = pb_binary_net_output();
-        int diff = (int)cihaz_logit - (int)pb_binary_validation_logit[k];
+        const int8_t device_logit = pb_binary_net_output();
+        int diff = (int)device_logit - (int)pb_binary_validation_logit[k];
         if (diff < 0) diff = -diff;
         if (diff == 0) exact++;
         if (diff > max_diff) max_diff = diff;
 
-        const bool cihaz_pred = pb_binary_net_probability() >= 0.5f;
+        const bool device_pred = pb_binary_net_probability() >= 0.5f;
         const bool pc_pred = pb_binary_validation_logit[k] >=
-                               pb_binary_net_output_zero();  /* logit>=0 esdeger */
-        if (cihaz_pred == pc_pred) pred_matches++;
+                               pb_binary_net_output_zero();  /* equivalent to logit>=0 */
+        if (device_pred == pc_pred) pred_matches++;
 
-        printf("  pencere %d  gercek %-5s  cihaz-logit %4d  PC-logit %4d  "
-               "fark %d  p=%.4f  %lu us\n",
-               k, pb_binary_validation_truth[k] ? "KUS" : "DEGIL",
-               cihaz_logit, pb_binary_validation_logit[k], diff,
+        printf("  window %d  truth %-6s  device-logit %4d  PC-logit %4d  "
+               "diff %d  p=%.4f  %lu us\n",
+               k, pb_binary_validation_truth[k] ? "BIRD" : "NOT",
+               device_logit, pb_binary_validation_logit[k], diff,
                (double)pb_binary_net_probability(), (unsigned long)us);
     }
 
-    printf("\nsure          min %lu  ort %lu  max %lu us\n",
+    printf("\ntime          min %lu  avg %lu  max %lu us\n",
            (unsigned long)time_min,
            (unsigned long)(time_total / PB_BINARY_VALIDATION_COUNT),
            (unsigned long)time_max);
-    printf("logit         %d/%d pencere BIREBIR ayni, en buyuk fark %d\n",
+    printf("logits        %d/%d windows EXACTLY equal, largest diff %d\n",
            exact, PB_BINARY_VALIDATION_COUNT, max_diff);
-    printf("karar         %d/%d pencere PC ile ayni yonde (>=0.5 esigi)\n",
+    printf("decision      %d/%d windows agree with the PC (>=0.5 threshold)\n",
            pred_matches, PB_BINARY_VALIDATION_COUNT);
 
     if (exact == PB_BINARY_VALIDATION_COUNT) {
-        printf("\nSONUC: cihaz PC ile BIREBIR ayni. TFLM hatti dogru.\n");
+        printf("\nRESULT: the device matches the PC EXACTLY. The TFLM path is correct.\n");
     } else if (pred_matches == PB_BINARY_VALIDATION_COUNT) {
-        printf("\nSONUC: logit'te kucuk sapma var ama karar ayni.\n");
+        printf("\nRESULT: the logit deviates slightly but the decision matches.\n");
     } else {
-        printf("\n[!] SONUC: cihaz PC'den FARKLI karar uretti. TFLM/CMSIS-NN\n"
-               "    veya nicelestirme tarafinda sorun var.\n");
+        printf("\n[!] RESULT: the device produced a DIFFERENT decision from the PC.\n"
+               "    Something is wrong in TFLM/CMSIS-NN or the quantisation.\n");
     }
 }
 
-/* ── k: gerçek zamanlı tanıma (core 1) ────────────────────────────────────
+/* ── k: real-time recognition (core 1) ────────────────────────────────────
  *
- * M6'nın asıl teslimi. Core 1 sesi okuyup mel çıkarıyor, kapı açılınca
- * saniyede bir tür ağını çalıştırıyor ve son 8 pencereyi birleştiriyor;
- * core 0 (burası) yalnızca sonucu basıyor.
+ * Core 1 reads audio and extracts mel, runs the species net once a second
+ * while the gate is open, and votes over the last 8 windows; core 0 (here)
+ * only prints the result.
  *
- * ⛔ AKUSTİK TEST İÇİN PC'DEN SES ÇALMAYIN (§5.5): bilgisayarda kulaklık
- * takılı, hoparlörden ses çıkmıyor. Bu komutun kuş sesiyle sınanması
- * gerekiyorsa kullanıcıdan isteyin. Modelin doğru çalıştığı zaten `x`
- * komutuyla mikrofona hiç dokunmadan kanıtlanıyor.
+ * NOTE ON ACOUSTIC TESTING: the development machine has headphones plugged
+ * in, so nothing comes out of its speakers. Testing this command with real
+ * birdsong has to be done by hand. That the model itself is correct is
+ * already proven by the `x` command, which never touches the microphone.
  */
 static void cmd_recognize(bool gate_ignore) {
-    printf("\n=== GERCEK ZAMANLI TANIMA (core 1) ===\n");
+    printf("\n=== REAL-TIME RECOGNITION (core 1) ===\n");
     if (gate_ignore)
-        printf("OLCUM KIPI: kapi YOKSAYILIYOR, her saniye cikarim.\n");
+        printf("MEASUREMENT MODE: the gate is IGNORED, inference every second.\n");
     else
-        printf("Kapi acilmadikca cikarim CALISMAZ (sessizlikte %%2-3).\n");
-    printf("Birlestirme penceresi: %d\n", PB_VOTE_WINDOWS);
-    printf("Cikmak icin bir tusa basin.\n\n");
+        printf("No inference runs unless the gate opens (2-3%% in silence).\n");
+    printf("Voting window: %d\n", PB_VOTE_WINDOWS);
+    printf("Press any key to exit.\n\n");
 
     if (!pb_recognizer_start(gate_ignore)) {
-        printf("[!] tanima hatti baslatilamadi.\n");
+        printf("[!] the recognition pipeline could not be started.\n");
         return;
     }
 
@@ -2622,7 +2628,7 @@ static void cmd_recognize(bool gate_ignore) {
 
         if (d.version != seen && d.valid) {
             seen = d.version;
-            printf("  [%lu] %lu pencere birlesti, %lu us:\n",
+            printf("  [%lu] %lu windows voted, %lu us:\n",
                    (unsigned long)d.inference, (unsigned long)d.merged,
                    (unsigned long)d.last_time_us);
             for (int r = 0; r < 3; r++) {
@@ -2635,8 +2641,8 @@ static void cmd_recognize(bool gate_ignore) {
         }
 
         if (time_reached(next)) {
-            printf("  kare %lu  kapi %%%lu  ikili %lu (red %lu, son p=%.2f)  "
-                   "cikarim %lu  atlanan %lu  bant %.1f dB  taban %.1f dB  "
+            printf("  frames %lu  gate %%%lu  binary %lu (rejected %lu, last p=%.2f)  "
+                   "inference %lu  skipped %lu  band %.1f dB  floor %.1f dB  "
                    "overrun %lu\n",
                    (unsigned long)d.frame,
                    (unsigned long)(d.frame ? d.gate_open * 100 / d.frame : 0),
@@ -2654,62 +2660,64 @@ static void cmd_recognize(bool gate_ignore) {
     pb_recognizer_read(&d);
     pb_recognizer_stop();
 
-    printf("\n  toplam kare %lu (%lu kapi acik, %%%lu)\n",
+    printf("\n  total frames %lu (%lu with the gate open, %%%lu)\n",
            (unsigned long)d.frame, (unsigned long)d.gate_open,
            (unsigned long)(d.frame ? d.gate_open * 100 / d.frame : 0));
-    printf("  cikarim %lu, kapi kapali diye atlanan pencere %lu\n",
+    printf("  inferences %lu, windows skipped for a closed gate %lu\n",
            (unsigned long)d.inference, (unsigned long)d.skipped);
-    printf("  ikili ag calisti %lu, \"kus degil\" dedigi (tur agi atlandi) %lu\n",
+    printf("  binary net ran %lu, said \"not a bird\" (species net skipped) %lu\n",
            (unsigned long)d.binary_ran, (unsigned long)d.binary_red);
-    printf("  ses halkasi overrun %lu  (0 olmali — degilse cikarim halkadan\n"
-           "                            uzun suruyor, audio_i2s.h'ye bakin)\n\n",
+    printf("  audio ring overrun %lu  (should be 0; if not, inference is taking\n"
+           "                          longer than the ring, see audio_i2s.h)\n\n",
            (unsigned long)d.overrun);
 }
 
-/* ── c: SONUÇ EKRANI — M7'nin ilk teslimi ─────────────────────────────────
+/* ── c: THE RESULT SCREEN ─────────────────────────────────────────────────
  *
- * `k` ne yapıyorsa aynısı, ama sonuç seri porta değil EKRANA gidiyor:
- * solda tanıma kartı (tür adı + güven + ilk 3 + sayaçlar), sağda canlı
- * spektrogram. Aradaki karar kuralı ai/decision.c'de; eşikleri ölçüldü
- * (models/thresholds.txt, tools/measure_thresholds.py).
+ * The same thing `k` does, except the result goes to the SCREEN rather than
+ * the serial console: the recognition card on the left (species name +
+ * confidence + top 3 + counters) and the live spectrogram on the right. The
+ * decision rule in between lives in ai/decision.c, and its thresholds were
+ * measured (models/thresholds.txt, tools/measure_thresholds.py).
  *
- * İŞ BÖLÜMÜ:
- *   core 1  ses -> mel -> kapı -> tür ağı -> birleştirme   (ai/recognizer.c)
- *   core 0  burası: kuyruğu boşalt, karar kuralı, LVGL, QSPI
+ * THE SPLIT OF WORK:
+ *   core 1  audio -> mel -> gate -> species net -> vote  (ai/recognizer.c)
+ *   core 0  here: drain the queue, decision rule, LVGL, QSPI
  *
- * Mel halkası motor çalışırken core 1'in malı (ai/recognizer.h uyarısı); core 0
- * spektrogram sütunlarını `pb_recognizer_get_mel()` kuyruğundan alıyor, mel'e
- * doğrudan dokunmuyor.
+ * While the engine runs the mel ring belongs to core 1 (see the warning in
+ * ai/recognizer.h); core 0 takes spectrogram columns from the
+ * `pb_recognizer_get_mel()` queue and never touches mel directly.
  *
- * ⛔ AKUSTİK DOĞRULAMAYI PC'DEN SES ÇALARAK YAPMAYIN (§5.5): bilgisayarda
- * kulaklık takılı. Bu ekranın kuş sesiyle sınanmasını kullanıcıdan isteyin.
+ * NOTE ON ACOUSTIC TESTING: the development machine has headphones plugged
+ * in, so testing this screen with real birdsong has to be done by hand.
  */
 static void cmd_result_screen(void) {
-    printf("\n=== SONUC EKRANI (M7) ===\n");
-    printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
-    printf("EKRAN 0 dinleme (solda ilk 3 tur, sagda spektrogram)\n");
-    printf("EKRAN 1 gunluk  (tam genislik, taninan turlerin listesi)\n");
-    printf("Gecis: ekranda YATAY KAYDIRMA, ya da bosluk/'n' tusu.\n");
-    printf("Karar kurali: girme %.2f / cikma %.2f, en az %u pencere, "
-           "tutma %u ms\n", (double)PB_DECISION_ENTER_THRESHOLD,
+    printf("\n=== RESULT SCREEN ===\n");
+    printf("Hold the device in landscape with the USB socket on the RIGHT.\n");
+    printf("SCREEN 0 listen (top 3 species on the left, spectrogram on the right)\n");
+    printf("SCREEN 1 log    (full width, the species identified so far)\n");
+    printf("To switch: SWIPE HORIZONTALLY on the screen, or press space or 'n'.\n");
+    printf("Decision rule: enter %.2f / exit %.2f, at least %u windows, "
+           "hold %u ms\n", (double)PB_DECISION_ENTER_THRESHOLD,
            (double)PB_DECISION_EXIT_THRESHOLD, (unsigned)PB_DECISION_MIN_WINDOWS,
            (unsigned)PB_DECISION_HOLD_MS);
-    printf("Cikmak icin baska bir tusa basin.\n\n");
+    printf("Press any other key to exit.\n\n");
 
     backlight_set(true);
-    /* `a` demosundaki gerekçe: fill, lcd_blit'in atlama şeridini bilinen bir
-     * hâle getiriyor — teşhis komutlarından sonra iz kalmasın. */
+    /* Same reasoning as the `a` demo: the fill puts lcd_blit's skip strip
+     * into a known state, so no trail is left after the diagnostic
+     * commands. */
     pb_lcd_fill(0x0000);
     pb_lv_flush_counters_reset();
     pb_lv_init();
 
     pb_ui_create();
-    /* Arayüzü önce çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi
-     * sahip olduğu dilimlerin tamamını boyuyor. */
+    /* Draw the UI FIRST, then hand the right strip to the spectrogram:
+     * LVGL's first draw paints all of the slices it owns. */
     for (int i = 0; i < 4; i++) { pb_ui_tick(); sleep_ms(5); }
     pb_spec_init();
 
-    pb_mel_init();   /* filtre bankası core 1 başlamadan hazır olsun */
+    pb_mel_init();   /* the filter bank must be ready before core 1 starts */
 
     /* ⚠ HAT AÇILIŞTA ÇALIŞMIYOR — cihaz artık sürekli dinlemiyor
      * (kullanıcının kararı). Dinlemeyi kayıt butonu başlatıyor; bu döngü her
@@ -2753,7 +2761,7 @@ static void cmd_result_screen(void) {
                     seen = 0;
                     printf("  [kayit BASLADI]\n");
                 } else {
-                    printf("[!] tanima hatti baslatilamadi.\n");
+                    printf("[!] the recognition pipeline could not be started.\n");
                     pb_ui_set_recording(false);
                 }
             } else {
