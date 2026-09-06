@@ -39,28 +39,28 @@
  *
  * Bedeli: cagri basina bir 32 bit timer okumasi + birkac sayac. `w` komutu
  * bunlari okuyor; `o`/`a` sonrasi da bakilabilir. */
-volatile uint32_t pb_qspi_wait_cagri;       /* toplam QSPI_WaitIdle cagrisi   */
-volatile uint32_t pb_qspi_wait_asim;        /* zaman asimina giren cagri      */
-volatile uint32_t pb_qspi_wait_sm_kapali;   /* girerken SM etkin degildi      */
-volatile uint32_t pb_qspi_wait_fifo_dolu;   /* girerken TX FIFO bos DEGILDI   */
-volatile uint32_t pb_qspi_wait_kalinti;     /* CIKARKEN FIFO hala bos degil   */
-volatile uint32_t pb_qspi_wait_bekledi;     /* dongu en az bir kez dondu      */
-volatile uint32_t pb_qspi_wait_fifo_azami;  /* girerkenki en yuksek FIFO      */
-volatile uint32_t pb_qspi_wait_donme_azami; /* en cok dongu sayisi (tek cagri)*/
-volatile uint32_t pb_qspi_wait_us_azami;    /* en uzun tek bekleme (us)       */
-volatile uint32_t pb_qspi_wait_us_top;      /* toplam bekleme (us)            */
+volatile uint32_t pb_qspi_wait_calls;       /* toplam QSPI_WaitIdle cagrisi   */
+volatile uint32_t pb_qspi_wait_timeout;        /* zaman asimina giren cagri      */
+volatile uint32_t pb_qspi_wait_sm_off;   /* girerken SM etkin degildi      */
+volatile uint32_t pb_qspi_wait_fifo_full;   /* girerken TX FIFO bos DEGILDI   */
+volatile uint32_t pb_qspi_wait_residue;     /* CIKARKEN FIFO hala bos degil   */
+volatile uint32_t pb_qspi_wait_waited;     /* dongu en az bir kez dondu      */
+volatile uint32_t pb_qspi_wait_fifo_max;  /* girerkenki en yuksek FIFO      */
+volatile uint32_t pb_qspi_wait_spin_max; /* en cok dongu sayisi (tek cagri)*/
+volatile uint32_t pb_qspi_wait_us_max;    /* en uzun tek bekleme (us)       */
+volatile uint32_t pb_qspi_wait_us_total;      /* toplam bekleme (us)            */
 
-void pb_qspi_sayaclari_sifirla(void) {
-    pb_qspi_wait_cagri = 0;
-    pb_qspi_wait_asim = 0;
-    pb_qspi_wait_sm_kapali = 0;
-    pb_qspi_wait_fifo_dolu = 0;
-    pb_qspi_wait_kalinti = 0;
-    pb_qspi_wait_bekledi = 0;
-    pb_qspi_wait_fifo_azami = 0;
-    pb_qspi_wait_donme_azami = 0;
-    pb_qspi_wait_us_azami = 0;
-    pb_qspi_wait_us_top = 0;
+void pb_qspi_counters_reset(void) {
+    pb_qspi_wait_calls = 0;
+    pb_qspi_wait_timeout = 0;
+    pb_qspi_wait_sm_off = 0;
+    pb_qspi_wait_fifo_full = 0;
+    pb_qspi_wait_residue = 0;
+    pb_qspi_wait_waited = 0;
+    pb_qspi_wait_fifo_max = 0;
+    pb_qspi_wait_spin_max = 0;
+    pb_qspi_wait_us_max = 0;
+    pb_qspi_wait_us_total = 0;
 }
 
 pio_qspi_t qspi = {
@@ -131,12 +131,12 @@ void QSPI_WaitIdle(pio_qspi_t qspi){
     /* --- TESHIS (§9n) — fonksiyon gercekten bekliyor mu? -------------------
      * Girerken FIFO'da bayt varsa bekleme GEREKLI demektir; cikarken hala
      * varsa bekleme ISE YARAMAMIS demektir. Ikisi de sayiliyor. */
-    pb_qspi_wait_cagri++;
-    if (!((qspi.pio->ctrl >> qspi.sm) & 1u)) pb_qspi_wait_sm_kapali++;
+    pb_qspi_wait_calls++;
+    if (!((qspi.pio->ctrl >> qspi.sm) & 1u)) pb_qspi_wait_sm_off++;
     uint32_t giris_fifo = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
     if (giris_fifo) {
-        pb_qspi_wait_fifo_dolu++;
-        if (giris_fifo > pb_qspi_wait_fifo_azami) pb_qspi_wait_fifo_azami = giris_fifo;
+        pb_qspi_wait_fifo_full++;
+        if (giris_fifo > pb_qspi_wait_fifo_max) pb_qspi_wait_fifo_max = giris_fifo;
     }
     uint32_t t0 = timer_hw->timerawl;
     uint32_t donme = 0;
@@ -144,19 +144,19 @@ void QSPI_WaitIdle(pio_qspi_t qspi){
     qspi.pio->fdebug = stall;                       /* bayragi temizle */
     absolute_time_t bitis = make_timeout_time_ms(50);
     while (!(qspi.pio->fdebug & stall)) {
-        if (time_reached(bitis)) { pb_qspi_wait_asim++; break; }  /* SM kapali/tikali */
+        if (time_reached(bitis)) { pb_qspi_wait_timeout++; break; }  /* SM kapali/tikali */
         donme++;
         tight_loop_contents();
     }
 
     uint32_t us = timer_hw->timerawl - t0;
-    pb_qspi_wait_us_top += us;
-    if (us > pb_qspi_wait_us_azami) pb_qspi_wait_us_azami = us;
+    pb_qspi_wait_us_total += us;
+    if (us > pb_qspi_wait_us_max) pb_qspi_wait_us_max = us;
     if (donme) {
-        pb_qspi_wait_bekledi++;
-        if (donme > pb_qspi_wait_donme_azami) pb_qspi_wait_donme_azami = donme;
+        pb_qspi_wait_waited++;
+        if (donme > pb_qspi_wait_spin_max) pb_qspi_wait_spin_max = donme;
     }
-    if (!pio_sm_is_tx_fifo_empty(qspi.pio, qspi.sm)) pb_qspi_wait_kalinti++;
+    if (!pio_sm_is_tx_fifo_empty(qspi.pio, qspi.sm)) pb_qspi_wait_residue++;
 }
 
 /******************************************************************************

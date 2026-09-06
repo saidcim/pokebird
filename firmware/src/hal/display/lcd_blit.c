@@ -50,7 +50,7 @@ static uint32_t s_imlec_x1, s_imlec_x2, s_imlec_satir;
 static uint16_t s_serit[PB_PANEL_H][2];      /* big-endian, panele gittiği hâliyle */
 static bool     s_serit_gecerli = false;
 
-void pb_lcd_imlec_gecersiz(void) {
+void pb_lcd_cursor_invalidate(void) {
     s_imlec_gecerli = false;
     s_serit_gecerli = false;
 }
@@ -75,21 +75,21 @@ static void akis_basla_ic(uint8_t ramwr) {
  * Teşhis komutları paneli elle sürüyor; her çağrı yerinde geçersiz kılmayı
  * hatırlamak zorunda kalmak sessiz hataya davetiyeydi (bir sonraki blit
  * imlecin yanlış yerde olduğunu bilmeden RAMWRC ile devam ederdi). */
-void pb_lcd_sutun_penceresi(uint32_t x1, uint32_t x2) {
+void pb_lcd_column_window(uint32_t x1, uint32_t x2) {
     caset_ic(x1, x2);
-    pb_lcd_imlec_gecersiz();
+    pb_lcd_cursor_invalidate();
 }
 
-void pb_lcd_akis_basla(uint8_t ramwr) {
+void pb_lcd_stream_begin(uint8_t ramwr) {
     akis_basla_ic(ramwr);
-    pb_lcd_imlec_gecersiz();
+    pb_lcd_cursor_invalidate();
 }
 
 /* Son yazılım aşamasının dökümü: DMA'ya giden `s_row`'un kendisi. Buraya
  * kadar her şey ölçüldü (kaynak veri, devrik okuma, satır adımı, hizalama,
  * CS zamanlaması); geriye doğrulanmamış tek aşama buydu. */
 static int s_satir_dokum = 0;
-void pb_lcd_satir_dokumu_iste(int adet) { s_satir_dokum = adet; }
+void pb_lcd_request_row_dump(int adet) { s_satir_dokum = adet; }
 
 /* ── Aktarım yığını — rsvpnano'nun tekniği ────────────────────────────────
  *
@@ -109,8 +109,8 @@ void pb_lcd_satir_dokumu_iste(int adet) { s_satir_dokum = adet; }
  * Yığın 4096 piksel = 8 KB. LVGL'in en geniş flush'ı 172 sütun; 4096/172 = 23
  * satır, tipik dar bant (32 sütun) için 128 satır — yani neredeyse her
  * dikdörtgen TEK DMA'ya sığıyor. */
-#define PB_YIGIN_PIKSEL 4096
-static uint16_t s_yigin[PB_YIGIN_PIKSEL];
+#define PB_STACK_PIXELS 4096
+static uint16_t s_yigin[PB_STACK_PIXELS];
 
 static void yigini_gonder(uint32_t piksel) {
     dma_channel_configure(dma_tx, &c,
@@ -142,7 +142,7 @@ static void satiri_gonder(uint32_t n) {
     while (dma_channel_is_busy(dma_tx)) tight_loop_contents();
 }
 
-void pb_lcd_akis_renk(uint16_t renk, uint32_t piksel) {
+void pb_lcd_stream_color(uint16_t renk, uint32_t piksel) {
     const uint16_t be = (uint16_t)((renk >> 8) | (renk << 8));
     for (uint32_t i = 0; i < PB_PANEL_W; i++) s_row[i] = be;
 
@@ -153,7 +153,7 @@ void pb_lcd_akis_renk(uint16_t renk, uint32_t piksel) {
     }
 }
 
-void pb_lcd_akis_satir(const uint16_t *src, uint32_t n) {
+void pb_lcd_stream_row(const uint16_t *src, uint32_t n) {
     if (!src || n == 0 || n > PB_PANEL_W) return;
     for (uint32_t i = 0; i < n; i++) {
         /* Panel big-endian RGB565 istiyor */
@@ -162,7 +162,7 @@ void pb_lcd_akis_satir(const uint16_t *src, uint32_t n) {
     satiri_gonder(n);
 }
 
-void pb_lcd_akis_bitir(void) {
+void pb_lcd_stream_end(void) {
     QSPI_Deselect(qspi);
 }
 
@@ -189,7 +189,7 @@ static void serit_ile_atla(uint32_t y) {
         satiri_gonder(n * 2);
         yazilan += n;
     }
-    pb_lcd_akis_bitir();
+    pb_lcd_stream_end();
 }
 
 /**
@@ -247,7 +247,7 @@ void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
     imleci_konumla(x1, x2, y);
 
     /* Satır satır DEĞİL, yığın yığın: bitişik tampon + tek DMA (yukarıya bak) */
-    uint32_t satir_basi = PB_YIGIN_PIKSEL / pw;
+    uint32_t satir_basi = PB_STACK_PIXELS / pw;
     if (satir_basi == 0) satir_basi = 1;
 
     for (uint32_t row0 = 0; row0 < h; row0 += satir_basi) {
@@ -273,7 +273,7 @@ void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
         yigini_gonder(n * pw);
     }
 
-    pb_lcd_akis_bitir();
+    pb_lcd_stream_end();
     imleci_isaretle(x1, x2, y + h);
 }
 
@@ -292,7 +292,7 @@ void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
     imleci_konumla(x1, x2, y);
 
-    uint32_t satir_basi = PB_YIGIN_PIKSEL / pw;
+    uint32_t satir_basi = PB_STACK_PIXELS / pw;
     if (satir_basi == 0) satir_basi = 1;
 
     for (uint32_t row0 = 0; row0 < h; row0 += satir_basi) {
@@ -317,7 +317,7 @@ void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
         yigini_gonder(n * pw);
     }
 
-    pb_lcd_akis_bitir();
+    pb_lcd_stream_end();
     imleci_isaretle(x1, x2, y + h);
 }
 
@@ -327,8 +327,8 @@ void pb_lcd_fill(uint16_t color) {
      * satıra biniyordu (§9n'in baş belirtisi: "ekran temizlenmiyor"). */
     caset_ic(0, PB_PANEL_W - 1);
     akis_basla_ic(0x2C);
-    pb_lcd_akis_renk(color, (uint32_t)PB_PANEL_W * PB_PANEL_H);
-    pb_lcd_akis_bitir();
+    pb_lcd_stream_color(color, (uint32_t)PB_PANEL_W * PB_PANEL_H);
+    pb_lcd_stream_end();
 
     const uint16_t be = (uint16_t)((color >> 8) | (color << 8));
     for (uint32_t r = 0; r < PB_PANEL_H; r++) { s_serit[r][0] = be; s_serit[r][1] = be; }
@@ -336,9 +336,9 @@ void pb_lcd_fill(uint16_t color) {
     imleci_isaretle(0, PB_PANEL_W - 1, PB_PANEL_H);
 }
 
-void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel) {
-    pb_lcd_akis_basla(0x2c);
-    pb_lcd_akis_renk(renk, piksel);
-    pb_lcd_akis_bitir();
-    pb_lcd_imlec_gecersiz();
+void pb_lcd_stream_flat(uint16_t renk, uint32_t piksel) {
+    pb_lcd_stream_begin(0x2c);
+    pb_lcd_stream_color(renk, piksel);
+    pb_lcd_stream_end();
+    pb_lcd_cursor_invalidate();
 }

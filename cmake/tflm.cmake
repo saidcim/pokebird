@@ -127,7 +127,7 @@ target_compile_definitions(tflm PUBLIC
     # CMSIS_NN olmadan kernels/conv.h gibi başlıklar Register_CONV_2D_INT8()'i
     # `inline` olarak KENDİSİ tanımlıyor ve cmsis_nn/conv.cc'nin gerçek
     # tanımıyla çakışıyor. PUBLIC olmak zorunda: bu başlıkları
-    # micro_mutable_op_resolver.h üzerinden src/ai/tur_agi.cc de görüyor,
+    # micro_mutable_op_resolver.h üzerinden src/ai/species_net.cc de görüyor,
     # tanımlar uyuşmazsa ODR ihlali olur ve çakışma sessiz kalır.
     CMSIS_NN
 )

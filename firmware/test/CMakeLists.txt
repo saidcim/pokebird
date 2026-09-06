@@ -18,9 +18,9 @@ add_executable(dsp_test
     ../src/dsp/fft.c
     ../src/dsp/mel.c
     ../src/dsp/gate.c
-    # Karar kurali (ai/karar.c) donanimsiz: histerezis ve tutma sureleri
+    # Karar kurali (ai/decision.c) donanimsiz: histerezis ve tutma sureleri
     # ancak zaman ilerletilerek sinanabilir, kartta bunu yapmak pahali.
-    ../src/ai/karar.c
+    ../src/ai/decision.c
     # Türkçe büyütme donanımsız: `i`->`İ` ve `ı`->`I` bayt uzunluğunu
     # değiştiriyor, tampon sınırı gerçek bir risk ve hatayı ekranda ancak
     # Türkçe okuyan biri yakalar.

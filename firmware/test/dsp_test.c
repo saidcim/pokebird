@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ai/karar.h"
+#include "ai/decision.h"
 #include "dsp/fft.h"
 #include "dsp/gate.h"
 #include "dsp/mel.h"
@@ -203,96 +203,96 @@ static void test_gate(void) {
     printf("        %s\n", msg);
 }
 
-/* ── Karar kuralı (ai/karar.c) ────────────────────────────────────────────
+/* ── Karar kuralı (ai/decision.c) ────────────────────────────────────────────
  * Ekranın zıplamaması bu kurala bağlı ve kuralın tamamı ZAMANA bağlı:
  * histerezis, tutma süresi, ses göstergesinin sönmesi. Kartta sınamak için
  * gerçek saniyeler beklemek gerekirdi; burada zamanı elle ilerletiyoruz. */
 /** Yeni bir birleştirme sonucu gelmiş gibi bir adım ilerlet. */
-static void sonuc(pb_karar_t *k, uint32_t ms, int16_t sinif, float p,
+static void sonuc(pb_decision_t *k, uint32_t ms, int16_t sinif, float p,
                   uint32_t birlesen) {
-    pb_karar_girdi_t g = { .simdi_ms = ms, .kapi_acik = true,
+    pb_decision_input_t g = { .simdi_ms = ms, .kapi_acik = true,
                            .yeni_sonuc = true, .sinif = sinif,
                            .olasilik = p, .birlesen = birlesen };
-    pb_karar_guncelle(k, &g);
+    pb_decision_update(k, &g);
 }
 
 /** Yeni sonuç YOKken bir adım ilerlet (zaman aşımları burada işliyor). */
-static void bos(pb_karar_t *k, uint32_t ms, bool kapi) {
-    pb_karar_girdi_t g = { .simdi_ms = ms, .kapi_acik = kapi,
+static void bos(pb_decision_t *k, uint32_t ms, bool kapi) {
+    pb_decision_input_t g = { .simdi_ms = ms, .kapi_acik = kapi,
                            .yeni_sonuc = false, .sinif = -1,
                            .olasilik = 0.0f, .birlesen = 0 };
-    pb_karar_guncelle(k, &g);
+    pb_decision_update(k, &g);
 }
 
 static void test_karar(void) {
     printf("Karar kurali (esik + histerezis + tutma):\n");
-    pb_karar_t k;
+    pb_decision_t k;
     char msg[160];
 
     /* 1) Açılış: kapı hiç açılmadıysa "dinliyor". */
-    pb_karar_sifirla(&k, 10000);
+    pb_decision_reset(&k, 10000);
     bos(&k, 10000, false);
-    check(k.kip == PB_KARAR_DINLIYOR && k.sinif < 0,
+    check(k.kip == PB_DECISION_LISTENING && k.sinif < 0,
           "acilista dinliyor", "baska bir kipte basladi");
 
     /* 2) Kapı açılınca ses göstergesi, kapanınca SES_TUT_MS sonra sönüyor. */
     bos(&k, 10100, true);
-    const bool ses_yandi = (k.kip == PB_KARAR_SES);
-    bos(&k, 10100 + PB_KARAR_SES_TUT_MS + 1, false);
-    check(ses_yandi && k.kip == PB_KARAR_DINLIYOR,
+    const bool ses_yandi = (k.kip == PB_DECISION_SOUND);
+    bos(&k, 10100 + PB_DECISION_SOUND_HOLD_MS + 1, false);
+    check(ses_yandi && k.kip == PB_DECISION_LISTENING,
           "kapi acilip kapaninca ses gostergesi sonuyor",
           ses_yandi ? "sonmedi" : "hic yanmadi");
 
     /* 3) Çıkma eşiğiyle girme eşiği arasındaki güven TÜR yazdırmıyor. */
-    pb_karar_sifirla(&k, 20000);
-    sonuc(&k, 20000, 5, 0.5f * (PB_KARAR_GIRIS_ESIK + PB_KARAR_CIKIS_ESIK),
-          PB_KARAR_MIN_PENCERE);
-    check(k.kip == PB_KARAR_BELIRSIZ && k.sinif == 5,
+    pb_decision_reset(&k, 20000);
+    sonuc(&k, 20000, 5, 0.5f * (PB_DECISION_ENTER_THRESHOLD + PB_DECISION_EXIT_THRESHOLD),
+          PB_DECISION_MIN_WINDOWS);
+    check(k.kip == PB_DECISION_UNSURE && k.sinif == 5,
           "esikler arasi guven = belirsiz", "kip yanlis");
 
     /* 4) Girme eşiği aşılınca TÜR. */
-    sonuc(&k, 21000, 5, PB_KARAR_GIRIS_ESIK + 0.05f, PB_KARAR_MIN_PENCERE);
-    check(k.kip == PB_KARAR_TUR && k.sinif == 5, "girme esigi -> TUR",
+    sonuc(&k, 21000, 5, PB_DECISION_ENTER_THRESHOLD + 0.05f, PB_DECISION_MIN_WINDOWS);
+    check(k.kip == PB_DECISION_SPECIES && k.sinif == 5, "girme esigi -> TUR",
           "TUR'a gecmedi");
 
     /* 5) HİSTEREZİS: güven girme eşiğinin ALTINA düşse de, çıkma eşiğinin
      *    üstünde kaldığı sürece aynı tür TUR olarak kalıyor. Ekranın
      *    zıplamamasını sağlayan madde bu. */
     for (uint32_t t = 22000; t <= 25000; t += 1000) {
-        sonuc(&k, t, 5, PB_KARAR_CIKIS_ESIK + 0.02f, PB_KARAR_MIN_PENCERE);
+        sonuc(&k, t, 5, PB_DECISION_EXIT_THRESHOLD + 0.02f, PB_DECISION_MIN_WINDOWS);
     }
     snprintf(msg, sizeof(msg), "kip %d sinif %d", (int)k.kip, (int)k.sinif);
-    check(k.kip == PB_KARAR_TUR && k.sinif == 5,
+    check(k.kip == PB_DECISION_SPECIES && k.sinif == 5,
           "girme esiginin altinda ama cikma esiginin ustunde: TUR kaliyor", msg);
 
     /* 6) Başka bir tür ancak GİRME eşiğiyle yerini alabiliyor. */
-    sonuc(&k, 26000, 9, PB_KARAR_CIKIS_ESIK + 0.02f, PB_KARAR_MIN_PENCERE);
+    sonuc(&k, 26000, 9, PB_DECISION_EXIT_THRESHOLD + 0.02f, PB_DECISION_MIN_WINDOWS);
     const bool degismedi = (k.sinif == 5);
-    sonuc(&k, 27000, 9, PB_KARAR_GIRIS_ESIK + 0.05f, PB_KARAR_MIN_PENCERE);
+    sonuc(&k, 27000, 9, PB_DECISION_ENTER_THRESHOLD + 0.05f, PB_DECISION_MIN_WINDOWS);
     check(degismedi && k.sinif == 9,
           "yeni tur yalnizca girme esigiyle yer aliyor",
           degismedi ? "girme esiginde de degismedi" : "cikma esiginde degisti");
 
     /* 7) Destek kesilince TUT_MS boyunca ekranda kalıyor, sonra siliniyor. */
-    bos(&k, 27000 + PB_KARAR_TUT_MS - 100, false);
-    const bool duruyor = (k.kip == PB_KARAR_TUR && k.sinif == 9);
-    bos(&k, 27000 + PB_KARAR_TUT_MS + 100, false);
+    bos(&k, 27000 + PB_DECISION_HOLD_MS - 100, false);
+    const bool duruyor = (k.kip == PB_DECISION_SPECIES && k.sinif == 9);
+    bos(&k, 27000 + PB_DECISION_HOLD_MS + 100, false);
     snprintf(msg, sizeof(msg), "kip %d sinif %d", (int)k.kip, (int)k.sinif);
-    check(duruyor && k.kip == PB_KARAR_DINLIYOR && k.sinif < 0,
+    check(duruyor && k.kip == PB_DECISION_LISTENING && k.sinif < 0,
           "destek kesilince tutma suresi sonunda siliniyor",
           duruyor ? msg : "tutma suresi dolmadan silindi");
 
     /* 8) Negatif sınıf hiçbir güvende tür adı yazdırmıyor — sahadaki en
-     *    pahalı hata "gürültüyü kuş sanmak" (models/esik.txt). */
-    pb_karar_sifirla(&k, 40000);
-    sonuc(&k, 40000, PB_KARAR_NEGATIF_SINIF, 0.99f, PB_KARAR_MIN_PENCERE);
-    check(k.sinif < 0 && k.kip != PB_KARAR_TUR,
+     *    pahalı hata "gürültüyü kuş sanmak" (models/thresholds.txt). */
+    pb_decision_reset(&k, 40000);
+    sonuc(&k, 40000, PB_DECISION_NEGATIVE_CLASS, 0.99f, PB_DECISION_MIN_WINDOWS);
+    check(k.sinif < 0 && k.kip != PB_DECISION_SPECIES,
           "negatif sinif ekrana tur yazdirmiyor", "negatif sinif gosterildi");
 
     /* 9) Yeterince pencere birleşmediyse karar yok: ölçüldü, 1 pencerede
-     *    isabet %70,1, 3 pencerede %84,9 (models/esik.txt). */
-    pb_karar_sifirla(&k, 50000);
-    sonuc(&k, 50000, 5, 0.95f, PB_KARAR_MIN_PENCERE - 1);
+     *    isabet %70,1, 3 pencerede %84,9 (models/thresholds.txt). */
+    pb_decision_reset(&k, 50000);
+    sonuc(&k, 50000, 5, 0.95f, PB_DECISION_MIN_WINDOWS - 1);
     check(k.sinif < 0, "az pencereyle karar verilmiyor", "erken karar verdi");
 }
 

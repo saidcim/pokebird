@@ -23,7 +23,7 @@
  *
  * ⚠ 24 KB YETMEDİ — ÖLÇÜLDÜ, tahmin değil. Eski yorum "tek ekranlık basit bir
  * arayüz için bol" diyordu ve arayüz İKİ ekrana çıkınca yanlış oldu.
- * `tools/arayuz_onizle` (host, cihazla aynı lv_conf) `lv_mem_monitor` ile
+ * `tools/ui_preview` (host, cihazla aynı lv_conf) `lv_mem_monitor` ile
  * ölçtü:
  *
  *     ekran 0 (dinleme) kurulduktan sonra:  16.384 / 20.624 bayt  = %80 dolu
@@ -34,7 +34,7 @@
  * host'ta segfault, kartta ise sessizce eksik/bozuk çizilen bir ekran.
  *
  * 64 KB SEÇİLMİŞTİ ama M7'de (Aşama-1 ikili ağ eklenirken, §9o adım 3)
- * SRAM'e ihtiyaç çıkınca bu havuzun gerçek kullanımı `tools/arayuz_onizle`
+ * SRAM'e ihtiyaç çıkınca bu havuzun gerçek kullanımı `tools/ui_preview`
  * ile YENİDEN ÖLÇÜLDÜ: iki ekran birlikte kurulunca **22.112 / 60.512 bayt
  * (%37)**. Eski "iki ekran ~33 KB" tahminiydi, ölçülen daha düşük çıktı —
  * 64 KB'ın büyük kısmı hiç kullanılmıyordu.
@@ -69,7 +69,7 @@
  * edilmemişti. Yeni arayüz güven çubukları (yarıçap 3), sıra rozetleri
  * (daire) ve sayfa noktaları üzerine kurulu; hepsi kaybolmuştu.
  *
- * `tools/arayuz_onizle` ile YAKALANDI: ayraç çizgileri (yarıçap 0) çiziliyor,
+ * `tools/ui_preview` ile YAKALANDI: ayraç çizgileri (yarıçap 0) çiziliyor,
  * çubuklar ve rozetler çizilmiyordu. Kartta da aynısı oluyordu. */
 #define LV_DRAW_SW_COMPLEX      1
 

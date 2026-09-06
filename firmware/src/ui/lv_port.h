@@ -30,14 +30,14 @@ void pb_lv_tick(void);
  * Panel sütun aralığını 2 piksele yuvarlıyor; sütun sayısı tek olursa veri
  * her satırda bir piksel kayar ve yazı yatay sürüklenmiş görünür.
  * Göz gerektirmeyen ölçüm: `a` ve `u` çıkışında basılıyor. */
-extern uint32_t pb_lv_flush_say;
-extern uint32_t pb_lv_flush_hizasiz;
-extern uint32_t pb_lv_flush_stride_farkli;
+extern uint32_t pb_lv_flush_count;
+extern uint32_t pb_lv_flush_unaligned;
+extern uint32_t pb_lv_flush_stride_differs;
 extern uint32_t pb_lv_flush_w_min, pb_lv_flush_w_max;
-extern int32_t  pb_lv_son_x1, pb_lv_son_x2, pb_lv_son_y1, pb_lv_son_y2;
-extern int32_t  pb_lv_son_stride_px, pb_lv_son_alan_w;
-extern uint32_t pb_lv_dilim_basim;      /* panele basılan dilim sayısı */
-void pb_lv_flush_sayaclari_sifirla(void);
+extern int32_t  pb_lv_last_x1, pb_lv_last_x2, pb_lv_last_y1, pb_lv_last_y2;
+extern int32_t  pb_lv_last_stride_px, pb_lv_last_area_w;
+extern uint32_t pb_lv_slice_press;      /* panele basılan dilim sayısı */
+void pb_lv_flush_counters_reset(void);
 
 /**
  * LVGL'in hangi dikey dilimleri çizdiğini bildir (bit d = dilim d, 128 px).
@@ -47,10 +47,10 @@ void pb_lv_flush_sayaclari_sifirla(void);
  * yerleşimlerine göre sahipliği bildiriyor: dinleme ekranı sağdaki iki dilimi
  * spektrograma bırakıyor, günlük ekranı beşini de kendi alıyor.
  */
-void pb_lv_dilim_sahibi_ayarla(uint32_t maske);
+void pb_lv_set_slice_owner(uint32_t maske);
 
 /** Bütün dilimleri kirlet — ekran değişiminde tam yeniden çizim için. */
-void pb_lv_tumunu_kirlet(void);
+void pb_lv_invalidate_all(void);
 
 /**
  * Ham dokunma noktasını ARAYÜZ koordinatlarında oku (0..639, 0..171).
@@ -63,11 +63,11 @@ void pb_lv_tumunu_kirlet(void);
  *
  * @return dokunma varsa true ve `ux`/`uy` yazılır; yoksa false.
  */
-bool pb_lv_dokunma_al(int32_t *ux, int32_t *uy);
+bool pb_lv_touch_get(int32_t *ux, int32_t *uy);
 
 /** Panel dışına düşüp reddedilen dokunma karesi sayısı — kullanıcının
  *  gözlediği "~4000'e sıçrama" bunun içinde. Göz gerektirmeyen ölçüm. */
-extern uint32_t pb_lv_dokunma_gecersiz;
+extern uint32_t pb_lv_touch_invalidate;
 
 /**
  * Sonraki `adet` flush alanını seri porta ASCII olarak dök — GÖZ GEREKMEZ.
@@ -76,12 +76,12 @@ extern uint32_t pb_lv_dokunma_gecersiz;
  * hem 90° devrik okumayı aynı anda sınıyor. Terminalde yazı düzgün
  * okunuyorsa bozulma daha aşağıda (panel/hat); okunmuyorsa LVGL tarafında.
  */
-void pb_lv_dokum_iste(int adet);
+void pb_lv_request_dump(int adet);
 
 /**
  * Kart framebuffer'ının TAMAMINI seri porta ASCII dök — GÖZ GEREKMEZ.
  *
- * `pb_lv_dokum_iste` yalnızca tek bir flush ALANINI gösteriyor; bu, kartın o
+ * `pb_lv_request_dump` yalnızca tek bir flush ALANINI gösteriyor; bu, kartın o
  * anki tam hâlini gösteriyor. İkisinin farkı teşhiste belirleyici:
  *
  *   döküm okunuyor  -> LVGL, yerleşim ve devrik yazım DOĞRU; bozulma panele
@@ -93,6 +93,6 @@ void pb_lv_dokum_iste(int adet);
  * satır x 128 sütun, soldan sağa ve yukarıdan aşağıya — yani ekrana bakınca
  * görülmesi gerekenle aynı düzen, beş parça hâlinde.
  */
-void pb_lv_kart_fb_dok(void);
+void pb_lv_dump_card_fb(void);
 
 #endif /* POKEBIRD_LV_PORT_H */

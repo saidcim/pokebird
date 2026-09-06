@@ -60,7 +60,7 @@ static const durak_t RAMPA[] = {
     {   0, 0x0B, 0x09, 0x08 },   /* ekran zemini — sessizlik              */
     {  56, 0x2E, 0x18, 0x0A },   /* köz                                    */
     { 128, 0x8A, 0x3F, 0x0C },   /* kızıl kehribar                         */
-    { 190, 0xFF, 0xB0, 0x20 },   /* PB_RENK_VURGU — tasarımın vurgusu      */
+    { 190, 0xFF, 0xB0, 0x20 },   /* PB_COLOR_ACCENT — tasarımın vurgusu      */
     { 255, 0xFF, 0xF2, 0xCC },   /* sıcak beyaz — tepe                     */
 };
 
@@ -110,7 +110,7 @@ void pb_spec_push_column(const uint8_t *bins, uint32_t n_bins) {
     write_ui_column(PB_SPEC_X0 + s_write_x, s_column);
 
     /* Bir sonraki sütunu imleçle işaretle: şeridin "şimdi"si belli olmazsa
-     * kayan görüntü okunmuyor. Renk PB_RENK_KENAR (0x3A332A) — arayüzün
+     * kayan görüntü okunmuyor. Renk PB_COLOR_BORDER (0x3A332A) — arayüzün
      * ayraç rengiyle aynı; eski koyu gri sıcak paletin içinde yabancı
      * duruyordu. */
     static uint16_t cursor[PB_SPEC_HEIGHT];

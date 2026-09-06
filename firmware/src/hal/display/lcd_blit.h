@@ -81,7 +81,7 @@ void pb_lcd_fill(uint16_t color);
  * tersi) yollayıp hangisinin düştüğünü görebilmek için. Pencereyi çağıran
  * ayarlar; bu fonksiyon yalnızca RAMWR + veri yolluyor.
  */
-void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel);
+void pb_lcd_stream_flat(uint16_t renk, uint32_t piksel);
 
 /**
  * Ham piksel akışı — panelin GERÇEK sözleşmesini ifade eden üçlü.
@@ -97,23 +97,23 @@ void pb_lcd_duz_akit(uint16_t renk, uint32_t piksel);
  * `basla` CS'i indirip komutu yollar, `renk` düz renk akıtır (kaç kez
  * çağrılırsa), `bitir` CS'i kaldırır. Pencereyi çağıran ayarlar.
  */
-void pb_lcd_akis_basla(uint8_t ramwr);
-void pb_lcd_akis_renk(uint16_t renk, uint32_t piksel);
+void pb_lcd_stream_begin(uint8_t ramwr);
+void pb_lcd_stream_color(uint16_t renk, uint32_t piksel);
 /** Tek satır (n piksel, normal RGB565) akıt; bayt sırasını kendi çevirir. */
-void pb_lcd_akis_satir(const uint16_t *src, uint32_t n);
-void pb_lcd_akis_bitir(void);
+void pb_lcd_stream_row(const uint16_t *src, uint32_t n);
+void pb_lcd_stream_end(void);
 
 /** Sütun aralığı (CASET, 0x2A). Kapsayıcı: x1 ve x2 dahil. */
-void pb_lcd_sutun_penceresi(uint32_t x1, uint32_t x2);
+void pb_lcd_column_window(uint32_t x1, uint32_t x2);
 
 /**
  * Panele bu dosyanın dışından komut/veri yollayan her kod bunu çağırmalı.
  * Sürücü imlecin nerede olduğunu takip ediyor; başkası panele yazınca bu
  * bilgi yanlışa döner ve bir sonraki blit sessizce yanlış yere düşer.
  */
-void pb_lcd_imlec_gecersiz(void);
+void pb_lcd_cursor_invalidate(void);
 
 /** Sonraki `adet` satırı DMA'ya giderken seri porta ASCII dök (teşhis). */
-void pb_lcd_satir_dokumu_iste(int adet);
+void pb_lcd_request_row_dump(int adet);
 
 #endif /* POKEBIRD_LCD_BLIT_H */

@@ -39,21 +39,21 @@ add_executable(pokebird
     firmware/src/dsp/gate.c
     firmware/src/ui/spectrogram.c
     firmware/src/ui/lv_port.c
-    firmware/src/ui/tema.c
+    firmware/src/ui/theme.c
     firmware/src/ui/text.c
-    firmware/src/ui/ekran_dinleme.c
-    firmware/src/ui/ekran_gunluk.c
-    firmware/src/ui/arayuz.c
-    # Yazı tipleri ÜRETİLMİŞ (tools/font_uret.py). LVGL'in gömülü
+    firmware/src/ui/screen_listen.c
+    firmware/src/ui/screen_log.c
+    firmware/src/ui/interface.c
+    # Yazı tipleri ÜRETİLMİŞ (tools/generate_fonts.py). LVGL'in gömülü
     # Montserrat'ında Türkçe harfler yok; bunlarda var (üretimde doğrulanıyor).
-    firmware/src/ui/fonts/pb_font_ad_18.c
-    firmware/src/ui/fonts/pb_font_kalin_13.c
-    firmware/src/ui/fonts/pb_font_dar_11.c
+    firmware/src/ui/fonts/pb_font_name_18.c
+    firmware/src/ui/fonts/pb_font_bold_13.c
+    firmware/src/ui/fonts/pb_font_narrow_11.c
     firmware/src/ui/fonts/pb_font_mono_10.c
-    firmware/src/ai/tur_agi.cc
-    firmware/src/ai/ikili_agi.cc
-    firmware/src/ai/tanima.c
-    firmware/src/ai/karar.c
+    firmware/src/ai/species_net.cc
+    firmware/src/ai/binary_net.cc
+    firmware/src/ai/recognizer.c
+    firmware/src/ai/decision.c
     firmware/src/ai/tflm_port.cc
 )
 
@@ -113,20 +113,20 @@ target_compile_options(pokebird PRIVATE
     -Wall -Wextra -Wno-unused-parameter
 )
 
-# TFLM tensor arena boyutu. Boş bırakılırsa firmware/src/ai/tur_agi.cc'deki ölçülmüş
+# TFLM tensor arena boyutu. Boş bırakılırsa firmware/src/ai/species_net.cc'deki ölçülmüş
 # varsayılan (120 KB) geçerli. Buradan ezmek iki işe yarıyor: yeni bir model
 # ölçülürken geçici olarak büyütmek, ve bss boyutunu tek değişken olarak
 # oynatıp yerleşim kaynaklı gerilemeleri A/B ile ayırmak (§5.17).
 #   cmake -S . -B build -DPB_TFLM_ARENA_BAYT=4096
-set(PB_TFLM_ARENA_BAYT "" CACHE STRING "TFLM tensor arena boyutu (bayt)")
-if(PB_TFLM_ARENA_BAYT)
+set(PB_TFLM_ARENA_BYTES "" CACHE STRING "TFLM tensor arena boyutu (bayt)")
+if(PB_TFLM_ARENA_BYTES)
     target_compile_definitions(pokebird PRIVATE
-        PB_TFLM_ARENA_BAYT=${PB_TFLM_ARENA_BAYT})
+        PB_TFLM_ARENA_BYTES=${PB_TFLM_ARENA_BYTES})
 endif()
 
-# Asama-1 ikili ag arena'si — ayni gerekce, firmware/src/ai/ikili_agi.cc'de.
-set(PB_IKILI_ARENA_BAYT "" CACHE STRING "Ikili ag TFLM tensor arena boyutu (bayt)")
-if(PB_IKILI_ARENA_BAYT)
+# Asama-1 ikili ag arena'si — ayni gerekce, firmware/src/ai/binary_net.cc'de.
+set(PB_BINARY_ARENA_BYTES "" CACHE STRING "Ikili ag TFLM tensor arena boyutu (bayt)")
+if(PB_BINARY_ARENA_BYTES)
     target_compile_definitions(pokebird PRIVATE
-        PB_IKILI_ARENA_BAYT=${PB_IKILI_ARENA_BAYT})
+        PB_BINARY_ARENA_BYTES=${PB_BINARY_ARENA_BYTES})
 endif()

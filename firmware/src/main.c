@@ -41,15 +41,15 @@
 #include "dsp/gate.h"
 #include "ui/spectrogram.h"
 #include "ui/lv_port.h"
-#include "ui/tema.h"
-#include "ai/tur_agi.h"
-#include "ai/ikili_agi.h"
-#include "ai/tanima.h"
-#include "ai/karar.h"
-#include "ai/siniflar.h"
-#include "ai/dogrulama_seti.h"
-#include "ai/ikili_dogrulama_seti.h"
-#include "ui/arayuz.h"
+#include "ui/theme.h"
+#include "ai/species_net.h"
+#include "ai/binary_net.h"
+#include "ai/recognizer.h"
+#include "ai/decision.h"
+#include "ai/classes.h"
+#include "ai/validation_set.h"
+#include "ai/binary_validation_set.h"
+#include "ui/interface.h"
 #include "lvgl.h"
 
 void pb_display_dma_init(void);   /* hal/display/dev_config.c */
@@ -69,12 +69,12 @@ static_assert(PB_PIN_BAT_ADC < NUM_BANK0_GPIOS,
 static_assert(PICO_FLASH_SIZE_BYTES == 16 * 1024 * 1024,
               "16 MB flash bekleniyor (PY25Q128HA).");
 
-/* Karar kuralı negatif sınıfın indeksini sabit olarak biliyor (ai/karar.h);
+/* Karar kuralı negatif sınıfın indeksini sabit olarak biliyor (ai/decision.h);
  * sınıf tablosu yeniden üretilip sınıf sayısı değişirse burada durmalı, çünkü
  * kayması "gürültüyü kuş sanmak" demek ve hiçbir yerde hata vermez. */
-static_assert(PB_KARAR_NEGATIF_SINIF == PB_SINIF_SAYISI - 1,
-              "Negatif sinif indeksi kaydi: ai/karar.h ile ai/siniflar.h "
-              "uyusmuyor (tools/sinif_tablosu.py yeniden mi calisti?).");
+static_assert(PB_DECISION_NEGATIVE_CLASS == PB_CLASS_COUNT - 1,
+              "Negatif sinif indeksi kaydi: ai/decision.h ile ai/classes.h "
+              "uyusmuyor (tools/class_table.py yeniden mi calisti?).");
 
 #define BL_PWM_WRAP     2048
 #define ES8311_I2C_ADDR 0x18
@@ -922,7 +922,7 @@ static void cmd_full_demo(void) {
      * konumlandırma 0/1. sütunlara siyah yazar ve iz bırakır — teşhis
      * komutlarından (`z`, `j`, `v`) sonra tam olarak bu olur. */
     pb_lcd_fill(0x0000);
-    pb_lv_flush_sayaclari_sifirla();
+    pb_lv_flush_counters_reset();
 
     bool dokunmatik = pb_lv_init();
     printf("  dokunmatik: %s\n", dokunmatik ? "hazir" : "yok (demoya engel degil)");
@@ -951,7 +951,7 @@ static void cmd_full_demo(void) {
     /* Spektrogramın dilimlerini LVGL'e ÇİZDİRME: arayüz artık tam genişlik
      * (640) ve LVGL varsayılan olarak beş dilimin de sahibi — bildirilmezse
      * kart ile şerit aynı bölgeye yazıp birbirini siler (lv_port.c). */
-    pb_lv_dilim_sahibi_ayarla(PB_LVGL_DILIM_MASKE_DINLEME);
+    pb_lv_set_slice_owner(PB_LVGL_SLICE_MASK_LISTEN);
 
     /* Kartı çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi kendi
      * dilimlerinin tamamını boyuyor. */
@@ -1057,12 +1057,12 @@ static void cmd_full_demo(void) {
     printf("  LVGL flush %lu, HIZASIZ %lu, satir adimi != alan_w: %lu\n"
            "  panel_w %lu..%lu, son alan ui x(%ld..%ld) y(%ld..%ld), "
            "adim %ld px / alan_w %ld px\n\n",
-           (unsigned long)pb_lv_flush_say, (unsigned long)pb_lv_flush_hizasiz,
-           (unsigned long)pb_lv_flush_stride_farkli,
+           (unsigned long)pb_lv_flush_count, (unsigned long)pb_lv_flush_unaligned,
+           (unsigned long)pb_lv_flush_stride_differs,
            (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max,
-           (long)pb_lv_son_x1, (long)pb_lv_son_x2,
-           (long)pb_lv_son_y1, (long)pb_lv_son_y2,
-           (long)pb_lv_son_stride_px, (long)pb_lv_son_alan_w);
+           (long)pb_lv_last_x1, (long)pb_lv_last_x2,
+           (long)pb_lv_last_y1, (long)pb_lv_last_y2,
+           (long)pb_lv_last_stride_px, (long)pb_lv_last_area_w);
 }
 
 /**
@@ -1151,8 +1151,8 @@ static void cmd_orientation(void) {
      * üste biniyor ve yalnızca sonuncusu görünüyordu — ekran hatasının en
      * çok görülen belirtisi buydu. Şimdi 640 satırın her biri yerinde
      * üretilip tek RAMWR akışında yollanıyor: dört köşe de doğru yerde. */
-    pb_lcd_sutun_penceresi(0, PB_PANEL_W - 1);
-    pb_lcd_akis_basla(0x2C);
+    pb_lcd_column_window(0, PB_PANEL_W - 1);
+    pb_lcd_stream_begin(0x2C);
     for (uint32_t y = 0; y < PB_PANEL_H; y++) {
         for (uint32_t x = 0; x < PB_PANEL_W; x++) satir[x] = 0x0000;
         for (size_t i = 0; i < sizeof(kose) / sizeof(kose[0]); i++) {
@@ -1162,10 +1162,10 @@ static void cmd_orientation(void) {
                 }
             }
         }
-        pb_lcd_akis_satir(satir, PB_PANEL_W);
+        pb_lcd_stream_row(satir, PB_PANEL_W);
     }
-    pb_lcd_akis_bitir();
-    pb_lcd_imlec_gecersiz();
+    pb_lcd_stream_end();
+    pb_lcd_cursor_invalidate();
 
     for (size_t i = 0; i < sizeof(kose) / sizeof(kose[0]); i++) {
         printf("  %s\n", kose[i].ad);
@@ -1184,25 +1184,25 @@ static void cmd_orientation(void) {
 
 static void qspi_sayac_yazdir(void) {
     printf("     WaitIdle cagrisi         : %lu\n",
-           (unsigned long)pb_qspi_wait_cagri);
+           (unsigned long)pb_qspi_wait_calls);
     printf("     ZAMAN ASIMI (sessiz hata): %lu%s\n",
-           (unsigned long)pb_qspi_wait_asim,
-           pb_qspi_wait_asim ? "   <<< HIPOTEZ DOGRU: beklemiyor" : "   (0 = beklendi)");
+           (unsigned long)pb_qspi_wait_timeout,
+           pb_qspi_wait_timeout ? "   <<< HIPOTEZ DOGRU: beklemiyor" : "   (0 = beklendi)");
     printf("     girerken SM kapali       : %lu%s\n",
-           (unsigned long)pb_qspi_wait_sm_kapali,
-           pb_qspi_wait_sm_kapali ? "   <<< SM KAPALI" : "");
+           (unsigned long)pb_qspi_wait_sm_off,
+           pb_qspi_wait_sm_off ? "   <<< SM KAPALI" : "");
     printf("     girerken FIFO doluydu    : %lu   (en yuksek seviye %lu/4)\n",
-           (unsigned long)pb_qspi_wait_fifo_dolu,
-           (unsigned long)pb_qspi_wait_fifo_azami);
+           (unsigned long)pb_qspi_wait_fifo_full,
+           (unsigned long)pb_qspi_wait_fifo_max);
     printf("     gercekten bekledi        : %lu   (en cok %lu dongu, en uzun %lu us)\n",
-           (unsigned long)pb_qspi_wait_bekledi,
-           (unsigned long)pb_qspi_wait_donme_azami,
-           (unsigned long)pb_qspi_wait_us_azami);
+           (unsigned long)pb_qspi_wait_waited,
+           (unsigned long)pb_qspi_wait_spin_max,
+           (unsigned long)pb_qspi_wait_us_max);
     printf("     CIKARKEN FIFO hala dolu  : %lu%s\n",
-           (unsigned long)pb_qspi_wait_kalinti,
-           pb_qspi_wait_kalinti ? "   <<< BEKLEME ISE YARAMADI" : "   (0 = FIFO bosaldi)");
+           (unsigned long)pb_qspi_wait_residue,
+           pb_qspi_wait_residue ? "   <<< BEKLEME ISE YARAMADI" : "   (0 = FIFO bosaldi)");
     printf("     toplam bekleme           : %lu us\n\n",
-           (unsigned long)pb_qspi_wait_us_top);
+           (unsigned long)pb_qspi_wait_us_total);
 }
 
 /**
@@ -1234,7 +1234,7 @@ static void cmd_qspi_timing(void) {
            (unsigned long)clock_get_hz(clk_sys));
 
     printf("1) Pencere komutlari — SetWindows, 3 CS islemi, DMA yok\n");
-    pb_qspi_sayaclari_sifirla();
+    pb_qspi_counters_reset();
     LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, 1);
     qspi_sayac_yazdir();
 
@@ -1242,14 +1242,14 @@ static void cmd_qspi_timing(void) {
     {
         static uint16_t satir[PB_PANEL_W];
         for (uint32_t i = 0; i < PB_PANEL_W; i++) satir[i] = 0x0000;
-        pb_qspi_sayaclari_sifirla();
+        pb_qspi_counters_reset();
         pb_lcd_blit(0, 0, PB_PANEL_W, 1, satir);
         qspi_sayac_yazdir();
     }
 
     printf("3) Tam ekran doldurma — 640 satir\n");
     {
-        pb_qspi_sayaclari_sifirla();
+        pb_qspi_counters_reset();
         absolute_time_t t0 = get_absolute_time();
         pb_lcd_fill(0x0000);
         int64_t gecen = absolute_time_diff_us(t0, get_absolute_time());
@@ -1265,7 +1265,7 @@ static void cmd_qspi_timing(void) {
         printf("     gecen sure               : %lu us\n", (unsigned long)gecen);
         printf("     PIO tabani (kuramsal)    : %lu us\n", (unsigned long)taban_us);
         printf("     her cagri zaman asiminda : ~%lu us olurdu\n\n",
-               (unsigned long)((uint64_t)pb_qspi_wait_cagri * 50000ull));
+               (unsigned long)((uint64_t)pb_qspi_wait_calls * 50000ull));
     }
 
     printf("4) CS yukseldikten SONRA hat hala kipirdiyor mu? (§5.9'un imzasi)\n");
@@ -1273,7 +1273,7 @@ static void cmd_qspi_timing(void) {
         pio_sm_set_clkdiv(qspi.pio, qspi.sm, 1000.0f);   /* ~150 kHz PIO */
         pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
 
-        pb_qspi_sayaclari_sifirla();
+        pb_qspi_counters_reset();
         QSPI_Select(qspi);
         QSPI_REGISTER_Write(qspi, 0x2a);
         QSPI_DATA_Write(qspi, 0x00);
@@ -1302,7 +1302,7 @@ static void cmd_qspi_timing(void) {
 
         /* Pencereyi tam ekrana geri al; sonraki cizim dogru yere dussun. */
         LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, PB_PANEL_H);
-        pb_lcd_imlec_gecersiz();   /* panele disaridan yazildi (lcd_blit.h) */
+        pb_lcd_cursor_invalidate();   /* panele disaridan yazildi (lcd_blit.h) */
     }
 }
 
@@ -1361,7 +1361,7 @@ static void melez_faz(bool pencere_pio, bool piksel_pio, float clkdiv) {
     if (pencere_pio) { melez_pio_ver(clkdiv); LCD_3IN49_SetWindows(0, 0, PB_PANEL_W, PB_PANEL_H); }
     else             { bb_pins_setup();       bb_pencere(0, 0, PB_PANEL_W, PB_PANEL_H); }
 
-    if (piksel_pio)  { melez_pio_ver(clkdiv); pb_lcd_duz_akit(0x001F, (uint32_t)PB_PANEL_W * PB_PANEL_H); }
+    if (piksel_pio)  { melez_pio_ver(clkdiv); pb_lcd_stream_flat(0x001F, (uint32_t)PB_PANEL_W * PB_PANEL_H); }
     else             { bb_pins_setup();       bb_piksel(0x001F, (uint32_t)PB_PANEL_W * PB_PANEL_H); }
 
     /* 2) Ekranin ORTASINA 40x40 beyaz kare.
@@ -1370,7 +1370,7 @@ static void melez_faz(bool pencere_pio, bool piksel_pio, float clkdiv) {
     if (pencere_pio) { melez_pio_ver(clkdiv); LCD_3IN49_SetWindows(KX, KY, KX + KW, KY + KH); }
     else             { bb_pins_setup();       bb_pencere(KX, KY, KW, KH); }
 
-    if (piksel_pio)  { melez_pio_ver(clkdiv); pb_lcd_duz_akit(0xFFFF, KW * KH); }
+    if (piksel_pio)  { melez_pio_ver(clkdiv); pb_lcd_stream_flat(0xFFFF, KW * KH); }
     else             { bb_pins_setup();       bb_piksel(0xFFFF, KW * KH); }
 
     melez_pio_ver(2.0f);        /* uretim saatiyle birak */
@@ -1457,9 +1457,9 @@ static void qspi_raset(uint16_t y1, uint16_t y2) {
  *  Bu yolun çalıştığı ölçüldü (`y`'nin altı adımında da ekran masmaviydi). */
 static void z_zemin(uint16_t renk) {
     qspi_caset(0, PB_PANEL_W - 1);
-    pb_lcd_akis_basla(0x2C);
-    pb_lcd_akis_renk(renk, (uint32_t)PB_PANEL_W * PB_PANEL_H);
-    pb_lcd_akis_bitir();
+    pb_lcd_stream_begin(0x2C);
+    pb_lcd_stream_color(renk, (uint32_t)PB_PANEL_W * PB_PANEL_H);
+    pb_lcd_stream_end();
 }
 
 /**
@@ -1487,9 +1487,9 @@ static void cmd_row_addr(void) {
             printf("  [1] SIMDIKI YOL: CASET + RASET + ciplak 0x2C, sonra RAMWR (kontrol)\n");
             z_zemin(MAVI);
             LCD_3IN49_SetWindows(KX, KY, KX + KW, KY + KH);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
+            pb_lcd_stream_begin(0x2C);
+            pb_lcd_stream_color(BEYAZ, KW * KH);
+            pb_lcd_stream_end();
             break;
 
         case 2:
@@ -1497,9 +1497,9 @@ static void cmd_row_addr(void) {
             z_zemin(MAVI);
             qspi_caset(KX, KX + KW - 1);
             qspi_raset(KY, KY + KH - 1);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
+            pb_lcd_stream_begin(0x2C);
+            pb_lcd_stream_color(BEYAZ, KW * KH);
+            pb_lcd_stream_end();
             break;
 
         case 3:
@@ -1507,9 +1507,9 @@ static void cmd_row_addr(void) {
             z_zemin(MAVI);
             qspi_raset(KY, KY + KH - 1);
             qspi_caset(KX, KX + KW - 1);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
+            pb_lcd_stream_begin(0x2C);
+            pb_lcd_stream_color(BEYAZ, KW * KH);
+            pb_lcd_stream_end();
             break;
 
         case 4:
@@ -1517,10 +1517,10 @@ static void cmd_row_addr(void) {
             printf("      sayiliyor — %d satir mavi atlanip sonra beyaz yaziliyor\n", KY);
             z_zemin(MAVI);
             qspi_caset(KX, KX + KW - 1);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(MAVI,  (uint32_t)KY * KW);   /* atla */
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
+            pb_lcd_stream_begin(0x2C);
+            pb_lcd_stream_color(MAVI,  (uint32_t)KY * KW);   /* atla */
+            pb_lcd_stream_color(BEYAZ, KW * KH);
+            pb_lcd_stream_end();
             break;
 
         case 5:
@@ -1528,12 +1528,12 @@ static void cmd_row_addr(void) {
             printf("      devam ediyor (kalici cozumun ucuz olup olmadigini soyler)\n");
             z_zemin(MAVI);
             qspi_caset(KX, KX + KW - 1);
-            pb_lcd_akis_basla(0x2C);
-            pb_lcd_akis_renk(MAVI, (uint32_t)KY * KW);
-            pb_lcd_akis_bitir();
-            pb_lcd_akis_basla(0x3C);                      /* RAMWRC — devam et */
-            pb_lcd_akis_renk(BEYAZ, KW * KH);
-            pb_lcd_akis_bitir();
+            pb_lcd_stream_begin(0x2C);
+            pb_lcd_stream_color(MAVI, (uint32_t)KY * KW);
+            pb_lcd_stream_end();
+            pb_lcd_stream_begin(0x3C);                      /* RAMWRC — devam et */
+            pb_lcd_stream_color(BEYAZ, KW * KH);
+            pb_lcd_stream_end();
             break;
         }
         melez_bekle();
@@ -1548,7 +1548,7 @@ static void cmd_row_addr(void) {
 
     /* Pencereyi tam ekrana geri birak. */
     qspi_caset(0, PB_PANEL_W - 1);
-    pb_lcd_imlec_gecersiz();
+    pb_lcd_cursor_invalidate();
 }
 
 /**
@@ -1606,13 +1606,13 @@ static void cmd_cursor_seek(void) {
         printf("      sonra pencere %d..%d ve RAMWRC ile beyaz\n", KX, KX + KW - 1);
 
         qspi_caset(atlama[i].x1, atlama[i].x2);
-        pb_lcd_akis_basla(0x2C);
-        pb_lcd_akis_renk(KIRMIZI, KY * genislik);   /* satir 0 -> KY */
-        pb_lcd_akis_bitir();
+        pb_lcd_stream_begin(0x2C);
+        pb_lcd_stream_color(KIRMIZI, KY * genislik);   /* satir 0 -> KY */
+        pb_lcd_stream_end();
         qspi_caset(KX, KX + KW - 1);
-        pb_lcd_akis_basla(0x3C);                    /* RAMWRC — satir korunuyor mu? */
-        pb_lcd_akis_renk(BEYAZ, KW * KH);
-        pb_lcd_akis_bitir();
+        pb_lcd_stream_begin(0x3C);                    /* RAMWRC — satir korunuyor mu? */
+        pb_lcd_stream_color(BEYAZ, KW * KH);
+        pb_lcd_stream_end();
 
         melez_bekle();
         printf("\n");
@@ -1623,10 +1623,10 @@ static void cmd_cursor_seek(void) {
     printf("      pencere %d..%d, %d satir genis kirmizi atlama, sonra beyaz\n",
            KX, KX + KW - 1, KY);
     qspi_caset(KX, KX + KW - 1);
-    pb_lcd_akis_basla(0x2C);
-    pb_lcd_akis_renk(KIRMIZI, (uint32_t)KY * KW);
-    pb_lcd_akis_renk(BEYAZ, KW * KH);
-    pb_lcd_akis_bitir();
+    pb_lcd_stream_begin(0x2C);
+    pb_lcd_stream_color(KIRMIZI, (uint32_t)KY * KW);
+    pb_lcd_stream_color(BEYAZ, KW * KH);
+    pb_lcd_stream_end();
     melez_bekle();
 
     printf("\nBildirin (her adim icin uc sey):\n");
@@ -1641,7 +1641,7 @@ static void cmd_cursor_seek(void) {
     printf("      katmani (kart + serit duzeni) ona gore yeniden kurulacak.\n\n");
 
     qspi_caset(0, PB_PANEL_W - 1);
-    pb_lcd_imlec_gecersiz();
+    pb_lcd_cursor_invalidate();
 }
 
 /**
@@ -1682,8 +1682,8 @@ static void cmd_text_dump(void) {
 
     printf("Asagidaki dokum ui yoneliminde: her satir bir ui y, her karakter\n");
     printf("bir ui x. Yazi okunuyorsa LVGL ve devrik okuma SAGLAM.\n\n");
-    pb_lv_dokum_iste(1);
-    pb_lcd_satir_dokumu_iste(140);   /* DMA'ya giden s_row'un kendisi */
+    pb_lv_request_dump(1);
+    pb_lcd_request_row_dump(140);   /* DMA'ya giden s_row'un kendisi */
     lv_obj_invalidate(etiket);
     for (int i = 0; i < 6; i++) { pb_lv_tick(); sleep_ms(10); }
 
@@ -1716,11 +1716,11 @@ static void kayma_bandi(uint32_t x1, uint32_t genislik, uint32_t n_piksel,
     desen[8]  = renk;
     desen[24] = renk;
 
-    pb_lcd_sutun_penceresi(x1, x1 + genislik - 1);
-    pb_lcd_akis_basla(0x2C);
-    for (uint32_t r = 0; r < satir; r++) pb_lcd_akis_satir(desen, n_piksel);
-    pb_lcd_akis_bitir();
-    pb_lcd_imlec_gecersiz();
+    pb_lcd_column_window(x1, x1 + genislik - 1);
+    pb_lcd_stream_begin(0x2C);
+    for (uint32_t r = 0; r < satir; r++) pb_lcd_stream_row(desen, n_piksel);
+    pb_lcd_stream_end();
+    pb_lcd_cursor_invalidate();
 }
 
 /**
@@ -1759,11 +1759,11 @@ static void cmd_stripe_test(void) {
         for (uint32_t i = 0; i < PB_PANEL_W; i++) desen[i] = 0x0000;
         desen[148] = 0xFFFF;
         desen[164] = 0xFFFF;
-        pb_lcd_sutun_penceresi(0, PB_PANEL_W - 1);
-        pb_lcd_akis_basla(0x2C);
-        for (uint32_t r = 0; r < SATIR; r++) pb_lcd_akis_satir(desen, PB_PANEL_W);
-        pb_lcd_akis_bitir();
-        pb_lcd_imlec_gecersiz();
+        pb_lcd_column_window(0, PB_PANEL_W - 1);
+        pb_lcd_stream_begin(0x2C);
+        for (uint32_t r = 0; r < SATIR; r++) pb_lcd_stream_row(desen, PB_PANEL_W);
+        pb_lcd_stream_end();
+        pb_lcd_cursor_invalidate();
     }
 
     for (size_t i = 0; i < sizeof(bant) / sizeof(bant[0]); i++) {
@@ -2375,7 +2375,7 @@ static void cmd_ai_verify(void) {
     printf("\n=== TUR AGI — cihaz ici dogrulama ===\n");
 
     const uint32_t t_init0 = time_us_32();
-    if (!pb_tur_agi_baslat()) {
+    if (!pb_species_net_init()) {
         printf("[!] model baslatilamadi.\n");
         return;
     }
@@ -2383,35 +2383,35 @@ static void cmd_ai_verify(void) {
 
     printf("baslatma      %lu us\n", (unsigned long)t_init);
     printf("arena         %u / %u bayt kullanildi  (%.1f%%)\n",
-           (unsigned)pb_tur_agi_arena_kullanilan(),
-           (unsigned)pb_tur_agi_arena_toplam(),
-           100.0 * pb_tur_agi_arena_kullanilan() / pb_tur_agi_arena_toplam());
+           (unsigned)pb_species_net_arena_used(),
+           (unsigned)pb_species_net_arena_total(),
+           100.0 * pb_species_net_arena_used() / pb_species_net_arena_total());
     printf("cikti nicel.  olcek %.9f  sifir %d\n",
-           (double)pb_tur_agi_cikti_olcek(), pb_tur_agi_cikti_sifir());
+           (double)pb_species_net_output_scale(), pb_species_net_output_zero());
 
-    int8_t *girdi = pb_tur_agi_girdi();
-    const int8_t *cikti = pb_tur_agi_cikti();
+    int8_t *girdi = pb_species_net_input();
+    const int8_t *cikti = pb_species_net_output();
 
     uint32_t sure_min = 0xFFFFFFFFu, sure_max = 0, sure_top = 0;
     int birebir = 0, tahmin_ayni = 0, en_buyuk_fark = 0;
     long fark_top = 0;
     long fark_adet = 0;
 
-    for (int k = 0; k < PB_DOGRULAMA_ADET; k++) {
-        memcpy(girdi, pb_dogrulama_girdi[k],
-               (size_t)PB_DOGRULAMA_KARE * PB_DOGRULAMA_BANT);
-        if (!pb_tur_agi_calistir()) {
+    for (int k = 0; k < PB_VALIDATION_COUNT; k++) {
+        memcpy(girdi, pb_validation_input[k],
+               (size_t)PB_VALIDATION_FRAMES * PB_VALIDATION_BANDS);
+        if (!pb_species_net_run()) {
             printf("[!] pencere %d: Invoke basarisiz\n", k);
             return;
         }
-        const uint32_t us = pb_tur_agi_son_sure_us();
+        const uint32_t us = pb_species_net_last_time_us();
         if (us < sure_min) sure_min = us;
         if (us > sure_max) sure_max = us;
         sure_top += us;
 
         int fark_max = 0, en_iyi = 0;
-        for (int c = 0; c < PB_DOGRULAMA_SINIF; c++) {
-            int d = (int)cikti[c] - (int)pb_dogrulama_logit[k][c];
+        for (int c = 0; c < PB_VALIDATION_CLASSES; c++) {
+            int d = (int)cikti[c] - (int)pb_validation_logit[k][c];
             if (d < 0) d = -d;
             if (d > fark_max) fark_max = d;
             fark_top += d;
@@ -2420,28 +2420,28 @@ static void cmd_ai_verify(void) {
         }
         if (fark_max == 0) birebir++;
         if (fark_max > en_buyuk_fark) en_buyuk_fark = fark_max;
-        if (en_iyi == pb_dogrulama_pc_tahmin[k]) tahmin_ayni++;
+        if (en_iyi == pb_validation_pc_pred[k]) tahmin_ayni++;
 
         printf("  pencere %d  sinif %3d  cihaz-tahmin %3d  PC-tahmin %3d  "
                "logit max fark %d  %lu us\n",
-               k, (int)pb_dogrulama_sinif[k], en_iyi,
-               (int)pb_dogrulama_pc_tahmin[k], fark_max, (unsigned long)us);
+               k, (int)pb_validation_class[k], en_iyi,
+               (int)pb_validation_pc_pred[k], fark_max, (unsigned long)us);
     }
 
     printf("\nsure          min %lu  ort %lu  max %lu us   (hedef < 1.000.000)\n",
            (unsigned long)sure_min,
-           (unsigned long)(sure_top / PB_DOGRULAMA_ADET),
+           (unsigned long)(sure_top / PB_VALIDATION_COUNT),
            (unsigned long)sure_max);
     printf("logit         %d/%d pencere BIREBIR ayni, en buyuk fark %d, "
            "ort mutlak fark %.4f\n",
-           birebir, PB_DOGRULAMA_ADET, en_buyuk_fark,
+           birebir, PB_VALIDATION_COUNT, en_buyuk_fark,
            (double)fark_top / (double)fark_adet);
     printf("tahmin        %d/%d pencere ayni sinifi sectik\n",
-           tahmin_ayni, PB_DOGRULAMA_ADET);
+           tahmin_ayni, PB_VALIDATION_COUNT);
 
-    if (birebir == PB_DOGRULAMA_ADET) {
+    if (birebir == PB_VALIDATION_COUNT) {
         printf("\nSONUC: cihaz PC ile BIREBIR ayni. TFLM hatti dogru.\n");
-    } else if (tahmin_ayni == PB_DOGRULAMA_ADET) {
+    } else if (tahmin_ayni == PB_VALIDATION_COUNT) {
         printf("\nSONUC: logit'lerde kucuk sapma var ama tahminler ayni.\n"
                "       Sapma 1-2 adimi asiyorsa cekirdek farki arayin.\n");
     } else {
@@ -2462,7 +2462,7 @@ static void cmd_ikili_ai_verify(void) {
     printf("\n=== IKILI AG — cihaz ici dogrulama ===\n");
 
     const uint32_t t_init0 = time_us_32();
-    if (!pb_ikili_agi_baslat()) {
+    if (!pb_binary_net_init()) {
         printf("[!] model baslatilamadi.\n");
         return;
     }
@@ -2470,59 +2470,59 @@ static void cmd_ikili_ai_verify(void) {
 
     printf("baslatma      %lu us\n", (unsigned long)t_init);
     printf("arena         %u / %u bayt kullanildi  (%.1f%%)\n",
-           (unsigned)pb_ikili_agi_arena_kullanilan(),
-           (unsigned)pb_ikili_agi_arena_toplam(),
-           100.0 * pb_ikili_agi_arena_kullanilan() / pb_ikili_agi_arena_toplam());
+           (unsigned)pb_binary_net_arena_used(),
+           (unsigned)pb_binary_net_arena_total(),
+           100.0 * pb_binary_net_arena_used() / pb_binary_net_arena_total());
     printf("cikti nicel.  olcek %.9f  sifir %d\n",
-           (double)pb_ikili_agi_cikti_olcek(), pb_ikili_agi_cikti_sifir());
+           (double)pb_binary_net_output_scale(), pb_binary_net_output_zero());
 
-    int8_t *girdi = pb_ikili_agi_girdi();
+    int8_t *girdi = pb_binary_net_input();
 
     uint32_t sure_min = 0xFFFFFFFFu, sure_max = 0, sure_top = 0;
     int birebir = 0, tahmin_ayni = 0, en_buyuk_fark = 0;
 
-    for (int k = 0; k < PB_IKILI_DOGRULAMA_ADET; k++) {
-        memcpy(girdi, pb_ikili_dogrulama_girdi[k],
-               (size_t)PB_IKILI_DOGRULAMA_KARE * PB_IKILI_DOGRULAMA_BANT);
-        if (!pb_ikili_agi_calistir()) {
+    for (int k = 0; k < PB_BINARY_VALIDATION_COUNT; k++) {
+        memcpy(girdi, pb_binary_validation_input[k],
+               (size_t)PB_BINARY_VALIDATION_FRAMES * PB_BINARY_VALIDATION_BANDS);
+        if (!pb_binary_net_run()) {
             printf("[!] pencere %d: Invoke basarisiz\n", k);
             return;
         }
-        const uint32_t us = pb_ikili_agi_son_sure_us();
+        const uint32_t us = pb_binary_net_last_time_us();
         if (us < sure_min) sure_min = us;
         if (us > sure_max) sure_max = us;
         sure_top += us;
 
-        const int8_t cihaz_logit = pb_ikili_agi_cikti();
-        int fark = (int)cihaz_logit - (int)pb_ikili_dogrulama_logit[k];
+        const int8_t cihaz_logit = pb_binary_net_output();
+        int fark = (int)cihaz_logit - (int)pb_binary_validation_logit[k];
         if (fark < 0) fark = -fark;
         if (fark == 0) birebir++;
         if (fark > en_buyuk_fark) en_buyuk_fark = fark;
 
-        const bool cihaz_tahmin = pb_ikili_agi_olasilik() >= 0.5f;
-        const bool pc_tahmin = pb_ikili_dogrulama_logit[k] >=
-                               pb_ikili_agi_cikti_sifir();  /* logit>=0 esdeger */
+        const bool cihaz_tahmin = pb_binary_net_probability() >= 0.5f;
+        const bool pc_tahmin = pb_binary_validation_logit[k] >=
+                               pb_binary_net_output_zero();  /* logit>=0 esdeger */
         if (cihaz_tahmin == pc_tahmin) tahmin_ayni++;
 
         printf("  pencere %d  gercek %-5s  cihaz-logit %4d  PC-logit %4d  "
                "fark %d  p=%.4f  %lu us\n",
-               k, pb_ikili_dogrulama_gercek[k] ? "KUS" : "DEGIL",
-               cihaz_logit, pb_ikili_dogrulama_logit[k], fark,
-               (double)pb_ikili_agi_olasilik(), (unsigned long)us);
+               k, pb_binary_validation_truth[k] ? "KUS" : "DEGIL",
+               cihaz_logit, pb_binary_validation_logit[k], fark,
+               (double)pb_binary_net_probability(), (unsigned long)us);
     }
 
     printf("\nsure          min %lu  ort %lu  max %lu us\n",
            (unsigned long)sure_min,
-           (unsigned long)(sure_top / PB_IKILI_DOGRULAMA_ADET),
+           (unsigned long)(sure_top / PB_BINARY_VALIDATION_COUNT),
            (unsigned long)sure_max);
     printf("logit         %d/%d pencere BIREBIR ayni, en buyuk fark %d\n",
-           birebir, PB_IKILI_DOGRULAMA_ADET, en_buyuk_fark);
+           birebir, PB_BINARY_VALIDATION_COUNT, en_buyuk_fark);
     printf("karar         %d/%d pencere PC ile ayni yonde (>=0.5 esigi)\n",
-           tahmin_ayni, PB_IKILI_DOGRULAMA_ADET);
+           tahmin_ayni, PB_BINARY_VALIDATION_COUNT);
 
-    if (birebir == PB_IKILI_DOGRULAMA_ADET) {
+    if (birebir == PB_BINARY_VALIDATION_COUNT) {
         printf("\nSONUC: cihaz PC ile BIREBIR ayni. TFLM hatti dogru.\n");
-    } else if (tahmin_ayni == PB_IKILI_DOGRULAMA_ADET) {
+    } else if (tahmin_ayni == PB_BINARY_VALIDATION_COUNT) {
         printf("\nSONUC: logit'te kucuk sapma var ama karar ayni.\n");
     } else {
         printf("\n[!] SONUC: cihaz PC'den FARKLI karar uretti. TFLM/CMSIS-NN\n"
@@ -2547,10 +2547,10 @@ static void cmd_recognize(bool kapi_yoksay) {
         printf("OLCUM KIPI: kapi YOKSAYILIYOR, her saniye cikarim.\n");
     else
         printf("Kapi acilmadikca cikarim CALISMAZ (sessizlikte %%2-3).\n");
-    printf("Birlestirme penceresi: %d\n", PB_BIRLESTIRME_PENCERE);
+    printf("Birlestirme penceresi: %d\n", PB_VOTE_WINDOWS);
     printf("Cikmak icin bir tusa basin.\n\n");
 
-    if (!pb_tanima_baslat(kapi_yoksay)) {
+    if (!pb_recognizer_start(kapi_yoksay)) {
         printf("[!] tanima hatti baslatilamadi.\n");
         return;
     }
@@ -2559,8 +2559,8 @@ static void cmd_recognize(bool kapi_yoksay) {
     absolute_time_t sonraki = make_timeout_time_ms(1000);
 
     while (getchar_timeout_us(0) < 0) {
-        pb_tanima_durum_t d;
-        pb_tanima_oku(&d);
+        pb_recognizer_state_t d;
+        pb_recognizer_read(&d);
 
         if (d.surum != gorulen && d.gecerli) {
             gorulen = d.surum;
@@ -2569,10 +2569,10 @@ static void cmd_recognize(bool kapi_yoksay) {
                    (unsigned long)d.son_sure_us);
             for (int r = 0; r < 3; r++) {
                 const int c = d.ilk3[r];
-                if (c < 0 || c >= PB_SINIF_SAYISI) continue;
+                if (c < 0 || c >= PB_CLASS_COUNT) continue;
                 printf("      %d. %%%5.1f  %-10s %s\n", r + 1,
                        (double)(d.ilk3_olasilik[r] * 100.0f),
-                       pb_sinif_kod[c], pb_sinif_ad[c]);
+                       pb_class_code[c], pb_class_name[c]);
             }
         }
 
@@ -2592,9 +2592,9 @@ static void cmd_recognize(bool kapi_yoksay) {
         sleep_ms(20);
     }
 
-    pb_tanima_durum_t d;
-    pb_tanima_oku(&d);
-    pb_tanima_durdur();
+    pb_recognizer_state_t d;
+    pb_recognizer_read(&d);
+    pb_recognizer_stop();
 
     printf("\n  toplam kare %lu (%lu kapi acik, %%%lu)\n",
            (unsigned long)d.kare, (unsigned long)d.kapi_acik,
@@ -2612,15 +2612,15 @@ static void cmd_recognize(bool kapi_yoksay) {
  *
  * `k` ne yapıyorsa aynısı, ama sonuç seri porta değil EKRANA gidiyor:
  * solda tanıma kartı (tür adı + güven + ilk 3 + sayaçlar), sağda canlı
- * spektrogram. Aradaki karar kuralı ai/karar.c'de; eşikleri ölçüldü
- * (models/esik.txt, tools/esik_olc.py).
+ * spektrogram. Aradaki karar kuralı ai/decision.c'de; eşikleri ölçüldü
+ * (models/thresholds.txt, tools/measure_thresholds.py).
  *
  * İŞ BÖLÜMÜ:
- *   core 1  ses -> mel -> kapı -> tür ağı -> birleştirme   (ai/tanima.c)
+ *   core 1  ses -> mel -> kapı -> tür ağı -> birleştirme   (ai/recognizer.c)
  *   core 0  burası: kuyruğu boşalt, karar kuralı, LVGL, QSPI
  *
- * Mel halkası motor çalışırken core 1'in malı (ai/tanima.h uyarısı); core 0
- * spektrogram sütunlarını `pb_tanima_mel_al()` kuyruğundan alıyor, mel'e
+ * Mel halkası motor çalışırken core 1'in malı (ai/recognizer.h uyarısı); core 0
+ * spektrogram sütunlarını `pb_recognizer_get_mel()` kuyruğundan alıyor, mel'e
  * doğrudan dokunmuyor.
  *
  * ⛔ AKUSTİK DOĞRULAMAYI PC'DEN SES ÇALARAK YAPMAYIN (§5.5): bilgisayarda
@@ -2633,43 +2633,43 @@ static void cmd_sonuc_ekrani(void) {
     printf("EKRAN 1 gunluk  (tam genislik, taninan turlerin listesi)\n");
     printf("Gecis: ekranda YATAY KAYDIRMA, ya da bosluk/'n' tusu.\n");
     printf("Karar kurali: girme %.2f / cikma %.2f, en az %u pencere, "
-           "tutma %u ms\n", (double)PB_KARAR_GIRIS_ESIK,
-           (double)PB_KARAR_CIKIS_ESIK, (unsigned)PB_KARAR_MIN_PENCERE,
-           (unsigned)PB_KARAR_TUT_MS);
+           "tutma %u ms\n", (double)PB_DECISION_ENTER_THRESHOLD,
+           (double)PB_DECISION_EXIT_THRESHOLD, (unsigned)PB_DECISION_MIN_WINDOWS,
+           (unsigned)PB_DECISION_HOLD_MS);
     printf("Cikmak icin baska bir tusa basin.\n\n");
 
     backlight_set(true);
     /* `a` demosundaki gerekçe: fill, lcd_blit'in atlama şeridini bilinen bir
      * hâle getiriyor — teşhis komutlarından sonra iz kalmasın. */
     pb_lcd_fill(0x0000);
-    pb_lv_flush_sayaclari_sifirla();
+    pb_lv_flush_counters_reset();
     pb_lv_init();
 
-    pb_arayuz_olustur();
+    pb_ui_create();
     /* Arayüzü önce çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi
      * sahip olduğu dilimlerin tamamını boyuyor. */
-    for (int i = 0; i < 4; i++) { pb_arayuz_tick(); sleep_ms(5); }
+    for (int i = 0; i < 4; i++) { pb_ui_tick(); sleep_ms(5); }
     pb_spec_init();
 
     pb_mel_init();   /* filtre bankası core 1 başlamadan hazır olsun */
 
     /* ⚠ HAT AÇILIŞTA ÇALIŞMIYOR — cihaz artık sürekli dinlemiyor
      * (kullanıcının kararı). Dinlemeyi kayıt butonu başlatıyor; bu döngü her
-     * turda `pb_arayuz_kayitta()`ya bakıp core 1'i gerçekten başlatıp
-     * durduruyor. `pb_tanima_baslat`/`durdur` bu kullanıma uygun:
+     * turda `pb_ui_recording()`ya bakıp core 1'i gerçekten başlatıp
+     * durduruyor. `pb_recognizer_start`/`durdur` bu kullanıma uygun:
      * ikisi de `s_calis` ile korumalı ve başlatma core 1'i sıfırdan kuruyor.
-     * ⚠ `pb_tanima_durdur` core 1'in döngüden çıkmasını beklemek için
+     * ⚠ `pb_recognizer_stop` core 1'in döngüden çıkmasını beklemek için
      * 400 ms bloklanıyor — butona basınca arayüz o kadar takılır. */
     bool hat_calisiyor = false;
 
-    pb_karar_t karar;
-    pb_karar_sifirla(&karar, to_ms_since_boot(get_absolute_time()));
+    pb_decision_t karar;
+    pb_decision_reset(&karar, to_ms_since_boot(get_absolute_time()));
 
     uint32_t gorulen = 0, kare0 = 0, son_hiz = 0;
     uint32_t karar_surum = karar.surum;
     absolute_time_t sonraki_hiz  = make_timeout_time_ms(1000);
     absolute_time_t sonraki_kart = make_timeout_time_ms(250);
-    pb_tanima_durum_t d;
+    pb_recognizer_state_t d;
     memset(&d, 0, sizeof(d));
 
     drain_stdin();
@@ -2679,30 +2679,30 @@ static void cmd_sonuc_ekrani(void) {
          * kalıyor (arayuz.h'deki gerekçe). */
         const int tus = getchar_timeout_us(0);
         if (tus >= 0) {
-            if (tus == ' ' || tus == 'n' || tus == 'N') pb_arayuz_sonraki();
+            if (tus == ' ' || tus == 'n' || tus == 'N') pb_ui_next();
             else if (tus == 'r' || tus == 'R')
-                pb_arayuz_kayit_ayarla(!pb_arayuz_kayitta());
+                pb_ui_set_recording(!pb_ui_recording());
             else break;
         }
 
         /* 0) Kayıt durumu değiştiyse hattı gerçekten başlat/durdur. */
-        if (pb_arayuz_kayitta() != hat_calisiyor) {
-            if (pb_arayuz_kayitta()) {
-                if (pb_tanima_baslat(false)) {
+        if (pb_ui_recording() != hat_calisiyor) {
+            if (pb_ui_recording()) {
+                if (pb_recognizer_start(false)) {
                     hat_calisiyor = true;
-                    pb_karar_sifirla(&karar, to_ms_since_boot(get_absolute_time()));
+                    pb_decision_reset(&karar, to_ms_since_boot(get_absolute_time()));
                     karar_surum = karar.surum;
                     gorulen = 0;
                     printf("  [kayit BASLADI]\n");
                 } else {
                     printf("[!] tanima hatti baslatilamadi.\n");
-                    pb_arayuz_kayit_ayarla(false);
+                    pb_ui_set_recording(false);
                 }
             } else {
-                pb_tanima_durdur();
+                pb_recognizer_stop();
                 hat_calisiyor = false;
                 memset(&d, 0, sizeof(d));
-                pb_karar_sifirla(&karar, to_ms_since_boot(get_absolute_time()));
+                pb_decision_reset(&karar, to_ms_since_boot(get_absolute_time()));
                 karar_surum = karar.surum;
                 printf("  [kayit DURDU]\n");
             }
@@ -2711,11 +2711,11 @@ static void cmd_sonuc_ekrani(void) {
         if (!hat_calisiyor) {
             /* Boştayken ekran yalnızca "BOŞTA" gösteriyor; sonuç alanı
              * boşaltılıyor ki durmuş bir tahmin canlıymış gibi durmasın. */
-            pb_sonuc_gorunum_t bos;
+            pb_result_view_t bos;
             memset(&bos, 0, sizeof(bos));
-            bos.kip = PB_KARAR_DINLIYOR;
-            pb_arayuz_guncelle(&bos);
-            pb_arayuz_tick();
+            bos.kip = PB_DECISION_LISTENING;
+            pb_ui_update(&bos);
+            pb_ui_tick();
             sleep_ms(10);
             continue;
         }
@@ -2724,12 +2724,12 @@ static void cmd_sonuc_ekrani(void) {
          *    Tur başına en fazla 8 sütun — çıkarım sonrası birikmiş kuyruk
          *    tek turda boşaltılmaya çalışılırsa arayüz o turda takılır. */
         int8_t mel_q[PB_MEL_BANDS];
-        for (int i = 0; i < 8 && pb_tanima_mel_al(mel_q); i++) {
+        for (int i = 0; i < 8 && pb_recognizer_get_mel(mel_q); i++) {
             /* ⚠ Günlük ekranındayken spektrogram YAZMAMALI: o ekranda sağdaki
              * iki dilim de LVGL'in (arayuz.c, dilim sahipliği) ve ikisi aynı
              * bölgeye yazarsa birbirlerini siler. Kuyruk yine de boşaltılıyor,
              * yoksa core 1 dolu kuyruğa kare atmaya başlar. */
-            if (pb_arayuz_ekran() != PB_EKRAN_DINLEME) continue;
+            if (pb_ui_screen() != PB_SCREEN_LISTEN) continue;
 
             uint8_t bins[PB_MEL_BANDS];
             for (int b = 0; b < PB_MEL_BANDS; b++) {
@@ -2743,8 +2743,8 @@ static void cmd_sonuc_ekrani(void) {
         }
 
         /* 2) Tanıma durumu -> karar kuralı. */
-        pb_tanima_oku(&d);
-        pb_karar_girdi_t gi = {
+        pb_recognizer_read(&d);
+        pb_decision_input_t gi = {
             .simdi_ms   = to_ms_since_boot(get_absolute_time()),
             .kapi_acik  = d.kapi_su_an,
             .yeni_sonuc = d.gecerli && d.surum != gorulen,
@@ -2753,7 +2753,7 @@ static void cmd_sonuc_ekrani(void) {
             .birlesen   = d.birlesen,
         };
         if (gi.yeni_sonuc) gorulen = d.surum;
-        pb_karar_guncelle(&karar, &gi);
+        pb_decision_update(&karar, &gi);
 
         /* Ekranda görünen her değişiklik seri porta da düşsün: bu komutun
          * göz gerektirmeyen kaydı bu — kullanıcı ekrana bakarken ben aynı
@@ -2762,9 +2762,9 @@ static void cmd_sonuc_ekrani(void) {
             karar_surum = karar.surum;
             const int c = karar.sinif;
             printf("  [%lu ms] %-14s %s %s  %%%.1f\n",
-                   (unsigned long)gi.simdi_ms, pb_karar_kip_ad(karar.kip),
-                   (c >= 0 && c < PB_SINIF_SAYISI) ? pb_sinif_kod[c] : "-",
-                   (c >= 0 && c < PB_SINIF_SAYISI) ? pb_sinif_ad[c] : "",
+                   (unsigned long)gi.simdi_ms, pb_decision_mode_name(karar.kip),
+                   (c >= 0 && c < PB_CLASS_COUNT) ? pb_class_code[c] : "-",
+                   (c >= 0 && c < PB_CLASS_COUNT) ? pb_class_name[c] : "",
                    (double)(karar.guven * 100.0f));
         }
 
@@ -2777,18 +2777,18 @@ static void cmd_sonuc_ekrani(void) {
         /* Kartı 4 Hz güncelle. Her güncelleme kartın QSPI'ye yeniden basılması
          * (68,8 KB) demek; sonuç ekranında daha hızlısının bir karşılığı yok. */
         if (time_reached(sonraki_kart)) {
-            pb_sonuc_gorunum_t gv;
+            pb_result_view_t gv;
             memset(&gv, 0, sizeof(gv));
             gv.kip = karar.kip;
             gv.guven = karar.guven;
-            gv.tur_ad = (karar.sinif >= 0 && karar.sinif < PB_SINIF_SAYISI)
-                            ? pb_sinif_ad[karar.sinif] : NULL;
+            gv.tur_ad = (karar.sinif >= 0 && karar.sinif < PB_CLASS_COUNT)
+                            ? pb_class_name[karar.sinif] : NULL;
             if (d.gecerli) {
                 for (int r = 0; r < 3; r++) {
                     const int c = d.ilk3[r];
-                    if (c >= 0 && c < PB_SINIF_SAYISI) {
-                        gv.ilk3_ad[r]    = pb_sinif_ad[c];
-                        gv.ilk3_latin[r] = pb_sinif_latin[c];
+                    if (c >= 0 && c < PB_CLASS_COUNT) {
+                        gv.ilk3_ad[r]    = pb_class_name[c];
+                        gv.ilk3_latin[r] = pb_class_latin[c];
                     }
                     gv.ilk3_olasilik[r] = d.ilk3_olasilik[r];
                 }
@@ -2798,16 +2798,16 @@ static void cmd_sonuc_ekrani(void) {
             gv.birlesen = d.birlesen;
             gv.overrun = d.overrun;
             gv.bant_db = d.bant_db;
-            pb_arayuz_guncelle(&gv);
+            pb_ui_update(&gv);
             sonraki_kart = make_timeout_time_ms(250);
         }
 
-        pb_arayuz_tick();
+        pb_ui_tick();
         sleep_ms(2);
     }
 
-    pb_tanima_oku(&d);
-    pb_tanima_durdur();
+    pb_recognizer_read(&d);
+    pb_recognizer_stop();
 
     printf("\n  kare %lu (kapi acik %%%lu), cikarim %lu, atlanan %lu, "
            "overrun %lu\n",
@@ -2817,21 +2817,21 @@ static void cmd_sonuc_ekrani(void) {
            (unsigned long)d.overrun);
     printf("  LVGL flush %lu, satir adimi != alan_w: %lu, panel_w %lu..%lu, "
            "dilim basimi %lu\n",
-           (unsigned long)pb_lv_flush_say,
-           (unsigned long)pb_lv_flush_stride_farkli,
+           (unsigned long)pb_lv_flush_count,
+           (unsigned long)pb_lv_flush_stride_differs,
            (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max,
-           (unsigned long)pb_lv_dilim_basim);
+           (unsigned long)pb_lv_slice_press);
     /* Kaydırma teşhisi — GÖZ GEREKMEZ. Kaydırma çalışmıyorsa hangi aşamada
      * durduğu buradan okunuyor: dokunma hiç gelmiyor mu, geliyor da hareket
      * eşiği mi aşılmıyor, yoksa panel dışı kareler mi düşürülüyor. */
     printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
            "panel disi %lu, son ham dx %ld (esik 200), ham_y %ld, "
            "buton basim %lu\n\n",
-           (unsigned long)pb_kaydirma_dokunma, (unsigned long)pb_kaydirma_basla,
-           (unsigned long)pb_kaydirma_kabul, (unsigned long)pb_kaydirma_kisa,
-           (unsigned long)pb_lv_dokunma_gecersiz,
-           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy,
-           (unsigned long)pb_buton_basim);
+           (unsigned long)pb_swipe_touch, (unsigned long)pb_swipe_begin,
+           (unsigned long)pb_swipe_accept, (unsigned long)pb_swipe_short,
+           (unsigned long)pb_lv_touch_invalidate,
+           (long)pb_swipe_last_dx, (long)pb_swipe_last_dy,
+           (unsigned long)pb_button_press);
 }
 
 /* ── C: SONUÇ KARTI GÖSTERİM TESTİ (mikrofonsuz) ──────────────────────────
@@ -2854,37 +2854,37 @@ static void cmd_sonuc_karti_demo(void) {
      * İndeks sabitlemek yerine aramak, sınıf tablosu yeniden üretilse de
      * testin en kötü durumu göstermeye devam etmesini sağlıyor. */
     int uzun = 0;
-    for (int i = 0; i < PB_SINIF_SAYISI; i++) {
-        if (strlen(pb_sinif_ad[i]) > strlen(pb_sinif_ad[uzun])) uzun = i;
+    for (int i = 0; i < PB_CLASS_COUNT; i++) {
+        if (strlen(pb_class_name[i]) > strlen(pb_class_name[uzun])) uzun = i;
     }
-    const int ikinci = (uzun + 1) % PB_SINIF_SAYISI;
-    const int ucuncu = (uzun + 2) % PB_SINIF_SAYISI;
+    const int ikinci = (uzun + 1) % PB_CLASS_COUNT;
+    const int ucuncu = (uzun + 2) % PB_CLASS_COUNT;
 
     printf("\n=== SONUC KARTI GOSTERIM TESTI (mikrofon YOK) ===\n");
     printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
     printf("En uzun tur adi: \"%s\" (%d karakter)\n",
-           pb_sinif_ad[uzun], (int)strlen(pb_sinif_ad[uzun]));
+           pb_class_name[uzun], (int)strlen(pb_class_name[uzun]));
     printf("Kart dort asamadan gecip basa donuyor. Cikmak icin bir tusa basin.\n\n");
 
     backlight_set(true);
     pb_lcd_fill(0x0000);
     pb_lv_init();
-    pb_arayuz_olustur();
-    for (int i = 0; i < 4; i++) { pb_arayuz_tick(); sleep_ms(5); }
+    pb_ui_create();
+    for (int i = 0; i < 4; i++) { pb_ui_tick(); sleep_ms(5); }
     pb_spec_init();
 
     /* Günlük ekranı da sınanabilsin: boş liste hiçbir çizim sorununu
      * göstermez. Üç sahte kayıt, en uzun ad dâhil. */
-    pb_arayuz_gunluge_ekle(pb_sinif_ad[uzun],   pb_sinif_latin[uzun],   0.91f);
-    pb_arayuz_gunluge_ekle(pb_sinif_ad[ikinci], pb_sinif_latin[ikinci], 0.74f);
-    pb_arayuz_gunluge_ekle(pb_sinif_ad[ucuncu], pb_sinif_latin[ucuncu], 0.63f);
+    pb_ui_log_add(pb_class_name[uzun],   pb_class_latin[uzun],   0.91f);
+    pb_ui_log_add(pb_class_name[ikinci], pb_class_latin[ikinci], 0.74f);
+    pb_ui_log_add(pb_class_name[ucuncu], pb_class_latin[ucuncu], 0.63f);
 
-    const struct { pb_karar_kip_t kip; bool tur; float guven; const char *ne; }
+    const struct { pb_decision_mode_t kip; bool tur; float guven; const char *ne; }
     asama[] = {
-        { PB_KARAR_DINLIYOR, false, 0.00f, "dinliyor (tur yok)"      },
-        { PB_KARAR_SES,      false, 0.00f, "ses algilandi"           },
-        { PB_KARAR_BELIRSIZ, true,  0.42f, "belirsiz, kehribar"      },
-        { PB_KARAR_TUR,      true,  0.91f, "tur adi, sari, en uzun"  },
+        { PB_DECISION_LISTENING, false, 0.00f, "dinliyor (tur yok)"      },
+        { PB_DECISION_SOUND,      false, 0.00f, "ses algilandi"           },
+        { PB_DECISION_UNSURE, true,  0.42f, "belirsiz, kehribar"      },
+        { PB_DECISION_SPECIES,      true,  0.91f, "tur adi, sari, en uzun"  },
     };
     const int adet = (int)(sizeof(asama) / sizeof(asama[0]));
 
@@ -2896,22 +2896,22 @@ static void cmd_sonuc_karti_demo(void) {
     for (;;) {
         const int tus = getchar_timeout_us(0);
         if (tus >= 0) {
-            if (tus == ' ' || tus == 'n' || tus == 'N') pb_arayuz_sonraki();
+            if (tus == ' ' || tus == 'n' || tus == 'N') pb_ui_next();
             else break;
         }
 
         if (time_reached(sonraki)) {
-            pb_sonuc_gorunum_t gv;
+            pb_result_view_t gv;
             memset(&gv, 0, sizeof(gv));
             gv.kip = asama[a].kip;
             gv.guven = asama[a].guven;
-            gv.tur_ad = asama[a].tur ? pb_sinif_ad[uzun] : NULL;
-            gv.ilk3_ad[0] = pb_sinif_ad[uzun];
-            gv.ilk3_ad[1] = pb_sinif_ad[ikinci];
-            gv.ilk3_ad[2] = pb_sinif_ad[ucuncu];
-            gv.ilk3_latin[0] = pb_sinif_latin[uzun];
-            gv.ilk3_latin[1] = pb_sinif_latin[ikinci];
-            gv.ilk3_latin[2] = pb_sinif_latin[ucuncu];
+            gv.tur_ad = asama[a].tur ? pb_class_name[uzun] : NULL;
+            gv.ilk3_ad[0] = pb_class_name[uzun];
+            gv.ilk3_ad[1] = pb_class_name[ikinci];
+            gv.ilk3_ad[2] = pb_class_name[ucuncu];
+            gv.ilk3_latin[0] = pb_class_latin[uzun];
+            gv.ilk3_latin[1] = pb_class_latin[ikinci];
+            gv.ilk3_latin[2] = pb_class_latin[ucuncu];
             gv.ilk3_olasilik[0] = asama[a].guven;
             gv.ilk3_olasilik[1] = 0.21f;
             gv.ilk3_olasilik[2] = 0.07f;
@@ -2920,10 +2920,10 @@ static void cmd_sonuc_karti_demo(void) {
             gv.birlesen = 8;
             gv.overrun = 0;
             gv.bant_db = -38.0f;
-            pb_arayuz_guncelle(&gv);
+            pb_ui_update(&gv);
 
             printf("  asama %d/%d: %s  [ekran %d]\n", a + 1, adet, asama[a].ne,
-                   pb_arayuz_ekran());
+                   pb_ui_screen());
             a = (a + 1) % adet;
             sonraki = make_timeout_time_ms(2500);
         }
@@ -2956,22 +2956,22 @@ static void cmd_sonuc_karti_demo(void) {
             }
             bins[b] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
         }
-        if (pb_arayuz_ekran() == PB_EKRAN_DINLEME) {
+        if (pb_ui_screen() == PB_SCREEN_LISTEN) {
             pb_spec_push_column(bins, PB_MEL_BANDS);
         }
         sutun++;
 
-        pb_arayuz_tick();
+        pb_ui_tick();
         sleep_ms(16);
     }
     printf("cikildi\n");
     printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
            "panel disi %lu, son dx %ld dy %ld, buton basim %lu\n\n",
-           (unsigned long)pb_kaydirma_dokunma, (unsigned long)pb_kaydirma_basla,
-           (unsigned long)pb_kaydirma_kabul, (unsigned long)pb_kaydirma_kisa,
-           (unsigned long)pb_lv_dokunma_gecersiz,
-           (long)pb_kaydirma_son_dx, (long)pb_kaydirma_son_dy,
-           (unsigned long)pb_buton_basim);
+           (unsigned long)pb_swipe_touch, (unsigned long)pb_swipe_begin,
+           (unsigned long)pb_swipe_accept, (unsigned long)pb_swipe_short,
+           (unsigned long)pb_lv_touch_invalidate,
+           (long)pb_swipe_last_dx, (long)pb_swipe_last_dy,
+           (unsigned long)pb_button_press);
 }
 
 /* ── F: KART FRAMEBUFFER DÖKÜMÜ — göz GEREKMEZ, teşhisi ikiye böler ───────
@@ -2992,29 +2992,29 @@ static void cmd_sonuc_karti_demo(void) {
  */
 static void cmd_kart_fb_dok(void) {
     int uzun = 0;
-    for (int i = 0; i < PB_SINIF_SAYISI; i++) {
-        if (strlen(pb_sinif_ad[i]) > strlen(pb_sinif_ad[uzun])) uzun = i;
+    for (int i = 0; i < PB_CLASS_COUNT; i++) {
+        if (strlen(pb_class_name[i]) > strlen(pb_class_name[uzun])) uzun = i;
     }
 
     printf("\n=== KART FRAMEBUFFER DOKUMU (goz GEREKMEZ) ===\n");
     backlight_set(true);
     pb_lcd_fill(0x0000);
     pb_lv_init();
-    pb_arayuz_olustur();
+    pb_ui_create();
 
     for (int asama = 0; asama < 2; asama++) {
-        pb_sonuc_gorunum_t gv;
+        pb_result_view_t gv;
         memset(&gv, 0, sizeof(gv));
         if (asama == 0) {
-            gv.kip = PB_KARAR_DINLIYOR;
+            gv.kip = PB_DECISION_LISTENING;
             printf("\n--- asama 1: dinliyor, tur yok ---\n");
         } else {
-            gv.kip = PB_KARAR_TUR;
-            gv.tur_ad = pb_sinif_ad[uzun];
+            gv.kip = PB_DECISION_SPECIES;
+            gv.tur_ad = pb_class_name[uzun];
             gv.guven = 0.91f;
-            gv.ilk3_ad[0] = pb_sinif_ad[uzun];
-            gv.ilk3_ad[1] = pb_sinif_ad[(uzun + 1) % PB_SINIF_SAYISI];
-            gv.ilk3_ad[2] = pb_sinif_ad[(uzun + 2) % PB_SINIF_SAYISI];
+            gv.ilk3_ad[0] = pb_class_name[uzun];
+            gv.ilk3_ad[1] = pb_class_name[(uzun + 1) % PB_CLASS_COUNT];
+            gv.ilk3_ad[2] = pb_class_name[(uzun + 2) % PB_CLASS_COUNT];
             gv.ilk3_olasilik[0] = 0.91f;
             gv.ilk3_olasilik[1] = 0.21f;
             gv.ilk3_olasilik[2] = 0.07f;
@@ -3023,11 +3023,11 @@ static void cmd_kart_fb_dok(void) {
             gv.birlesen = 8;
             gv.bant_db = -38.0f;
             printf("\n--- asama 2: en uzun tur adi (\"%s\") ---\n",
-                   pb_sinif_ad[uzun]);
+                   pb_class_name[uzun]);
         }
-        pb_arayuz_guncelle(&gv);
-        for (int i = 0; i < 6; i++) { pb_arayuz_tick(); sleep_ms(5); }
-        pb_lv_kart_fb_dok();
+        pb_ui_update(&gv);
+        for (int i = 0; i < 6; i++) { pb_ui_tick(); sleep_ms(5); }
+        pb_lv_dump_card_fb();
     }
     printf("\n");
 }

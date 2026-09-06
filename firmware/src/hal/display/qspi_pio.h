@@ -67,18 +67,18 @@ typedef struct pio_qspi {
 extern pio_qspi_t qspi;
 
 /* POKEBIRD teshis sayaclari — QSPI_WaitIdle gercekten bekliyor mu (§9n).
- * `w` komutu okuyor; sifirlamak icin pb_qspi_sayaclari_sifirla(). */
-extern volatile uint32_t pb_qspi_wait_cagri;       /* toplam cagri            */
-extern volatile uint32_t pb_qspi_wait_asim;        /* zaman asimi (SESSIZ hata)*/
-extern volatile uint32_t pb_qspi_wait_sm_kapali;   /* girerken SM etkin degil */
-extern volatile uint32_t pb_qspi_wait_fifo_dolu;   /* girerken FIFO bos degil */
-extern volatile uint32_t pb_qspi_wait_kalinti;     /* cikarken FIFO bos degil */
-extern volatile uint32_t pb_qspi_wait_bekledi;     /* gercekten bekledigi     */
-extern volatile uint32_t pb_qspi_wait_fifo_azami;
-extern volatile uint32_t pb_qspi_wait_donme_azami;
-extern volatile uint32_t pb_qspi_wait_us_azami;
-extern volatile uint32_t pb_qspi_wait_us_top;
-void pb_qspi_sayaclari_sifirla(void);
+ * `w` komutu okuyor; sifirlamak icin pb_qspi_counters_reset(). */
+extern volatile uint32_t pb_qspi_wait_calls;       /* toplam cagri            */
+extern volatile uint32_t pb_qspi_wait_timeout;        /* zaman asimi (SESSIZ hata)*/
+extern volatile uint32_t pb_qspi_wait_sm_off;   /* girerken SM etkin degil */
+extern volatile uint32_t pb_qspi_wait_fifo_full;   /* girerken FIFO bos degil */
+extern volatile uint32_t pb_qspi_wait_residue;     /* cikarken FIFO bos degil */
+extern volatile uint32_t pb_qspi_wait_waited;     /* gercekten bekledigi     */
+extern volatile uint32_t pb_qspi_wait_fifo_max;
+extern volatile uint32_t pb_qspi_wait_spin_max;
+extern volatile uint32_t pb_qspi_wait_us_max;
+extern volatile uint32_t pb_qspi_wait_us_total;
+void pb_qspi_counters_reset(void);
 
 void QSPI_GPIO_Init(pio_qspi_t qspi);
 void QSPI_Select(pio_qspi_t qspi);

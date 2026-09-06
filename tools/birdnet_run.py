@@ -22,7 +22,7 @@ ayni surede daha cok bilgi birakiyor; ilk olcum kayitta bunu dogruladi:
 
 `Engine` gibi kus disi siniflar Asama-1 kapisi ve negatif madenciligi icin
 dogrudan degerli; akraba tur skoru da bulasik dilimi ayiklamaya yariyor.
-178 ture suzme tools/birdnet_ozet.py'de yapiliyor.
+178 ture suzme tools/birdnet_summary.py'de yapiliyor.
 
 --------------------------------------------------------------------------
 NEDEN --min_conf 0.1
