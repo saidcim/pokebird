@@ -1666,8 +1666,8 @@ static void cmd_cursor_seek(void) {
     }
 
     z_background(CLR_BLUE);
-    printf("  [4] KONTROL (z[4] ile ayni, dogru oldugu biliniyor):\n");
-    printf("      pencere %d..%d, %d satir genis kirmizi atlama, sonra beyaz\n",
+    printf("  [4] CONTROL (same as z[4], known to be correct):\n");
+    printf("      window %d..%d, a %d-row wide red skip, then white\n",
            SQ_X, SQ_X + SQ_W - 1, SQ_Y);
     qspi_caset(SQ_X, SQ_X + SQ_W - 1);
     pb_lcd_stream_begin(0x2C);
@@ -1676,39 +1676,40 @@ static void cmd_cursor_seek(void) {
     pb_lcd_stream_end();
     hybrid_wait();
 
-    printf("\nBildirin (her adim icin uc sey):\n");
-    printf("  a) beyaz kare ORTADA mi, ORTAYA YAKIN mi, UCTA mi?\n");
-    printf("  b) kare DUZ mu, NOKTALI mi?\n");
-    printf("  c) kirmizi INCE cizgi mi, GENIS blok mu?\n\n");
-    printf("  [1] ortada + DUZ  -> panel sutunu 2'ye yuvarliyor, UCUZ\n");
-    printf("      KONUMLANDIRMA VAR: y satir ilerletmek 2*y piksel.\n");
-    printf("      pb_lcd_blit genel amacli kalir, `a` demosu duzelir.\n");
-    printf("  [1] hala noktali/kayik -> dar pencere yolu OLU. Panel yalnizca\n");
-    printf("      yukaridan asagi TEK GECIS cizime izin veriyor; arayuz\n");
-    printf("      katmani (kart + serit duzeni) ona gore yeniden kurulacak.\n\n");
+    printf("\nReport three things for each step:\n");
+    printf("  a) is the white square in the MIDDLE, NEAR the middle, or at the EDGE?\n");
+    printf("  b) is the square SOLID or DOTTED?\n");
+    printf("  c) is the red a THIN line or a WIDE block?\n\n");
+    printf("  [1] centre + SOLID -> the panel rounds columns to 2, so CHEAP\n");
+    printf("      POSITIONING EXISTS: advancing y rows costs 2*y pixels.\n");
+    printf("      pb_lcd_blit stays general purpose and the `a` demo is fixed.\n");
+    printf("  [1] still dotted/shifted -> the narrow-window path is DEAD. The\n");
+    printf("      panel only permits SINGLE-PASS drawing top to bottom, and the\n");
+    printf("      UI layer has to be rebuilt around that.\n\n");
 
     qspi_caset(0, PB_PANEL_W - 1);
     pb_lcd_cursor_invalidate();
 }
 
 /**
- * `L` — yazı teşhisi. GÖZ GEREKMİYOR.
+ * `L` — text diagnostic. NO EYES REQUIRED.
  *
- * Ekrandaki yazılar bozuk görünüyor ama teşhisin tamamı temiz çıktı:
- * WaitIdle bekliyor, CS zamanlaması doğru, sütun hizalaması tutuyor
- * (HIZASIZ 0), LVGL'in satır adımı alan genişliğine eşit (fark 0). Geriye
- * iki ihtimal kaldı ve bu komut ikisini ayırıyor:
+ * The text on screen looks corrupt, but every diagnostic came back clean:
+ * WaitIdle waits, the CS timing is right, the column alignment holds
+ * (UNALIGNED 0), and LVGL's row stride equals the area width (difference 0).
+ * Two possibilities remain, and this command separates them:
  *
- *   - LVGL yazıyı zaten bozuk çiziyor (yazı tipi/önbellek/bellek sorunu), ya da
- *   - çizim doğru, bozulma bizim gönderme yolumuzda.
+ *   - LVGL is already drawing the text corrupt (a font, cache or memory
+ *     problem), or
+ *   - the drawing is correct and the corruption is in our send path.
  *
- * Tek bir etiket çizdirip flush alanını, **sürücünün okuduğu indislemeyle**,
- * seri porta ASCII olarak döküyor. Terminalde "PokeBird" okunuyorsa LVGL de
- * devrik okuma da sağlam demektir.
+ * It draws a single label and dumps the flush area to the serial console as
+ * ASCII, **using the indexing the driver reads with**. If "PokeBird" is
+ * legible in the terminal, then both LVGL and the transposed read are sound.
  */
 static void cmd_text_dump(void) {
-    printf("\nYazi teshisi — LVGL'in cizdigi ASCII olarak dokuluyor (goz GEREKMEZ)\n");
-    printf("====================================================================\n\n");
+    printf("\nText diagnostic - what LVGL drew, dumped as ASCII (NO EYES NEEDED)\n");
+    printf("=================================================================\n\n");
 
     backlight_set(true);
     pb_lcd_fill(0x0000);
@@ -1724,37 +1725,42 @@ static void cmd_text_dump(void) {
     lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 4, 4);
 
-    /* Once tum ekrani cizdir (dokum kapali), sonra yalnizca etiketi kirlet. */
+    /* Draw the whole screen first (with the dump off), then dirty only the
+     * label. */
     for (int i = 0; i < 6; i++) { pb_lv_tick(); sleep_ms(10); }
 
-    printf("Asagidaki dokum ui yoneliminde: her satir bir ui y, her karakter\n");
-    printf("bir ui x. Yazi okunuyorsa LVGL ve devrik okuma SAGLAM.\n\n");
+    printf("The dump below is in UI orientation: each line is one ui y and each\n");
+    printf("character one ui x. If the text is legible, LVGL and the transposed\n");
+    printf("read are both SOUND.\n\n");
     pb_lv_request_dump(1);
-    pb_lcd_request_row_dump(140);   /* DMA'ya giden s_row'un kendisi */
+    pb_lcd_request_row_dump(140);   /* s_row itself, as handed to DMA */
     lv_obj_invalidate(label);
     for (int i = 0; i < 6; i++) { pb_lv_tick(); sleep_ms(10); }
 
-    printf("\nBitti.\n\n");
+    printf("\nDone.\n\n");
 }
 
 /**
- * `S` — dar pencerede çok satırlı yazma KAYIYOR MU? GÖZ GEREKİR.
+ * Does a multi-row write into a NARROW WINDOW slip? EYES REQUIRED.
  *
- * Yazılım yolunun tamamı ölçüldü ve temiz: LVGL'in çizimi, 90° devrik okuma,
- * satır adımı, sütun hizalaması, DMA'ya giden `s_row`'un kendisi — hepsi
- * piksel piksel doğru (`L` komutu). Doğru veri, hizalı pencereyle hatta
- * çıkıyor. Yine de ekranda yazı bozuk.
+ * The entire software path has been measured and is clean: LVGL's drawing,
+ * the 90-degree transposed read, the row stride, the column alignment, and
+ * `s_row` itself as handed to DMA — all correct pixel for pixel (the `L`
+ * command). Correct data goes out with an aligned window. And yet the text on
+ * screen is corrupt.
  *
- * ⚠ Şimdiye kadarki BÜTÜN ekran testleri bu hataya KÖRDÜ: `o`'nun köşeleri,
- * `z`/`j`'nin kareleri, `d`'nin renkleri, `pb_lcd_fill` — hepsi DÜZ RENK.
- * Düz bir blok satır satır kaysa bile yine düz blok görünür. Spektrogram da
- * kör: her itmede TEK satır yazıyor, hata birikemiyor. Bozulan tek şey
- * LVGL'in yazısı ve o da tek yerde: **dar pencereye çok satırlı yazma.**
+ * EVERY display test so far was BLIND to this bug: `o`'s corners, `z`/`j`'s
+ * squares, `d`'s colours, `pb_lcd_fill` — all FLAT COLOUR. A flat block still
+ * looks like a flat block even if it slips row by row. The spectrogram is
+ * blind too: it writes ONE row per push, so the error cannot accumulate. The
+ * only thing that breaks is LVGL's text, and it breaks in one place: **a
+ * multi-row write into a narrow window.**
  *
- * Bu test tam olarak onu sınıyor. Desen düz renk DEĞİL: her satırda aynı iki
- * pikselde beyaz nokta var, yani doğru yazılırsa iki DÜMDÜZ çizgi çıkar,
- * kayma varsa çizgiler EĞİLİR. Kaynak `row_step = 0` ile besleniyor, yani
- * her panel satırı aynı veriyi alıyor — eğilme varsa panelden gelir.
+ * This test exercises exactly that. The pattern is deliberately NOT a flat
+ * colour: every row has a white dot at the same two pixels, so a correct
+ * write gives two DEAD STRAIGHT lines and a slip makes them SLANT. The source
+ * is fed with `row_step = 0`, so every panel row gets identical data — any
+ * slant therefore comes from the panel.
  */
 static void shift_band(uint32_t x1, uint32_t width, uint32_t n_pixel,
                         uint16_t color, uint32_t row) {
@@ -1771,36 +1777,38 @@ static void shift_band(uint32_t x1, uint32_t width, uint32_t n_pixel,
 }
 
 /**
- * `S` — dar pencerede panelin GERÇEK satır adımı kaç piksel? GÖZ GEREKİR.
+ * `S` — how many pixels is the panel's REAL row step in a narrow window?
+ * EYES REQUIRED.
  *
- * ÖLÇÜLDÜ (kullanıcı gözle): 32 sütunluk pencereye 32 piksel/satır
- * yazınca çizgiler merdiven gibi AŞAĞI kayıyor; tam genişlikte (172) düz.
- * Yani panelin bir satırda tükettiği piksel sayısı, pencere genişliği
- * OLARAK HESAPLADIĞIMIZ değere eşit değil — ve fark yazıyı bozuyor.
+ * MEASURED by eye: writing 32 pixels per row into a 32-column window makes
+ * the lines slip DOWNWARDS like a staircase, while at full width (172) they
+ * are straight. So the number of pixels the panel consumes per row is not
+ * equal to the window width WE COMPUTE — and the difference is what corrupts
+ * the text.
  *
- * Bu tur tahmin etmiyor, ÖLÇÜYOR: aynı 32 sütunluk pencereye satır başına
- * 31 / 32 / 33 / 34 piksel yazan dört bant basılıyor. Hangisinin çizgileri
- * DÜMDÜZ çıkarsa panelin gerçek satır adımı odur. Desen bilerek düz renk
- * değil; düz blok kaysa bile düz görünür (§9n'de bütün testleri kör eden şey
- * tam olarak buydu).
+ * This round does not guess, it MEASURES: four bands are drawn into the same
+ * 32-column window at 31 / 32 / 33 / 34 pixels per row. Whichever band's
+ * lines come out DEAD STRAIGHT gives the panel's real row step. The pattern
+ * is deliberately not a flat colour; a flat block looks flat even when it
+ * slips, which is exactly what blinded every earlier test.
  */
 static void cmd_stripe_test(void) {
     enum { ROW = 200, WIDTH = 32 };
 
     const struct { uint32_t x1, n; uint16_t color; const char *name; } band[] = {
-        {   8, 31, 0xF800, "KIRMIZI = satir basina 31 piksel" },
-        {  40, 32, 0x07E0, "YESIL   = satir basina 32 piksel (su anki varsayim)" },
-        {  72, 33, 0x001F, "MAVI    = satir basina 33 piksel" },
-        { 104, 34, 0xFFE0, "SARI    = satir basina 34 piksel" },
+        {   8, 31, 0xF800, "RED    = 31 pixels per row" },
+        {  40, 32, 0x07E0, "GREEN  = 32 pixels per row (the current assumption)" },
+        {  72, 33, 0x001F, "BLUE   = 33 pixels per row" },
+        { 104, 34, 0xFFE0, "YELLOW = 34 pixels per row" },
     };
 
-    printf("\nDar pencere satir adimi olcumu — hangi bant DUZ?\n");
-    printf("================================================\n\n");
+    printf("\nNarrow-window row step measurement - which band is STRAIGHT?\n");
+    printf("===========================================================\n\n");
     backlight_set(true);
     pb_lcd_fill(0x0000);
 
-    /* Referans: tam genislik. Bunun duz oldugu olculdu; "duz nasil gorunur"un
-     * karsilastirma olcegi olsun diye duruyor. */
+    /* A reference at full width. This is measured to be straight, and it is
+     * here to give a comparison for what "straight" looks like. */
     {
         static uint16_t pattern[PB_PANEL_W];
         for (uint32_t i = 0; i < PB_PANEL_W; i++) pattern[i] = 0x0000;
@@ -1818,44 +1826,46 @@ static void cmd_stripe_test(void) {
         printf("  %s\n", band[i].name);
     }
 
-    printf("\nEkranda BES cift yatay cizgi var (cihaz USB SAGDA, yatay).\n");
-    printf("Hepsi ekranin SOL ucundan baslayip ortaya dogru uzaniyor.\n");
-    printf("  2 BEYAZ  — tam genislikteki referans, DUZ olmali\n");
-    printf("  kirmizi / yesil / mavi / sari — dort aday satir adimi\n\n");
-    printf("BILDIRIN: hangi RENK cifti beyazlar gibi DUMDUZ?\n");
-    printf("(digerlerinin merdiven gibi yukari ya da asagi kaymasi bekleniyor)\n\n");
-    printf("Duz cikan renk, panelin dar penceredeki GERCEK satir adimini verir.\n");
-    printf("Sürücü ona göre düzeltilecek — yazinin bozuk gorunmesinin sebebi bu.\n\n");
+    printf("\nThere are FIVE pairs of horizontal lines on screen (device in\n");
+    printf("landscape, USB on the RIGHT). All start at the LEFT edge and run\n");
+    printf("towards the middle.\n");
+    printf("  2 WHITE  - the full-width reference, should be STRAIGHT\n");
+    printf("  red / green / blue / yellow - four candidate row steps\n\n");
+    printf("REPORT: which COLOUR pair is as DEAD STRAIGHT as the white ones?\n");
+    printf("(the others are expected to slip up or down like a staircase)\n\n");
+    printf("The straight one gives the panel's REAL row step in a narrow window,\n");
+    printf("and the driver is corrected accordingly - that is why the text looks\n");
+    printf("corrupt.\n\n");
 }
 
 /**
- * Dokunmatik bring-up ve koordinat eşlemesi.
+ * Touch bring-up and coordinate mapping.
  *
- * Ham değerlerin hangi eksene/yöne karşılık geldiği varsayılmıyor, ekran
- * yönünde olduğu gibi ÖLÇÜLÜYOR: kullanıcıdan dört köşeye sırayla dokunması
- * isteniyor ve cihaz her köşenin ham değerini yazıyor. Dört satırdan eşleme
- * belirsizliğe yer bırakmadan çıkıyor.
+ * Which axis and direction the raw values correspond to is not assumed but
+ * MEASURED, exactly as the screen orientation was: the user is asked to touch
+ * each of the four edges in turn and the device prints the raw value for
+ * each. Four lines settle the mapping unambiguously.
  */
 static void cmd_touch_probe(void) {
-    printf("\nDokunmatik teshisi\n");
-    printf("==================\n\n");
+    printf("\nTouch diagnostic\n");
+    printf("================\n\n");
 
     if (!pb_touch_init()) {
-        printf("Adres 0x%02x (I2C0, SDA=GPIO%d SCL=GPIO%d) yanit VERMIYOR.\n\n",
+        printf("Address 0x%02x (I2C0, SDA=GPIO%d SCL=GPIO%d) does NOT respond.\n\n",
                PB_TP_I2C_ADDR, PB_PIN_TP_SDA, PB_PIN_TP_SCL);
         return;
     }
-    printf("Adres 0x%02x yanit veriyor.\n\n", PB_TP_I2C_ADDR);
+    printf("Address 0x%02x responds.\n\n", PB_TP_I2C_ADDR);
 
-    /* ── Once en temel soru: bu hatta gercekten bir sey var mi? ───────────
-     * Adres taramasi. Yalnizca 0x3B yanit veriyorsa cip gercekten orada.
-     * COGU adres yanit veriyorsa hat bozuk (yanlis pin, SDA takili kalmis)
-     * ve okudugumuz 0xdb yalnizca gurultudur — protokol varyantlariyla
-     * ugrasmak bos emek olur. Karsilastirma icin ES8311'in bulundugu i2c1
-     * de taraniyor: o hat saglam oldugunu bildigimiz referans. */
+    /* ── First, the most basic question: is anything really on this bus? ──
+     * An address scan. If only 0x3B responds, the chip really is there. If
+     * MOST addresses respond, the bus is broken (wrong pin, SDA stuck) and
+     * the 0xdb we read is just noise — chasing protocol variants would be
+     * wasted effort. i2c1, where the ES8311 lives, is scanned for comparison:
+     * that bus is a reference we know to be sound. */
     {
-        printf("I2C adres taramasi:\n");
-        printf("  i2c0 (dokunmatik, GPIO%d/%d):", PB_PIN_TP_SDA, PB_PIN_TP_SCL);
+        printf("I2C address scan:\n");
+        printf("  i2c0 (touch, GPIO%d/%d):", PB_PIN_TP_SDA, PB_PIN_TP_SCL);
         int tp_count = 0;
         for (uint8_t a = 0x08; a < 0x78; a++) {
             uint8_t d;
@@ -1864,56 +1874,58 @@ static void cmd_touch_probe(void) {
                 tp_count++;
             }
         }
-        printf("   (%d adet)\n", tp_count);
+        printf("   (%d found)\n", tp_count);
 
-        printf("  i2c1 (codec,      GPIO%d/%d):", PB_PIN_I2C_SDA, PB_PIN_I2C_SCL);
+        printf("  i2c1 (codec, GPIO%d/%d):", PB_PIN_I2C_SDA, PB_PIN_I2C_SCL);
         int cd_count = 0;
         for (uint8_t a = 0x08; a < 0x78; a++) {
             if (pb_i2c_probe(a)) { printf(" %02x", a); cd_count++; }
         }
-        printf("   (%d adet)\n", cd_count);
+        printf("   (%d found)\n", cd_count);
 
         if (tp_count > 8) {
-            printf("  -> i2c0'da COK FAZLA adres yanit veriyor: hat bozuk,\n");
-            printf("     okunan 0xdb gurultu. Once pin/kablolama.\n\n");
+            printf("  -> FAR TOO MANY addresses respond on i2c0: the bus is\n");
+            printf("     broken and the 0xdb is noise. Check pins/wiring first.\n\n");
         } else if (tp_count == 0) {
-            printf("  -> i2c0'da HICBIR sey yok.\n\n");
+            printf("  -> NOTHING at all on i2c0.\n\n");
         } else {
             printf("\n");
         }
     }
 
 
-    /* INT hatti: cip dokunusu ALGILIYOR mu? Bu, okuma protokolunden bagimsiz
-     * bir soru. INT kipirdiyorsa cip calisiyordur ve sorun yalnizca okumada. */
+    /* The INT line: does the chip DETECT the touch? That is a question
+     * independent of the read protocol. If INT moves, the chip is working and
+     * the problem is only in the reading. */
     gpio_init(PB_PIN_TP_INT);
     gpio_set_dir(PB_PIN_TP_INT, GPIO_IN);
     gpio_pull_up(PB_PIN_TP_INT);
 
-    printf("Cihazi USB soketi SAGDA olacak sekilde YATAY tutun.\n\n");
+    printf("Hold the device in LANDSCAPE with the USB socket on the RIGHT.\n\n");
 
-    /* ── YONLENDIRMELI KALIBRASYON ────────────────────────────────────────
+    /* ── GUIDED CALIBRATION ───────────────────────────────────────────────
      *
-     * NEDEN: dokunmatik calisiyor ama ekran degistirme YANLIS EKSENDE
-     * tetikleniyor (kullanici DIKEY kaydiriyor, kod YATAY kaydirma sayiyor).
-     * Hangi bayt ciftinin hangi fiziksel eksen oldugu ve yonun hangi tarafa
-     * arttigi TAHMIN EDILEMEZ; dort kenar tek tek olculuyor.
+     * WHY: touch works, but the screen change fires on the WRONG AXIS (the
+     * user swipes VERTICALLY and the code counts a HORIZONTAL swipe). Which
+     * byte pair is which physical axis, and which way the value increases,
+     * CANNOT BE GUESSED; all four edges are measured one at a time.
      *
-     * Her kenarda ORTANCA aliniyor, ortalama degil: cip ara sira panel disi
-     * (~4000) deger veriyor ve ortalama ondan bozulur, ortanca bozulmaz. */
+     * The MEDIAN is taken at each edge, not the mean: the chip occasionally
+     * emits an off-panel value (~4000), which corrupts a mean but not a
+     * median. */
     {
         static uint16_t ox[256], oy[256];
-        const char *edge[4] = { "SOL", "SAG", "ALT", "UST" };
+        const char *edge[4] = { "LEFT", "RIGHT", "BOTTOM", "TOP" };
         uint16_t mx[4], my[4];
 
-        printf("KALIBRASYON — dort kenar sirayla olculecek.\n");
-        printf("Her komutta parmaginizi o kenarin ORTASINA basili tutun.\n\n");
+        printf("CALIBRATION - the four edges are measured in turn.\n");
+        printf("At each prompt, hold your finger on the MIDDLE of that edge.\n\n");
 
         for (int k = 0; k < 4; k++) {
-            /* Pico SDK'nin stdio'su tamponlamiyor; fflush KULLANILMIYOR —
-             * newlib'in fflush'i __retarget_lock_* sembollerini cekiyor ve
-             * SDK onlari saglamiyor, bag hatasi veriyor. */
-            printf("  >> %s kenarina simdi basili tutun", edge[k]);
+            /* The Pico SDK's stdio does not buffer, and fflush is NOT used:
+             * newlib's fflush drags in the __retarget_lock_* symbols, which
+             * the SDK does not provide, and the link fails. */
+            printf("  >> hold on the %s edge now", edge[k]);
             for (int g = 3; g > 0; g--) { printf(" %d", g); sleep_ms(700); }
 
             uint32_t n = 0;
@@ -1923,10 +1935,10 @@ static void cmd_touch_probe(void) {
                 if (st.ok && st.fingers > 0) { ox[n] = st.p.raw_x; oy[n] = st.p.raw_y; n++; }
                 sleep_ms(8);
             }
-            if (n == 0) { printf("  -> dokunma OKUNAMADI\n"); mx[k] = my[k] = 0xFFFF; continue; }
+            if (n == 0) { printf("  -> touch could NOT BE READ\n"); mx[k] = my[k] = 0xFFFF; continue; }
 
-            /* Ortanca: kucukten buyuge siralayip ortayi al (n kucuk, basit
-             * ekleme siralamasi yeter). */
+            /* Median: sort ascending and take the middle (n is small, a
+             * simple insertion sort is enough). */
             for (uint32_t i = 1; i < n; i++) {
                 uint16_t a = ox[i], b = oy[i];
                 uint32_t j = i;
@@ -1938,44 +1950,45 @@ static void cmd_touch_probe(void) {
             }
             mx[k] = ox[n / 2];
             my[k] = oy[n / 2];
-            printf("  -> ortanca ham_x %4u  ham_y %4u   (%lu ornek, en kucuk/buyuk "
+            printf("  -> median raw_x %4u  raw_y %4u   (%lu samples, min/max "
                    "x %u/%u  y %u/%u)\n",
                    mx[k], my[k], (unsigned long)n, ox[0], ox[n - 1], oy[0], oy[n - 1]);
         }
 
-        printf("\n  SONUC:\n");
-        printf("    SOL->SAG  ham_x %u -> %u   (degisim %d)\n",
+        printf("\n  RESULT:\n");
+        printf("    LEFT->RIGHT   raw_x %u -> %u   (change %d)\n",
                mx[0], mx[1], (int)mx[1] - (int)mx[0]);
-        printf("    SOL->SAG  ham_y %u -> %u   (degisim %d)\n",
+        printf("    LEFT->RIGHT   raw_y %u -> %u   (change %d)\n",
                my[0], my[1], (int)my[1] - (int)my[0]);
-        printf("    ALT->UST  ham_x %u -> %u   (degisim %d)\n",
+        printf("    BOTTOM->TOP   raw_x %u -> %u   (change %d)\n",
                mx[2], mx[3], (int)mx[3] - (int)mx[2]);
-        printf("    ALT->UST  ham_y %u -> %u   (degisim %d)\n",
+        printf("    BOTTOM->TOP   raw_y %u -> %u   (change %d)\n",
                my[2], my[3], (int)my[3] - (int)my[2]);
-        printf("  Hangi ham eksen YATAY'da cok degisiyorsa arayuzun x'i odur;\n");
-        printf("  degisimin isareti de yonu verir.\n\n");
+        printf("  Whichever raw axis changes most HORIZONTALLY is the UI's x,\n");
+        printf("  and the sign of the change gives the direction.\n\n");
     }
 
-    printf("Simdi CANLI AKIS. Kenarlarda gezdirin; her degisiklik yaziliyor.\n");
-    printf("INT sutunu dokununca 0'a dusuyorsa cip dokunusu goruyor demektir.\n");
-    printf("Cikmak icin bir tusa basin.\n\n");
-    printf("  INT  parmak   ham x   ham y   ilk 8 bayt\n");
+    printf("Now a LIVE STREAM. Move around the edges; every change is printed.\n");
+    printf("If the INT column drops to 0 on touch, the chip is seeing it.\n");
+    printf("Press any key to exit.\n\n");
+    printf("  INT  fingers   raw x   raw y   first 8 bytes\n");
 
-    /* Adim adim "su koseye dokun" yerine CANLI AKIS: cihaz ne goruyorsa onu
-     * yaziyor. Onceki surum kose kose ilerliyordu ve bazi koseleri atliyordu;
-     * hatanin dokunmatikte mi kendi durum makinemde mi oldugu ayirt
-     * edilemiyordu. Ham baytlari da basiyoruz — parmak sayisinin gercekten
-     * bayt 1'de olup olmadigi ancak boyle gorulur. */
+    /* A LIVE STREAM rather than a step-by-step "touch this corner": the
+     * device prints whatever it sees. The previous version walked corner by
+     * corner and skipped some, so it was impossible to tell whether the fault
+     * was in the touch controller or in our own state machine. The raw bytes
+     * are printed too — that is the only way to see whether the finger count
+     * really is in byte 1. */
     uint16_t previous_x = 0xFFFF, previous_y = 0xFFFF;
     uint8_t  previous_f = 0xFF;
     int      previous_int = -1;
-    uint32_t hic_yanit_yok = 0;
+    uint32_t no_response = 0;
 
     while (getchar_timeout_us(0) < 0) {
         int intp = gpio_get(PB_PIN_TP_INT);
         pb_touch_state_t st = pb_touch_read();
         if (!st.ok) {
-            if (++hic_yanit_yok % 100 == 1) printf("  (I2C yanit vermiyor)\n");
+            if (++no_response % 100 == 1) printf("  (I2C is not responding)\n");
             sleep_ms(20);
             continue;
         }
@@ -1995,41 +2008,42 @@ static void cmd_touch_probe(void) {
         }
         sleep_ms(20);
     }
-    printf("\ncikildi\n\n");
+    printf("\nexited\n\n");
 }
 
 /**
- * Veri yolu teşhisi — QSPI hattında hangi varsayım tutmuyor?
+ * Data path diagnostic — which assumption about the QSPI bus does not hold?
  *
- * Üç başlatma dizisinin üçü de görüntü vermedi, yani sorun panelin register
- * dizisinde değil, baytların panele ulaşmasında. Bu testte veri yolundaki
- * her varsayım tek tek ölçülüyor; çoğu için ekrana bakmak GEREKMİYOR, cihaz
- * sonucu kendisi yazıyor (bkz. lastsession.md §5.9).
+ * All three init sequences failed to produce an image, so the problem is not
+ * the panel's register sequence but the bytes reaching the panel. This test
+ * measures every assumption on the data path one at a time; for most of them
+ * NO EYES are required, because the device prints the result itself.
  */
 static void cmd_datapath_probe(void) {
-    printf("\nVeri yolu teshisi\n");
-    printf("=================\n\n");
+    printf("\nData path diagnostic\n");
+    printf("====================\n\n");
 
-    /* ── 1. Dar (8 bit) DMA yazimi bayt seritlerine kopyalaniyor mu? ──────
-     * Piksel verisi DMA_SIZE_8 ile PIO TX FIFO'suna yaziliyor. PIO programi
-     * OSR'yi SOLA kaydiriyor, yani anlamli bayt bit 31:24'te olmali. Tek
-     * baytlik bir yazimin 32 bitin tamamina kopyalanmasina guveniyoruz.
-     * Kopyalanmiyorsa bayt bit 7:0'a dusuyor ve panele giden her piksel 0
-     * oluyor — tum piksel yolu sessizce olu.
+    /* ── 1. Is a narrow (8-bit) DMA write replicated across byte lanes? ───
+     * Pixel data is written to the PIO TX FIFO with DMA_SIZE_8. The PIO
+     * program shifts the OSR LEFT, so the significant byte must be in bits
+     * 31:24. We rely on a single-byte write being replicated across all 32
+     * bits. If it is not, the byte lands in bits 7:0 and every pixel reaching
+     * the panel is 0 — the whole pixel path is silently dead.
      *
-     * Zararsiz, okunabilir bir IO register'ina (watchdog scratch) ayni
-     * sekilde tek bayt yazip geri okuyoruz. */
+     * We write a single byte the same way to a harmless, readable IO register
+     * and read it back. */
     {
-        /* Hedef: kullanilmayan bir DMA kanalinin read_addr register'i. Tam
-         * 32 bit okunur-yazilir, tetiklenmedigi surece zararsiz. (Ilk
-         * denemede watchdog scratch kullanilmisti; oradan 0 donuyordu, yani
-         * hedef yaziya hic izin vermiyordu ve test sonucsuz kalmisti.) */
+        /* The target is an unused DMA channel's read_addr register: fully
+         * 32-bit readable and writable, and harmless as long as it is not
+         * triggered. (The first attempt used the watchdog scratch register,
+         * which read back 0 — the target was not accepting the write at all
+         * and the test was inconclusive.) */
         int target = dma_claim_unused_channel(true);
         int ch    = dma_claim_unused_channel(true);
         volatile uint32_t *reg = &dma_hw->ch[target].read_addr;
         static uint8_t src = 0xA5;
 
-        /* (a) DMA ile tek bayt */
+        /* (a) a single byte via DMA */
         *reg = 0;
         dma_channel_config cfg = dma_channel_get_default_config(ch);
         channel_config_set_transfer_data_size(&cfg, DMA_SIZE_8);
@@ -2037,9 +2051,9 @@ static void cmd_datapath_probe(void) {
         channel_config_set_write_increment(&cfg, false);
         dma_channel_configure(ch, &cfg, (void *)reg, &src, 1, true);
         dma_channel_wait_for_finish_blocking(ch);
-        uint32_t dma_sonuc = *reg;
+        uint32_t dma_result = *reg;
 
-        /* (b) CPU ile tek bayt — karsilastirma icin */
+        /* (b) a single byte via the CPU, for comparison */
         *reg = 0;
         *(volatile uint8_t *)reg = 0xA5;
         uint32_t cpu_result = *reg;
@@ -2048,26 +2062,26 @@ static void cmd_datapath_probe(void) {
         dma_channel_unclaim(ch);
         dma_channel_unclaim(target);
 
-        printf("1) Dar (8 bit) IO yazimi — 0xA5:\n");
-        printf("   DMA ile: 0x%08lx    CPU ile: 0x%08lx\n",
-               (unsigned long)dma_sonuc, (unsigned long)cpu_result);
-        if (dma_sonuc == 0xA5A5A5A5u) {
-            printf("   -> bayt tum seritlere kopyalaniyor. PIO 31:24'ten okuyor,\n");
-            printf("      piksel yolu bu yonden SAGLAM.\n\n");
-        } else if (dma_sonuc == 0x000000A5u) {
-            printf("   -> KOPYALANMIYOR. Bayt 7:0'a dusuyor, PIO ise sola kaydirip\n");
-            printf("      31:24'ten okuyor: TUM PIKSEL VERISI SIFIR GIDIYOR.\n");
-            printf("      Duzeltme: DMA yazma adresi ((uint8_t*)&pio->txf[sm])+3.\n\n");
+        printf("1) Narrow (8-bit) IO write - 0xA5:\n");
+        printf("   via DMA: 0x%08lx    via CPU: 0x%08lx\n",
+               (unsigned long)dma_result, (unsigned long)cpu_result);
+        if (dma_result == 0xA5A5A5A5u) {
+            printf("   -> the byte is replicated across all lanes. PIO reads from\n");
+            printf("      31:24, so the pixel path is SOUND in this respect.\n\n");
+        } else if (dma_result == 0x000000A5u) {
+            printf("   -> NOT REPLICATED. The byte lands in 7:0 while PIO shifts\n");
+            printf("      left and reads 31:24: ALL PIXEL DATA GOES OUT AS ZERO.\n");
+            printf("      Fix: DMA write address ((uint8_t*)&pio->txf[sm])+3.\n\n");
         } else {
-            printf("   -> beklenmeyen; elle degerlendirin.\n\n");
+            printf("   -> unexpected; evaluate by hand.\n\n");
         }
     }
 
-    /* ── 2. PIO state machine calisiyor ve FIFO'yu tuketiyor mu? ────────── */
+    /* ── 2. Is the PIO state machine running and draining the FIFO? ────── */
     {
-        printf("2) PIO durumu (pio0, sm%u):\n", (unsigned)qspi.sm);
-        printf("   SM etkin mi: %s\n",
-               ((qspi.pio->ctrl >> qspi.sm) & 1u) ? "EVET" : "HAYIR (veri hic cikmaz)");
+        printf("2) PIO state (pio0, sm%u):\n", (unsigned)qspi.sm);
+        printf("   SM enabled: %s\n",
+               ((qspi.pio->ctrl >> qspi.sm) & 1u) ? "YES" : "NO (no data will ever go out)");
         printf("   PC: %u\n", (unsigned)pio_sm_get_pc(qspi.pio, qspi.sm));
 
         pio_sm_clear_fifos(qspi.pio, qspi.sm);
@@ -2076,21 +2090,22 @@ static void cmd_datapath_probe(void) {
                 pio_sm_put(qspi.pio, qspi.sm, 0x0Fu << 24);
             }
         }
-        uint32_t lvl_once = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
+        uint32_t lvl_before = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
         sleep_ms(2);
-        uint32_t lvl_sonra = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
-        printf("   TX FIFO: yazimdan hemen sonra %lu, 2 ms sonra %lu\n",
-               (unsigned long)lvl_once, (unsigned long)lvl_sonra);
-        printf("   -> %s\n\n", (lvl_sonra == 0)
-               ? "FIFO bosaliyor, SM veriyi tuketiyor."
-               : "FIFO BOSALMIYOR. SM calismiyor veya saat durmus.");
+        uint32_t lvl_after = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
+        printf("   TX FIFO: right after writing %lu, after 2 ms %lu\n",
+               (unsigned long)lvl_before, (unsigned long)lvl_after);
+        printf("   -> %s\n\n", (lvl_after == 0)
+               ? "the FIFO drains, the SM is consuming data."
+               : "the FIFO does NOT drain. The SM is stopped or the clock is dead.");
     }
 
-    /* ── 3. PIO pinleri gercekten suruyor mu? ─────────────────────────────
-     * Saati calisilamayacak kadar yavaslatip (birkac kHz) pinleri CPU ile
-     * ornekliyoruz. Gecis sayisi 0 ise PIO o pini hic surmuyor. */
+    /* ── 3. Is PIO actually driving the pins? ─────────────────────────────
+     * The clock is slowed far below working speed (a few kHz) and the pins
+     * are sampled by the CPU. A transition count of 0 means PIO is not
+     * driving that pin at all. */
     {
-        printf("3) PIO pinleri suruyor mu (yavas saatte orneklendi):\n");
+        printf("3) Is PIO driving the pins (sampled at a slow clock):\n");
         pio_sm_set_clkdiv(qspi.pio, qspi.sm, 30000.0f);
         pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
 
@@ -2099,31 +2114,31 @@ static void cmd_datapath_probe(void) {
         absolute_time_t end = make_timeout_time_ms(60);
         while (!time_reached(end)) {
             if (!pio_sm_is_tx_fifo_full(qspi.pio, qspi.sm)) {
-                pio_sm_put(qspi.pio, qspi.sm, 0x0Fu << 24);  /* nibble 0 sonra F */
+                pio_sm_put(qspi.pio, qspi.sm, 0x0Fu << 24);  /* nibble 0 then F */
             }
             int s = gpio_get(PIN_SCLK);
             int d = gpio_get(PIN_DIO0);
             if (s != previous_s) { transition_sclk++; previous_s = s; }
             if (d != previous_d) { transition_d0++;  previous_d = d; }
         }
-        printf("   SCLK(GPIO%d) gecis: %lu   D0(GPIO%d) gecis: %lu\n",
+        printf("   SCLK(GPIO%d) transitions: %lu   D0(GPIO%d): %lu\n",
                PIN_SCLK, (unsigned long)transition_sclk,
                PIN_DIO0, (unsigned long)transition_d0);
         printf("   -> %s\n\n", (transition_sclk > 0 && transition_d0 > 0)
-               ? "PIO her iki pini de suruyor."
-               : "PIN KIPIRDAMIYOR. Yanlis pin, ezilmis islev ya da olu SM.");
+               ? "PIO is driving both pins."
+               : "THE PINS DO NOT MOVE. Wrong pin, overridden function, or a dead SM.");
 
         pio_sm_set_clkdiv(qspi.pio, qspi.sm, 2.0f);
         pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
         pio_sm_clear_fifos(qspi.pio, qspi.sm);
     }
 
-    /* ── 4. Pinler elektriksel olarak saglam mi? ──────────────────────────
-     * Pinleri kisa sureligine duz GPIO yapip surulen seviyeyi geri okuyoruz.
-     * Bu test yanlis pin NUMARASINI yakalayamaz (bagli olmayan bir GPIO de
-     * yazdiginizi geri okur); kisa devre / takili kalmis pin yakalar. */
+    /* ── 4. Are the pins electrically sound? ──────────────────────────────
+     * The pins are briefly made plain GPIOs and the driven level is read
+     * back. This test cannot catch a wrong pin NUMBER (an unconnected GPIO
+     * also reads back what you wrote); it catches shorts and stuck pins. */
     {
-        printf("4) Pin surme/geri okuma (kisa devre testi):\n");
+        printf("4) Pin drive/readback (short-circuit test):\n");
         const struct { uint pin; const char *name; } pins[] = {
             { PIN_SCLK, "SCLK" }, { PIN_DIO0, "D0" }, { PIN_DIO1, "D1" },
             { PIN_DIO2, "D2" },   { PIN_DIO3, "D3" }, { PIN_CS,   "CS" },
@@ -2138,14 +2153,14 @@ static void cmd_datapath_probe(void) {
             int low = gpio_get(pins[i].pin);
             printf("   %-4s GPIO%-2d  1->%d  0->%d  %s\n",
                    pins[i].name, pins[i].pin, high, low,
-                   (high == 1 && low == 0) ? "" : "<<< TAKILI KALMIS");
+                   (high == 1 && low == 0) ? "" : "<<< STUCK");
         }
         printf("\n");
 
-        /* Takili kalan pin disaridan mi suruluyor? Cikisi birakip once
-         * asagi sonra yukari cekerek olcuyoruz: ikisinde de ayni seviye
-         * okunuyorsa pini baska bir sey suruyor demektir. */
-        printf("   Serbest birakildiginda (dahili pull ile olculdu):\n");
+        /* Is a stuck pin being driven from outside? We release the output
+         * and pull it down, then up: if the same level is read both times,
+         * something else is driving the pin. */
+        printf("   When released (measured with the internal pulls):\n");
         const struct { uint pin; const char *name; } free[] = {
             { PIN_RST, "RST(34)" }, { PB_PIN_LCD_TE, "TE(35)" },
             { PB_PIN_LCD_BL, "BL(36)" }, { PB_PIN_BL_EN, "BL_EN(37)" },
@@ -2158,34 +2173,28 @@ static void cmd_datapath_probe(void) {
             gpio_pull_up(free[i].pin);   sleep_ms(2);
             int pu = gpio_get(free[i].pin);
             gpio_disable_pulls(free[i].pin);
-            const char *yorum = (pd == 0 && pu == 1) ? "serbest (normal)"
-                              : (pd == 1 && pu == 1) ? "DISARIDAN YUKSEK SURULUYOR"
-                              : (pd == 0 && pu == 0) ? "DISARIDAN DUSUK SURULUYOR"
-                                                     : "belirsiz";
+            const char *note = (pd == 0 && pu == 1) ? "free (normal)"
+                             : (pd == 1 && pu == 1) ? "DRIVEN HIGH FROM OUTSIDE"
+                             : (pd == 0 && pu == 0) ? "DRIVEN LOW FROM OUTSIDE"
+                                                    : "inconclusive";
             printf("   %-10s pull-down->%d  pull-up->%d   %s\n",
-                   free[i].name, pd, pu, yorum);
+                   free[i].name, pd, pu, note);
         }
         printf("\n");
     }
 
-    /* ── 5. Komutlar panele ulasiyor mu? (goz gerekir) ────────────────────
-     * DISPOFF/DISPON ve renk tersleme, piksel verisinden BAGIMSIZ olarak
-     * ekranda gorunur bir degisiklik yapar. Karincalanma sonuyor ya da
-     * renkleri tersine donuyorsa komut yolu calisiyor demektir ve sorun
-     * yalnizca piksel yolundadir. Hicbir sey degismiyorsa panele hicbir
-     * sey ulasmiyordur. */
-    /* ── 5. Komutlar panele ULASIYOR MU? — TE hatti ile, goz gerekmeden ────
-     * Panelin TE (tearing effect) cikisi GPIO35'e bagli. TEON (0x35) komutu
-     * panelin her karede bu hatti darbelemesini saglar; TEOFF (0x34) durdurur.
-     * Yani TE'yi izleyerek "komut panele ulasti mi" sorusunu ekrana bakmadan,
-     * olcerek yanitlayabiliyoruz. Ayrica darbe varsa panel gercekten TARIYOR
-     * demektir — ki bu da karincalanmanin panelin kendi GRAM'ini gosterdigini
-     * dogrular. */
+    /* ── 5. Do the commands REACH the panel? — via the TE line, no eyes ───
+     * The panel's TE (tearing effect) output is wired to GPIO35. The TEON
+     * (0x35) command makes the panel pulse that line every frame, and TEOFF
+     * (0x34) stops it. So by watching TE we can answer "did the command reach
+     * the panel" by measurement rather than by looking at the screen. And if
+     * there are pulses, the panel really is SCANNING — which also confirms
+     * that the snow is the panel showing its own GRAM. */
     {
-        printf("5) Komut yolu testi — panelin TE cikisi (GPIO%d) dinleniyor:\n",
+        printf("5) Command path test - listening to the panel's TE output (GPIO%d):\n",
                PB_PIN_LCD_TE);
 
-        /* Pinleri PIO'ya geri ver, paneli yeniden baslat */
+        /* Hand the pins back to PIO and restart the panel */
         QSPI_GPIO_Init(qspi);
         for (uint p = PIN_SCLK; p <= PIN_DIO3; p++) pio_gpio_init(qspi.pio, p);
         LCD_3IN49_InitVariant(LCD_3IN49_INIT_FULL);
@@ -2194,11 +2203,11 @@ static void cmd_datapath_probe(void) {
         gpio_set_dir(PB_PIN_LCD_TE, GPIO_IN);
         gpio_disable_pulls(PB_PIN_LCD_TE);
 
-        /* TE gecislerini 200 ms boyunca say (60 Hz'de ~24 beklenir).
-         * Test iki yonlu: TEOFF darbeleri durdurmali, TEON geri getirmeli.
-         * Tek yonlu bakmak yaniltici — panel varsayilan olarak da darbeliyor
-         * olabilir, nitekim ilk olcumde oyleydi. */
-        #define TE_SAY() ({                                            \
+        /* Count TE transitions over 200 ms (about 24 expected at 60 Hz).
+         * The test is two-way: TEOFF must stop the pulses and TEON must bring
+         * them back. Looking only one way is misleading — the panel may pulse
+         * by default anyway, as it did on the first measurement. */
+        #define TE_COUNT() ({                                            \
             uint32_t _s = 0; int _o = gpio_get(PB_PIN_LCD_TE);         \
             absolute_time_t _b = make_timeout_time_ms(200);            \
             while (!time_reached(_b)) {                                \
@@ -2206,55 +2215,56 @@ static void cmd_datapath_probe(void) {
                 if (_n != _o) { _s++; _o = _n; }                       \
             } _s; })
 
-        /* Saat hizini da eleyelim: 37.5 MHz komut icin fazla hizliysa yavas
-         * saatte calisir. Iki hizda da olcup karsilastiriyoruz. */
-        const struct { float bolen; const char *name; } rates[] = {
+        /* Rule out clock speed too: if 37.5 MHz is too fast for commands, a
+         * slow clock will work. We measure at both and compare. */
+        const struct { float divider; const char *name; } rates[] = {
             { 2.0f,  "clkdiv 2  (~37.5 MHz)" },
             { 40.0f, "clkdiv 40 (~1.9 MHz)"  },
         };
 
         for (size_t h = 0; h < sizeof(rates) / sizeof(rates[0]); h++) {
-            pio_sm_set_clkdiv(qspi.pio, qspi.sm, rates[h].bolen);
+            pio_sm_set_clkdiv(qspi.pio, qspi.sm, rates[h].divider);
             pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
 
-            uint32_t base = TE_SAY();
+            uint32_t base = TE_COUNT();
 
             LCD_3IN49_SendSimpleCmd(0x34);          /* TEOFF */
             sleep_ms(20);
-            uint32_t off = TE_SAY();
+            uint32_t off = TE_COUNT();
 
             QSPI_Select(qspi);                      /* TEON */
             QSPI_REGISTER_Write(qspi, 0x35);
             QSPI_DATA_Write(qspi, 0x00);
             QSPI_Deselect(qspi);
             sleep_ms(20);
-            uint32_t open = TE_SAY();
+            uint32_t open = TE_COUNT();
 
             printf("   %s\n", rates[h].name);
-            printf("     taban %lu  ->  TEOFF %lu  ->  TEON %lu\n",
+            printf("     baseline %lu  ->  TEOFF %lu  ->  TEON %lu\n",
                    (unsigned long)base, (unsigned long)off,
                    (unsigned long)open);
             if (base > 4 && off < 4 && open > 4) {
-                printf("     -> KOMUTLAR ULASIYOR. Panel emirlere uyuyor.\n");
+                printf("     -> COMMANDS ARE REACHING IT. The panel obeys.\n");
             } else if (base > 4) {
-                printf("     -> panel tariyor ama komutlara UYMUYOR.\n");
+                printf("     -> the panel scans but does NOT obey commands.\n");
             } else {
-                printf("     -> TE hic darbelemiyor; panel taramiyor.\n");
+                printf("     -> TE never pulses; the panel is not scanning.\n");
             }
         }
         printf("\n");
         pio_sm_set_clkdiv(qspi.pio, qspi.sm, 2.0f);
         pio_sm_clkdiv_restart(qspi.pio, qspi.sm);
-        #undef TE_SAY
+        #undef TE_COUNT
     }
 
-    /* ── 6. Bit-bang: PIO'yu denklemden cikar, panele kimligini sor ───────
-     * PIO calisiyor, pinler kipirdiyor, CS zamanlamasi duzeltildi — ama panel
-     * hala uymuyor. Geriye iki ihtimal kaliyor: PIO'nun urettigi dalga sekli
-     * yanlis, ya da sorun hattin/panelin kendisinde. Bit-bang ikisini ayirir.
-     * Ayrica okuma yapabildigi icin panelin kimligini sorabiliyoruz. */
+    /* ── 6. Bit-bang: take PIO out of the equation, ask the panel its ID ──
+     * PIO runs, the pins move, the CS timing was fixed — and the panel still
+     * does not obey. Two possibilities remain: the waveform PIO produces is
+     * wrong, or the problem is in the bus or the panel itself. Bit-bang
+     * separates them. And because it can read, we can ask the panel its
+     * identity. */
     {
-        printf("6) Bit-bang testi (PIO devre disi, ~500 kHz):\n");
+        printf("6) Bit-bang test (PIO disabled, ~500 kHz):\n");
         pio_sm_set_enabled(qspi.pio, qspi.sm, false);
         bb_pins_setup();
 
@@ -2271,18 +2281,19 @@ static void cmd_datapath_probe(void) {
         sleep_ms(20);
         uint32_t open = te_transition_count();
 
-        printf("   TE: taban %lu -> TEOFF %lu -> TEON %lu\n",
+        printf("   TE: baseline %lu -> TEOFF %lu -> TEON %lu\n",
                (unsigned long)base, (unsigned long)off, (unsigned long)open);
         printf("   -> %s\n", (base > 4 && off < 4 && open > 4)
-               ? "BIT-BANG CALISIYOR. Hata PIO dalga seklinde."
-               : "bit-bang de etkisiz. Sorun PIO'da degil.");
+               ? "BIT-BANG WORKS. The fault is in the PIO waveform."
+               : "bit-bang has no effect either. The problem is not in PIO.");
 
-        /* Panelden oku: 0x04 = RDDID, 0x0A = guc modu, 0x0C = piksel bicimi.
-         * Hepsi 0x00 ya da hepsi 0xFF gelirse panel hic yanit vermiyordur
-         * (hat sirasiyla asagi ya da yukari cekili kaliyor). */
+        /* Read from the panel: 0x04 = RDDID, 0x0A = power mode, 0x0C = pixel
+         * format. If everything comes back 0x00, or everything 0xFF, the
+         * panel is not answering at all (the bus is stuck low or high
+         * respectively). */
         const struct { uint8_t reg; const char *name; } reads[] = {
-            { 0x04, "RDDID  (uretici/surum/kimlik)" },
-            { 0x0A, "RDDPM  (guc modu)" },
+            { 0x04, "RDDID  (manufacturer/version/id)" },
+            { 0x0A, "RDDPM  (power mode)" },
             { 0x0C, "RDDCOLMOD (piksel bicimi)" },
         };
         int anlamli = 0;
