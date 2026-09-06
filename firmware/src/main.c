@@ -1,20 +1,17 @@
 /**
- * PokeBird — İstanbul kuş sesi tanıma cihazı
+ * PokeBird — a bird-song recognition device for Istanbul
  *
- * M1: mikrofon bring-up.
+ * This file is the firmware entry point and the diagnostic console.
  *
- * Bu aşamanın amacı bir özellik teslim etmek değil, planın en riskli
- * varsayımını ölçmek: kart üzerindeki analog MEMS mikrofon, aynı küçük PCB'de
- * duran ekran, QSPI hattı ve anahtarlamalı güç kaynağının gürültüsü altında
- * kuş sesi tanımaya yetecek kadar temiz mi?
+ * Beyond running the device, it carries the bring-up and measurement
+ * commands the project was built with. The riskiest assumption in the plan
+ * was whether the board's analog MEMS microphone is clean enough for bird
+ * recognition given the noise of the display, the QSPI bus and the switching
+ * regulator all sharing the same small PCB — most of these commands exist to
+ * measure exactly that, and they were kept because they are what makes a
+ * fault diagnosable without a logic analyser.
  *
- * USB seri porttan komut alır:
- *   i  cihaz kimliği ve saat yapılandırmasını yazdır
- *   n  gürültü tabanı ölçümü (sessiz ortamda çalıştırın)
- *   e  EMI taraması: arka ışık kapalı / sabit açık / PWM'li durumlarda gürültü
- *   g  mikrofon kazancını değiştir (0-7)
- *   r  2 saniye kayıt al ve PC'ye aktar (tools/capture_wav.py ile yakalayın)
- *   ?  yardım
+ * Commands arrive over the USB serial port; press `?` for the full list.
  */
 #include <assert.h>
 #include <stdio.h>
@@ -54,48 +51,49 @@
 
 void pb_display_dma_init(void);   /* hal/display/dev_config.c */
 
-/* ── Derleme zamanı donanım kontrolleri ───────────────────────────────────
- * Yanlış board seçilirse bu hatalar derlemeyi durdurur. Aksi hâlde kod
- * sessizce derlenir ve hata ancak kartta, GPIO40'ın hiç kıpırdamamasıyla
- * ortaya çıkar — orada bulması çok pahalı. */
+/* ── Compile-time hardware checks ─────────────────────────────────────────
+ * If the wrong board is selected these stop the build. Otherwise the code
+ * compiles silently and the fault only shows up on the board, as GPIO40 never
+ * moving — which is very expensive to find there. */
 static_assert(PICO_RP2350A == 0,
-              "RP2350B secilmedi. PICO_BOARD=pokebird_rp2350b olmali "
-              "(boards/pokebird_rp2350b.h).");
+              "RP2350B not selected. PICO_BOARD must be pokebird_rp2350b "
+              "(firmware/boards/pokebird_rp2350b.h).");
 static_assert(NUM_BANK0_GPIOS >= 48,
-              "48 GPIO bekleniyor. BAT_ADC (GPIO40), SD_CS (GPIO31) ve "
-              "bos baslik pinleri (41-47) RP2350A'da yok.");
+              "48 GPIOs expected. BAT_ADC (GPIO40), SD_CS (GPIO31) and the "
+              "free header pins (41-47) do not exist on the RP2350A.");
 static_assert(PB_PIN_BAT_ADC < NUM_BANK0_GPIOS,
-              "BAT_ADC pini GPIO araliginin disinda.");
+              "The BAT_ADC pin is outside the GPIO range.");
 static_assert(PICO_FLASH_SIZE_BYTES == 16 * 1024 * 1024,
-              "16 MB flash bekleniyor (PY25Q128HA).");
+              "16 MB of flash expected (PY25Q128HA).");
 
-/* Karar kuralı negatif sınıfın indeksini sabit olarak biliyor (ai/decision.h);
- * sınıf tablosu yeniden üretilip sınıf sayısı değişirse burada durmalı, çünkü
- * kayması "gürültüyü kuş sanmak" demek ve hiçbir yerde hata vermez. */
+/* The decision rule knows the negative class's index as a constant
+ * (ai/decision.h). If the class table is regenerated and the class count
+ * changes, the build must stop here: a shift would mean "mistaking noise for
+ * a bird", and it would raise no error anywhere. */
 static_assert(PB_DECISION_NEGATIVE_CLASS == PB_CLASS_COUNT - 1,
-              "Negatif sinif indeksi kaydi: ai/decision.h ile ai/classes.h "
-              "uyusmuyor (tools/class_table.py yeniden mi calisti?).");
+              "Negative class index drift: ai/decision.h and ai/classes.h "
+              "disagree (did tools/class_table.py run again?).");
 
 #define BL_PWM_WRAP     2048
 #define ES8311_I2C_ADDR 0x18
 
 /**
- * Yakalama parçası — akıştan tek seferde okunan en büyük öbek.
+ * Capture chunk — the largest block read from the stream at once.
  *
- * Burada eskiden 2 saniyelik bitişik bir tampon vardı: 24 kHz × 16 bit =
- * 96.000 bayt, tek başına bss'in yarısı. Onu kullanan teşhis komutlarının
- * hiçbirinin 2 saniyeyi bir arada görmesi gerekmiyordu — hepsi ya biriktirici
- * (RMS, tepe, DC) ya da pencere pencere çalışıyor. M3'ün sürekli yakalama
- * halkası geldiğinden beri (hal/audio_i2s.c) veri kesintisiz biçimde parça
- * parça okunabiliyor, bu yüzden tampon parça boyuna indirildi.
+ * There used to be a contiguous two-second buffer here: 24 kHz x 16 bit =
+ * 96,000 bytes, half of bss on its own. None of the diagnostic commands using
+ * it actually needed to see two seconds at once — they are all either
+ * accumulators (RMS, peak, DC) or work window by window. Since the continuous
+ * capture ring arrived (hal/audio_i2s.c) the data can be read chunk by chunk
+ * without interruption, so the buffer was cut to one chunk.
  *
- * Kazanç 96.000 → 4.096 bayt. M6'nın TFLM arena'sı (180 KB) ancak bu yer
- * açıldıktan sonra sığıyor.
+ * That saved 96,000 -> 4,096 bytes. The TFLM arena only fits after this space
+ * was freed.
  */
-#define CHUNK_SAMPLES   PB_AUDIO_MAX_READ       /* 2048 ornek = 4096 bayt */
+#define CHUNK_SAMPLES   PB_AUDIO_MAX_READ       /* 2048 samples = 4096 bytes */
 static int16_t s_chunk[CHUNK_SAMPLES];
 
-/* 'r' komutunun kayıt uzunluğu. */
+/* Recording length for the 'r' command. */
 #define CAPTURE_SECONDS 2
 #define CAPTURE_SAMPLES (PB_SAMPLE_RATE * CAPTURE_SECONDS)
 
@@ -108,48 +106,50 @@ static const pb_audio_cfg_t s_audio_cfg = {
 
 static uint8_t s_mic_gain = PB_MIC_GAIN;
 
-/* â”€â”€ Ekran â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * M1'de ekranı kullanmıyoruz ama arka ışık gürültü ölçümünün bir değişkeni:
- * AP3032 yükseltici ve PWM, mikrofonun hemen yanında anahtarlama yapıyor. */
+/* ── Display ──────────────────────────────────────────────────────────────
+ * The backlight is a variable in the noise measurement: the AP3032 boost
+ * converter and its PWM switch right next to the microphone. */
 
 /**
- * Arka ışık — düz GPIO, PWM YOK.
+ * Backlight — plain GPIO, NO PWM.
  *
- * DOĞRULANMIŞ DAVRANIŞ (etkileşimli 'b' testi, kart üzerinde ölçüldü):
- *     BL_EN (GPIO37) = 1  ve  LCD_BL (GPIO36) = 0   ->  IŞIK YANAR
- * Yani LCD_BL aktif-düşük. rsvpnano'daki çalışan sürücü de aynısını söylüyor
- * ("active-low PWM; lower duty is brighter"), Waveshare'in kendi kodu da
- * (pwm_set_chan_level(slice, CHAN_A, 100 - Value)).
+ * VERIFIED BEHAVIOUR (the interactive 'b' test, measured on the board):
+ *     BL_EN (GPIO37) = 1  and  LCD_BL (GPIO36) = 0   ->  THE LIGHT COMES ON
+ * So LCD_BL is active-low. The working driver in rsvpnano says the same
+ * ("active-low PWM; lower duty is brighter"), and so does Waveshare's own
+ * code (pwm_set_chan_level(slice, CHAN_A, 100 - Value)).
  *
- * NEDEN PWM KULLANMIYORUZ:
- * PWM ile duty %0 — elektriksel olarak pinin sürekli LOW olması, yani yukarıda
- * ışığı yakan durumun aynısı — ışığı YAKMIYOR. Düz GPIO ile LOW yakıyor.
- * Demek ki PWM çevre birimi bu pini beklediğimiz gibi sürmüyor (muhtemelen
- * RP2350B'de GPIO36'nın slice eşlemesiyle ilgili). Kök nedeni kovalamak yerine
- * çalıştığı doğrulanmış mekanizmayı kullanıyoruz.
+ * WHY WE DO NOT USE PWM:
+ * With PWM at 0% duty — electrically the pin held permanently LOW, the same
+ * condition that lights the backlight above — the light does NOT come on.
+ * With plain GPIO, LOW does light it. So the PWM peripheral is not driving
+ * this pin the way we expect (probably something about GPIO36's slice mapping
+ * on the RP2350B). Rather than chase the root cause we use the mechanism
+ * verified to work.
  *
- * MALİYETİ: parlaklık ayarı yok, sadece aç/kapa. Şimdilik önemsiz — M1'deki
- * EMI taraması arka ışığın mikrofona etkisinin +0.2 dB olduğunu gösterdi,
- * yani parlaklığı kısmak için akustik bir gerekçe de yok. Kademeli parlaklık
- * istenirse (M7 ayarlar ekranı) PWM sorunu o zaman ayrıca çözülür.
+ * THE COST: no brightness control, only on/off. That is unimportant for now —
+ * the EMI sweep measured the backlight's effect on the microphone at +0.2 dB,
+ * so there is no acoustic reason to dim it either. If graduated brightness is
+ * ever wanted, the PWM problem can be solved separately then.
  */
 /**
- * Güç mandalını kilitle.
+ * Latch the power rail on.
  *
- * Waveshare'in örneği ekrandan önce `DEV_Module_Init()` çağırıyor; biz onu
- * kendi HAL'imizle çakışmasın diye hiç almadık. İçindeki tek kritik iş
- * SYS_EN'i yüksek tutmak: kart bu mandalla ayakta duruyor, örneğin core1'i
- * `DEV_Digital_Write(SYS_EN, 0)` ile kapanma yapıyor.
+ * Waveshare's example calls `DEV_Module_Init()` before touching the display;
+ * we never took it, to avoid clashing with our own HAL. The one critical
+ * thing it does is hold SYS_EN high: the board stays powered through this
+ * latch, and the example powers itself down with
+ * `DEV_Digital_Write(SYS_EN, 0)`.
  *
- * Panelin mantık/IO beslemesi bu mandalın arkasındaysa, panel kendi
- * taramasını sürdürse bile ana bilgisayar arayüzü beslemesiz kalır ve
- * QSPI'den gelen hiçbir komutu duymaz — gözlediğimiz tabloya birebir uyuyor.
- * Doğrulanmış değil; ucuz ve zararsız olduğu için deniyoruz.
+ * If the panel's logic/IO supply sits behind this latch, then even while the
+ * panel keeps scanning, its host interface would be unpowered and would hear
+ * no QSPI command at all — which matches the symptoms we saw exactly. That is
+ * unproven, but it is cheap and harmless, so we do it.
  */
 static void power_latch_init(void) {
     gpio_init(PB_PIN_SYS_EN);
     gpio_set_dir(PB_PIN_SYS_EN, GPIO_OUT);
-    gpio_put(PB_PIN_SYS_EN, 1);     /* 1 = acik kal. 0 KAPATIR. */
+    gpio_put(PB_PIN_SYS_EN, 1);     /* 1 = stay on. 0 POWERS OFF. */
 }
 
 static void backlight_init(void) {
@@ -159,7 +159,7 @@ static void backlight_init(void) {
 
     gpio_init(PB_PIN_LCD_BL);
     gpio_set_dir(PB_PIN_LCD_BL, GPIO_OUT);
-    gpio_put(PB_PIN_LCD_BL, 0);         /* aktif-düşük: 0 = yanık */
+    gpio_put(PB_PIN_LCD_BL, 0);         /* active-low: 0 = lit */
 }
 
 static void backlight_set(bool on) {
@@ -167,8 +167,8 @@ static void backlight_set(bool on) {
     gpio_put(PB_PIN_LCD_BL, on ? 0 : 1);
 }
 
-/* ── Ölçüm ───────────────────────────────────────────────────────────────
- * Tam ölçek 16-bit için referans 32768. dBFS = 20*log10(rms/32768). */
+/* ── Measurement ──────────────────────────────────────────────────────────
+ * The full-scale 16-bit reference is 32768. dBFS = 20*log10(rms/32768). */
 
 typedef struct {
     double  rms;
@@ -177,26 +177,27 @@ typedef struct {
     double  dc_offset;
 } audio_stats_t;
 
-/* log10 için math.h yerine basit bir yaklaşım kullanmıyoruz; SDK'nın
- * optimize edilmiş log10f'i zaten bağlı ve M3'te CMSIS-DSP gelecek. */
+/* We do not roll our own approximation for log10; the SDK's optimised
+ * log10f is already linked in. */
 #include <math.h>
 
 /**
- * Akış biriktiricisi — istatistik tek geçişte.
+ * Streaming accumulator — statistics in a single pass.
  *
- * Eski `compute_stats` İKİ geçişliydi: önce DC ortalamasını buluyor, sonra
- * aynı diziyi ikinci kez tarayıp o ortalamaya göre RMS hesaplıyordu. Bu,
- * örneklerin tamamının bellekte durmasını şart koşuyordu. Parça parça
- * okurken ikinci geçiş için veri yok — parça işlendikten sonra üzerine
- * yenisi yazılıyor.
+ * The old `compute_stats` took TWO passes: first it found the DC mean, then
+ * it walked the same array again computing RMS relative to that mean. That
+ * required every sample to stay in memory. Reading chunk by chunk there is no
+ * data for a second pass — once a chunk is processed the next one overwrites
+ * it.
  *
- * Çözüm varyans özdeşliği:  rms² = sumsq/n − (sum/n)²
- * Böylece ham toplamlar biriktirilip DC ancak sonda çıkarılabiliyor.
- * `double` ile güvenli: 48.000 örnek × 32768² ≈ 5,2e13, double'ın tam sayı
- * kesinliği 9e15'e kadar. Host tarafında iki yol aynı veriyle karşılaştırıldı:
- * karttan alınan gerçek kayıtta sapma 3,6e-14 dB, DC 20000 üzerine ±3 AC gibi
- * fark almayı zorlayan uydurma bir durumda bile 3,6e-8 dB. (Kabul sınırı
- * 0,1 dB idi.)
+ * The fix is the variance identity:  rms^2 = sumsq/n - (sum/n)^2
+ * so the raw sums can be accumulated and DC removed only at the end.
+ *
+ * `double` makes this safe: 48,000 samples x 32768^2 is about 5.2e13, and
+ * double is exact for integers up to 9e15. The two approaches were compared
+ * on the host with identical data: on a real recording from the board the
+ * deviation was 3.6e-14 dB, and even in a contrived worst case (DC of 20000
+ * with +/-3 of AC) it was 3.6e-8 dB. The acceptance limit was 0.1 dB.
  */
 typedef struct {
     double   sum;
@@ -222,7 +223,7 @@ static audio_stats_t stats_finish(const stats_acc_t *a) {
 
     double mean = a->sum / (double)a->n;
     double var  = a->sumsq / (double)a->n - mean * mean;
-    if (var < 0.0) var = 0.0;        /* yuvarlama sıfırın altına düşürebilir */
+    if (var < 0.0) var = 0.0;        /* rounding can push it below zero */
 
     st.dc_offset = mean;
     st.rms       = sqrt(var);
@@ -231,7 +232,7 @@ static audio_stats_t stats_finish(const stats_acc_t *a) {
     return st;
 }
 
-/** Bellekteki küçük bir tampon için kolaylık sarmalayıcısı. */
+/** Convenience wrapper for a small in-memory buffer. */
 static audio_stats_t compute_stats(const int16_t *x, uint32_t n) {
     stats_acc_t acc = { 0 };
     stats_add(&acc, x, n);
@@ -239,25 +240,29 @@ static audio_stats_t compute_stats(const int16_t *x, uint32_t n) {
 }
 
 /**
- * Gürültü tabanını yüzdelik ile ölç.
+ * Measure the noise floor with a percentile.
  *
- * Düz RMS, ölçüm boyunca olan tek bir kapı sesi ya da öksürükle yukarı
- * çekiliyor — oda hiçbir zaman tam sessiz değil. Sinyali kısa pencerelere
- * bölüp pencere RMS'lerinin 10. yüzdeliğini almak, geçici seslere karşı
- * dayanıklı ve "en sessiz an" için çok daha dürüst bir sayı veriyor.
+ * A plain RMS is dragged upwards by a single door slam or cough during the
+ * measurement — a room is never completely silent. Splitting the signal into
+ * short windows and taking the 10th percentile of the window RMS values is
+ * robust against transients and gives a far more honest number for "the
+ * quietest moment".
  */
-/* Pencere sayısı 64'ten 48'e indi ve pencere uzunluğu parça sınırına hizalandı.
+/* The window count went from 64 to 48 and the window length was aligned to
+ * the chunk size.
  *
- * Eskiden 2 saniye tek parça okunup 64'e bölünüyordu (pencere 750 örnek).
- * Akışta pencerenin okuma parçasına hizalı olması gerekiyor, yoksa pencereler
- * parça sınırını aşar. 1024 örneklik 48 pencere = 49.152 örnek = 2,048 s.
+ * Two seconds used to be read in one go and split into 64 (750 samples per
+ * window). On the stream the window has to align with the read chunk,
+ * otherwise windows straddle a chunk boundary. 48 windows of 1024 samples =
+ * 49,152 samples = 2.048 s.
  *
- * YAN ETKİ — belgelenmeli: yüzdelik indeksi `count/10` olduğu için 64 pencerede
- * 6. eleman (%9,4), 48 pencerede 4. eleman (%8,3) seçiliyor. Yani "10.
- * yüzdelik" biraz kaydı. Sonuç diagnostik; M1'in -36 dBFS tabanıyla
- * karşılaştırma yaparken bu kayma akılda tutulmalı. */
+ * A SIDE EFFECT worth documenting: the percentile index is `count/10`, so
+ * with 64 windows it picked element 6 (9.4%) and with 48 it picks element 4
+ * (8.3%). The "10th percentile" therefore shifted slightly. The result is
+ * diagnostic, but keep the shift in mind when comparing against the earlier
+ * -36 dBFS floor. */
 #define NOISE_WINDOWS 48
-#define NOISE_WIN_LEN 1024      /* 42,7 ms @ 24 kHz — parça boyunun böleni */
+#define NOISE_WIN_LEN 1024      /* 42.7 ms @ 24 kHz — divides the chunk size */
 
 static double window_rms(const int16_t *x, uint32_t n) {
     stats_acc_t acc = { 0 };
@@ -265,9 +270,9 @@ static double window_rms(const int16_t *x, uint32_t n) {
     return stats_finish(&acc).rms;
 }
 
-/** Sıralayıp 10. yüzdeliği döndür (liste yerinde değiştirilir). */
+/** Sort and return the 10th percentile (the list is modified in place). */
 static double percentile10(double *v, uint32_t count) {
-    /* küçükten büyüğe (count küçük, basit ekleme sıralaması yeterli) */
+    /* ascending (count is small, a simple insertion sort is enough) */
     for (uint32_t i = 1; i < count; i++) {
         double t = v[i];
         uint32_t j = i;
@@ -279,23 +284,23 @@ static double percentile10(double *v, uint32_t count) {
 
 static void print_stats(const char *label, const audio_stats_t *st,
                         const pb_capture_result_t *cap) {
-    printf("  %-22s RMS %8.1f  %7.1f dBFS  tepe %6ld  DC %8.1f",
+    printf("  %-22s RMS %8.1f  %7.1f dBFS  peak %6ld  DC %8.1f",
            label, st->rms, st->dbfs, (long)st->peak, st->dc_offset);
-    if (cap->fifo_overrun) printf("   [!] ORNEK DUSTU");
-    if (cap->timed_out)    printf("   [!] SAAT YOK");
+    if (cap->fifo_overrun) printf("   [!] SAMPLES DROPPED");
+    if (cap->timed_out)    printf("   [!] NO CLOCK");
     printf("\n");
 }
 
 /**
- * Akıştan `total` örnek oku ve yalnızca istatistik biriktir — ham veri
- * saklanmaz, her parça bir sonrakinin üzerine yazılır.
+ * Read `total` samples from the stream and accumulate statistics only — the
+ * raw data is not kept, each chunk overwrites the last.
  *
- * TUZAK: flush YALNIZCA döngüden önce, bir kez çağrılıyor. Parça başına
- * `pb_audio_capture` çağırmak cazip görünüyor (imzası tam uyuyor) ama o
- * fonksiyon flush + oku sarmalayıcısı: her çağrıda birikmişi atar. Parça
- * parça çağrılırsa parçalar ARASINDAKİ örnekler düşer ve ölçüm sessizce
- * bozulur — `fifo_overrun` bu kaybı bildirmez, çünkü halka taşmamıştır,
- * biz attırmışızdır.
+ * A TRAP: flush is called ONCE, before the loop. Calling `pb_audio_capture`
+ * per chunk looks tempting (the signature fits perfectly) but that function
+ * is a flush+read wrapper: it discards the backlog on every call. Called
+ * chunk by chunk it would drop the samples BETWEEN chunks and silently
+ * corrupt the measurement — and `fifo_overrun` would not report the loss,
+ * because the ring never overflowed, we threw the data away ourselves.
  */
 static pb_capture_result_t stream_stats(uint32_t total, audio_stats_t *out) {
     pb_capture_result_t res = { 0 };
@@ -318,7 +323,8 @@ static pb_capture_result_t stream_stats(uint32_t total, audio_stats_t *out) {
     return res;
 }
 
-/* Ölçüm alırken arka ışığı verilen duruma getirip bekle (güç hattı otursun) */
+/* Set the backlight to the given state and wait for the power rail to
+ * settle before measuring. */
 static audio_stats_t measure_with_backlight(bool enable,
                                             pb_capture_result_t *cap_out) {
     backlight_set(enable);
@@ -330,46 +336,46 @@ static audio_stats_t measure_with_backlight(bool enable,
     return st;
 }
 
-/* â”€â”€ Komutlar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Commands ─────────────────────────────────────────────────────────────── */
 
 static void cmd_info(void) {
     pico_unique_board_id_t id;
     pico_get_unique_board_id(&id);
 
-    printf("\n--- Cihaz ---\n");
+    printf("\n--- Device ---\n");
     printf("  MCU          RP2350%s @ %lu Hz\n",
            PICO_RP2350A ? "A" : "B", (unsigned long)clock_get_hz(clk_sys));
     printf("  Flash        %d MB\n", PICO_FLASH_SIZE_BYTES / (1024 * 1024));
-    printf("  Kart ID      ");
+    printf("  Board ID     ");
     for (size_t i = 0; i < PICO_UNIQUE_BOARD_ID_SIZE_BYTES; i++) printf("%02x", id.id[i]);
     printf("\n");
-    printf("--- Ses ---\n");
+    printf("--- Audio ---\n");
     printf("  MCLK         %lu Hz (PIO, GPIO%d)\n",
            (unsigned long)s_audio_cfg.mclk_freq, PB_PIN_I2S_MCLK);
-    printf("  Ornekleme    %lu Hz (ES8311 master, MCLK/256)\n",
+    printf("  Sample rate  %lu Hz (ES8311 master, MCLK/256)\n",
            (unsigned long)s_audio_cfg.sample_freq);
-    printf("  Mikrofon     analog MEMS -> ES8311 ADC, kazanc %u\n", s_mic_gain);
+    printf("  Microphone   analog MEMS -> ES8311 ADC, gain %u\n", s_mic_gain);
     printf("  ES8311 ID    0x%04x %s\n", es8311_read_id(),
-           pb_i2c_probe(ES8311_I2C_ADDR) ? "(I2C yanit veriyor)" : "(I2C YANIT YOK)");
+           pb_i2c_probe(ES8311_I2C_ADDR) ? "(I2C responds)" : "(NO I2C RESPONSE)");
     printf("\n");
 }
 
 static void cmd_noise(void) {
     const uint32_t total = (uint32_t)NOISE_WINDOWS * NOISE_WIN_LEN;
 
-    printf("\nGurultu tabani olcumu (%.2f s). Ortami sessiz tutun...\n",
+    printf("\nNoise floor measurement (%.2f s). Keep the room quiet...\n",
            (double)total / PB_SAMPLE_RATE);
     backlight_set(false);
     sleep_ms(300);
 
-    /* Pencere pencere oku: her pencere hem genel istatistiğe eklenir hem de
-     * kendi RMS'iyle yüzdelik listesine girer. Ham veri saklanmıyor. */
+    /* Read window by window: each window feeds both the overall statistics
+     * and, via its own RMS, the percentile list. No raw data is kept. */
     pb_capture_result_t cap = { 0 };
     stats_acc_t acc = { 0 };
     double rms_list[NOISE_WINDOWS];
     uint32_t count = 0;
 
-    pb_audio_stream_flush();        /* bir KEZ, döngüden önce (bkz. stream_stats) */
+    pb_audio_stream_flush();     /* ONCE, before the loop (see stream_stats) */
     for (uint32_t w = 0; w < NOISE_WINDOWS; w++) {
         pb_capture_result_t part =
             pb_audio_stream_read(s_chunk, NOISE_WIN_LEN, 1000);
@@ -377,48 +383,50 @@ static void cmd_noise(void) {
         cap.fifo_overrun |= part.fifo_overrun;
         cap.timed_out    |= part.timed_out;
 
-        if (part.samples < NOISE_WIN_LEN) break;    /* saat yok — eksik pencere */
+        if (part.samples < NOISE_WIN_LEN) break;   /* no clock — short window */
 
         stats_add(&acc, s_chunk, part.samples);
         rms_list[count++] = window_rms(s_chunk, part.samples);
     }
     audio_stats_t st = stats_finish(&acc);
 
-    printf("  Yakalanan    %lu / %lu ornek  (%lu / %d pencere)\n",
+    printf("  Captured     %lu / %lu samples  (%lu / %d windows)\n",
            (unsigned long)cap.samples, (unsigned long)total,
            (unsigned long)count, NOISE_WINDOWS);
-    print_stats("tum pencere (RMS)", &st, &cap);
+    print_stats("all windows (RMS)", &st, &cap);
 
     double floor_rms = (count > 0) ? percentile10(rms_list, count) : 0.0;
     double floor_db  = (floor_rms > 0.0)
                      ? 20.0 * log10(floor_rms / 32768.0) : -999.0;
-    printf("  %-22s RMS %8.1f  %7.1f dBFS   <- gecici seslere dayanikli\n",
-           "gurultu tabani (P10)", floor_rms, floor_db);
+    printf("  %-22s RMS %8.1f  %7.1f dBFS   <- robust to transients\n",
+           "noise floor (P10)", floor_rms, floor_db);
 
     if (cap.timed_out) {
-        printf("\n  [!] ES8311 saat uretmiyor. Kontrol: MCLK cikiyor mu, codec\n");
-        printf("      I2C'de yanit veriyor mu, master mod register'i yazildi mi.\n");
+        printf("\n  [!] The ES8311 is not producing a clock. Check: is MCLK\n");
+        printf("      running, does the codec answer on I2C, was the master\n");
+        printf("      mode register written?\n");
     } else if (st.rms < 1.0) {
-        printf("\n  [!] Sinyal tamamen sifir. Mikrofon yolu acilmamis olabilir\n");
-        printf("      (ES8311 REG14 analog mic / PGA ayarlari).\n");
+        printf("\n  [!] The signal is exactly zero. The microphone path may not\n");
+        printf("      be enabled (ES8311 REG14 analog mic / PGA settings).\n");
     } else {
-        printf("\n  Yorum: %.0f dBFS taban, ", floor_db);
-        if (floor_db < -60.0)      printf("iyi — kus sesi tanima icin yeterli.\n");
-        else if (floor_db < -45.0) printf("kabul edilebilir, ama EMI taramasi ('e') yapin.\n");
-        else                       printf("YUKSEK — ortam sesi mi devre mi, 'g' ile\n"
-                                          "         kazanci degistirip bakin (olcum kazancla\n"
-                                          "         olcekleniyorsa gurultu akustiktir).\n");
+        printf("\n  Reading: a %.0f dBFS floor, ", floor_db);
+        if (floor_db < -60.0)      printf("good - enough for bird recognition.\n");
+        else if (floor_db < -45.0) printf("acceptable, but run the EMI sweep ('e').\n");
+        else                       printf("HIGH - room noise or circuit noise? Change\n"
+                                          "         the gain with 'g' and look again (if the\n"
+                                          "         reading scales with gain, it is acoustic).\n");
     }
     printf("\n");
 }
 
-/* Canlı seviye göstergesi. Mikrofonun gerçekten ses duyduğunu doğrulamanın en
- * pratik yolu: el çırpın, ıslık çalın, konuşun — çubuk anında tepki vermeli. */
+/* Live level meter. The most practical way to confirm the microphone really
+ * hears something: clap, whistle or talk — the bar should react instantly. */
 static void cmd_level_meter(void) {
-    printf("\nCanli seviye. El cirpin / konusun. Cikmak icin bir tusa basin.\n\n");
-    /* 2048 ornek = 85 ms. Eskiden 100 ms'ti; parca boyuna indirildi.
-     * Canli gosterge oldugu icin her turda en tazeye atlamasi zaten isteniyor,
-     * bu yuzden flush+oku sarmalayicisi (pb_audio_capture) burada DOGRU olan. */
+    printf("\nLive level. Clap or talk. Press any key to exit.\n\n");
+    /* 2048 samples = 85 ms. It used to be 100 ms; it was cut to the chunk
+     * size. Being a live display, jumping to the freshest data each turn is
+     * exactly what we want, so the flush+read wrapper (pb_audio_capture) is
+     * the RIGHT choice here. */
     const uint32_t win = CHUNK_SAMPLES;
 
     while (getchar_timeout_us(0) < 0) {
@@ -430,25 +438,25 @@ static void cmd_level_meter(void) {
         if (bars < 0) bars = 0;
         if (bars > 40) bars = 40;
 
-        printf("\r  %6.1f dBFS  tepe %5ld  [", st.dbfs, (long)st.peak);
+        printf("\r  %6.1f dBFS  peak %5ld  [", st.dbfs, (long)st.peak);
         for (int i = 0; i < 40; i++) putchar(i < bars ? '#' : ' ');
         printf("]");
-        stdio_flush();   /* fflush() newlib stdio kilitlerini cekiyor;
-                          * SDK'nin kendi flush'i o bagimliligi getirmiyor */
+        stdio_flush();   /* fflush() drags in newlib's stdio locks; the SDK's
+                          * own flush does not bring that dependency */
     }
     printf("\n\n");
 }
 
 static void cmd_emi_sweep(void) {
-    printf("\nEMI taramasi — ekran arka isiginin mikrofona etkisi.\n");
-    printf("Her olcum 0.5 s. Ortami sessiz tutun.\n\n");
+    printf("\nEMI sweep - the backlight's effect on the microphone.\n");
+    printf("Each measurement is 0.5 s. Keep the room quiet.\n\n");
 
     pb_capture_result_t cap;
     audio_stats_t off    = measure_with_backlight(false, &cap);
-    print_stats("arka isik KAPALI", &off, &cap);
+    print_stats("backlight OFF", &off, &cap);
 
     audio_stats_t full   = measure_with_backlight(true, &cap);
-    print_stats("tam acik (PWM yok)", &full, &cap);
+    print_stats("full on (no PWM)", &full, &cap);
 
     audio_stats_t pwm50  = measure_with_backlight(true, &cap);
     print_stats("PWM %50", &pwm50, &cap);
@@ -462,54 +470,58 @@ static void cmd_emi_sweep(void) {
     if (full.dbfs > worst) worst = full.dbfs;
     double delta = worst - off.dbfs;
 
-    printf("\n  En kotu durum, kapaliya gore %+.1f dB.\n", delta);
+    printf("\n  Worst case, relative to off: %+.1f dB.\n", delta);
     if (delta < 3.0) {
-        printf("  Arka isik mikrofonu bozmuyor. Ekran acik dinleme sorunsuz.\n");
+        printf("  The backlight does not disturb the microphone. Listening\n"
+               "  with the screen on is fine.\n");
     } else if (delta < 10.0) {
-        printf("  Olcülebilir etki var. PWM frekansini degistirmeyi ya da dinleme\n");
-        printf("  aninda parlakligi sabitlemeyi degerlendirin.\n");
+        printf("  There is a measurable effect. Consider changing the PWM\n");
+        printf("  frequency, or fixing the brightness while listening.\n");
     } else {
-        printf("  [!] Ciddi girisim. Secenekler: PWM yerine sabit parlaklik,\n");
-        printf("      PWM frekansini kaydirma, ya da bos GPIO'lardan (12-19)\n");
-        printf("      harici I2S MEMS mikrofon (plan §10 risk tablosu).\n");
+        printf("  [!] Serious interference. Options: a fixed brightness instead\n");
+        printf("      of PWM, shifting the PWM frequency, or an external I2S\n");
+        printf("      MEMS microphone on the free GPIOs (12-19).\n");
     }
     printf("\n");
 }
 
 static void cmd_gain(void) {
-    printf("\nKazanc (0-7), su an %u. Yeni deger girin: ", s_mic_gain);
+    printf("\nGain (0-7), currently %u. Enter a new value: ", s_mic_gain);
     int c = getchar_timeout_us(10 * 1000 * 1000);
     if (c < '0' || c > '7') {
-        printf("iptal\n\n");
+        printf("cancelled\n\n");
         return;
     }
     s_mic_gain = (uint8_t)(c - '0');
     es8311_microphone_gain_set((es8311_mic_gain_t)s_mic_gain);
-    printf("%u olarak ayarlandi\n\n", s_mic_gain);
+    printf("set to %u\n\n", s_mic_gain);
 }
 
-/* Ham örnekleri PC'ye aktar. Basit ve kendini tanıtan bir çerçeve kullanıyoruz;
- * tools/capture_wav.py bunu WAV'a çeviriyor. */
+/* Stream raw samples to the PC. The framing is simple and self-describing;
+ * tools/capture_wav.py turns it into a WAV. */
 /**
- * Kayıt artık akış hâlinde: 2 saniye önce belleğe alınıp sonra yazdırılmıyor,
- * parça parça okunup anında aktarılıyor. Üç ayrıntı kritik:
+ * Recording is streamed: rather than buffering two seconds and then printing
+ * them, chunks are read and forwarded immediately. Three details matter:
  *
- * 1. SIRA. `tools/capture_wav.py` başlıktaki `samples=N`'i okuyup N örnek
- *    bekliyor (capture_wav.py:112), yani başlık örneklerden ÖNCE gitmeli.
- *    Ama istatistik ancak akış bitince hazır olur. Bu yüzden yeni sıra:
- *    başlık → örnekler → #WAV-END → istatistik. (Araç #WAV-END'de okumayı
- *    bıraktığı için istatistiği o göstermez; seri terminalde görünür.)
+ * 1. ORDER. `tools/capture_wav.py` reads `samples=N` from the header and then
+ *    waits for N samples, so the header must go out BEFORE the samples. But
+ *    the statistics are only ready once the stream ends. Hence the order:
+ *    header -> samples -> #WAV-END -> statistics. (The tool stops reading at
+ *    #WAV-END so it never shows the statistics; they appear in the serial
+ *    terminal.)
  *
- * 2. SAAT KONTROLÜ BAŞLIKTAN ÖNCE. Başlığı yazdıktan sonra çekilmek yok:
- *    `samples=N` sözü verilmiş olur. Bu yüzden ilk parça başlıktan önce
- *    okunuyor; saat yoksa hiç başlık yazmadan çıkıyoruz.
+ * 2. THE CLOCK CHECK COMES BEFORE THE HEADER. There is no backing out after
+ *    printing the header: `samples=N` is a promise. So the first chunk is
+ *    read before the header, and if there is no clock we leave without
+ *    printing one at all.
  *
- * 3. GERÇEK ZAMANA YETİŞMEK. Yazdırma okumayla iç içe geçtiği için aktarım
- *    gerçek zamandan yavaş kalırsa halka (170 ms) taşar ve WAV'da kopukluk
- *    olur. Kartta ölçüldü: CDC 276 KB/s, ondalık biçimde gereken 102 KB/s —
- *    2,7 kat pay var. Yine de her parçanın `fifo_overrun`'ı toplanıp sonda
- *    yüksek sesle bildiriliyor: bu projede sessiz bozulma iki kez pahalıya
- *    patladı (lastsession.md §5.10), kopukluk sessizce geçmemeli.
+ * 3. KEEPING UP WITH REAL TIME. Because printing is interleaved with reading,
+ *    a transfer slower than real time would overflow the ring and leave a gap
+ *    in the WAV. Measured on the board: CDC does 276 KB/s and the decimal
+ *    format needs 102 KB/s — 2.7x of headroom. Even so, every chunk's
+ *    `fifo_overrun` is accumulated and reported loudly at the end: silent
+ *    corruption has cost this project dearly twice, and a gap must not pass
+ *    unnoticed.
  */
 static void cmd_record(void) {
     printf("\nKayit basliyor (%d s)...\n", CAPTURE_SECONDS);
@@ -588,7 +600,7 @@ static void cmd_spectrogram(void) {
  * koyabilsin diye burada bildiriliyor. */
 static void bb_pins_setup(void);
 static void bb_panel_init(void);
-static void bb_ekrani_boya(uint16_t color);
+static void bb_fill_screen(uint16_t color);
 
 #define PB_INIT_BITBANG 99   /* cmd_display_test icin sanal varyant */
 
@@ -646,7 +658,7 @@ static void cmd_display_test(void) {
 
         for (size_t r = 0; r < sizeof(colors) / sizeof(colors[0]); r++) {
             printf("        %s\n", colors[r].name);
-            if (bitbang) bb_ekrani_boya(colors[r].color);
+            if (bitbang) bb_fill_screen(colors[r].color);
             else         pb_lcd_fill(colors[r].color);
 
             /* Renk basildiktan sonra 1.5 s bakma suresi */
@@ -773,7 +785,7 @@ static void bb_byte_quad(uint8_t v) {
  * bir yol. Yavas ama her adimi burada gorunur. PIO yolu calismayip bu
  * calisirsa hata PIO tarafindadir; ikisi de calismazsa hata daha asagida.
  */
-static void bb_ekrani_boya(uint16_t color) {
+static void bb_fill_screen(uint16_t color) {
     for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) gpio_set_dir(p, GPIO_OUT);
 
     uint8_t caset[] = { 0x00, 0x00, (PB_PANEL_W - 1) >> 8, (PB_PANEL_W - 1) & 0xFF };
@@ -1309,7 +1321,7 @@ static void cmd_qspi_timing(void) {
 /* ── Melez yol testi: pencere komutu ile piksel verisi AYRI yollardan ──────
  *
  * §9n'in ölçülmüş gerçeği: bit-bang düz renkleri doğru basıyor, PIO/DMA yolu
- * basmıyor. Ama `bb_ekrani_boya` HEM pencereyi HEM pikselleri bit-bang ile
+ * basmıyor. Ama `bb_fill_screen` HEM pencereyi HEM pikselleri bit-bang ile
  * yolluyor, yani hangisinin düştüğünü ayırmıyor.
  *
  * Belirti ("ekran temizlenmiyor, yalnızca EN SON çizilen kare görünüyor")
@@ -1709,7 +1721,7 @@ static void cmd_text_dump(void) {
  * kayma varsa çizgiler EĞİLİR. Kaynak `row_step = 0` ile besleniyor, yani
  * her panel satırı aynı veriyi alıyor — eğilme varsa panelden gelir.
  */
-static void kayma_bandi(uint32_t x1, uint32_t width, uint32_t n_pixel,
+static void shift_band(uint32_t x1, uint32_t width, uint32_t n_pixel,
                         uint16_t color, uint32_t row) {
     static uint16_t pattern[PB_PANEL_W];
     for (uint32_t i = 0; i < PB_PANEL_W; i++) pattern[i] = 0x0000;
@@ -1767,7 +1779,7 @@ static void cmd_stripe_test(void) {
     }
 
     for (size_t i = 0; i < sizeof(band) / sizeof(band[0]); i++) {
-        kayma_bandi(band[i].x1, WIDTH, band[i].n, band[i].color, ROW);
+        shift_band(band[i].x1, WIDTH, band[i].n, band[i].color, ROW);
         printf("  %s\n", band[i].name);
     }
 
@@ -1800,7 +1812,7 @@ static void cmd_touch_probe(void) {
     }
     printf("Adres 0x%02x yanit veriyor.\n\n", PB_TP_I2C_ADDR);
 
-    /* â”€â”€ Once en temel soru: bu hatta gercekten bir sey var mi? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /* ── Once en temel soru: bu hatta gercekten bir sey var mi? ───────────
      * Adres taramasi. Yalnizca 0x3B yanit veriyorsa cip gercekten orada.
      * COGU adres yanit veriyorsa hat bozuk (yanlis pin, SDA takili kalmis)
      * ve okudugumuz 0xdb yalnizca gurultudur — protokol varyantlariyla
@@ -1963,7 +1975,7 @@ static void cmd_datapath_probe(void) {
     printf("\nVeri yolu teshisi\n");
     printf("=================\n\n");
 
-    /* â”€â”€ 1. Dar (8 bit) DMA yazimi bayt seritlerine kopyalaniyor mu? â”€â”€â”€â”€â”€â”€
+    /* ── 1. Dar (8 bit) DMA yazimi bayt seritlerine kopyalaniyor mu? ──────
      * Piksel verisi DMA_SIZE_8 ile PIO TX FIFO'suna yaziliyor. PIO programi
      * OSR'yi SOLA kaydiriyor, yani anlamli bayt bit 31:24'te olmali. Tek
      * baytlik bir yazimin 32 bitin tamamina kopyalanmasina guveniyoruz.
@@ -2016,7 +2028,7 @@ static void cmd_datapath_probe(void) {
         }
     }
 
-    /* â”€â”€ 2. PIO state machine calisiyor ve FIFO'yu tuketiyor mu? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── 2. PIO state machine calisiyor ve FIFO'yu tuketiyor mu? ────────── */
     {
         printf("2) PIO durumu (pio0, sm%u):\n", (unsigned)qspi.sm);
         printf("   SM etkin mi: %s\n",
@@ -2039,7 +2051,7 @@ static void cmd_datapath_probe(void) {
                : "FIFO BOSALMIYOR. SM calismiyor veya saat durmus.");
     }
 
-    /* â”€â”€ 3. PIO pinleri gercekten suruyor mu? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /* ── 3. PIO pinleri gercekten suruyor mu? ─────────────────────────────
      * Saati calisilamayacak kadar yavaslatip (birkac kHz) pinleri CPU ile
      * ornekliyoruz. Gecis sayisi 0 ise PIO o pini hic surmuyor. */
     {
@@ -2071,7 +2083,7 @@ static void cmd_datapath_probe(void) {
         pio_sm_clear_fifos(qspi.pio, qspi.sm);
     }
 
-    /* â”€â”€ 4. Pinler elektriksel olarak saglam mi? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /* ── 4. Pinler elektriksel olarak saglam mi? ──────────────────────────
      * Pinleri kisa sureligine duz GPIO yapip surulen seviyeyi geri okuyoruz.
      * Bu test yanlis pin NUMARASINI yakalayamaz (bagli olmayan bir GPIO de
      * yazdiginizi geri okur); kisa devre / takili kalmis pin yakalar. */
@@ -2121,7 +2133,7 @@ static void cmd_datapath_probe(void) {
         printf("\n");
     }
 
-    /* â”€â”€ 5. Komutlar panele ulasiyor mu? (goz gerekir) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /* ── 5. Komutlar panele ulasiyor mu? (goz gerekir) ────────────────────
      * DISPOFF/DISPON ve renk tersleme, piksel verisinden BAGIMSIZ olarak
      * ekranda gorunur bir degisiklik yapar. Karincalanma sonuyor ya da
      * renkleri tersine donuyorsa komut yolu calisiyor demektir ve sorun
@@ -2201,7 +2213,7 @@ static void cmd_datapath_probe(void) {
         #undef TE_SAY
     }
 
-    /* â”€â”€ 6. Bit-bang: PIO'yu denklemden cikar, panele kimligini sor â”€â”€â”€â”€â”€â”€â”€
+    /* ── 6. Bit-bang: PIO'yu denklemden cikar, panele kimligini sor ───────
      * PIO calisiyor, pinler kipirdiyor, CS zamanlamasi duzeltildi — ama panel
      * hala uymuyor. Geriye iki ihtimal kaliyor: PIO'nun urettigi dalga sekli
      * yanlis, ya da sorun hattin/panelin kendisinde. Bit-bang ikisini ayirir.
@@ -2260,7 +2272,7 @@ static void cmd_datapath_probe(void) {
         QSPI_PIO_Restore(qspi);
     }
 
-    /* â”€â”€ 7. Yedek: gozle komut yolu testi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /* ── 7. Yedek: gozle komut yolu testi ─────────────────────────────────
      * Olculebilir testler sonucsuz kalirsa diye duruyor. */
     {
         printf("7) Komut yolu testi — EKRANA BAKIN.\n");
@@ -2626,7 +2638,7 @@ static void cmd_recognize(bool gate_ignore) {
  * ⛔ AKUSTİK DOĞRULAMAYI PC'DEN SES ÇALARAK YAPMAYIN (§5.5): bilgisayarda
  * kulaklık takılı. Bu ekranın kuş sesiyle sınanmasını kullanıcıdan isteyin.
  */
-static void cmd_result_ekrani(void) {
+static void cmd_result_screen(void) {
     printf("\n=== SONUC EKRANI (M7) ===\n");
     printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
     printf("EKRAN 0 dinleme (solda ilk 3 tur, sagda spektrogram)\n");
@@ -2849,7 +2861,7 @@ static void cmd_result_ekrani(void) {
  * Desen düz renk DEĞİL (§9o uyarısı): en uzun tür adı, iki alternatif satırı
  * ve sağda hareketli bir spektrogram deseni var — kayma olursa yazıda görünür.
  */
-static void cmd_result_karti_demo(void) {
+static void cmd_result_card_demo(void) {
     /* En UZUN tür adını bul: sarmanın ve kenarların en kötü durumu bu.
      * İndeks sabitlemek yerine aramak, sınıf tablosu yeniden üretilse de
      * testin en kötü durumu göstermeye devam etmesini sağlıyor. */
@@ -2990,7 +3002,7 @@ static void cmd_result_karti_demo(void) {
  * silinmiyor"dur; kalıntı yoksa ve satırlar üst üste biniyorsa sorun
  * yerleşimdir (etiketler birbirinin alanına taşıyor).
  */
-static void cmd_card_fb_dok(void) {
+static void cmd_card_fb_dump(void) {
     int lengthy = 0;
     for (int i = 0; i < PB_CLASS_COUNT; i++) {
         if (strlen(pb_class_name[i]) > strlen(pb_class_name[lengthy])) lengthy = i;
@@ -3097,7 +3109,7 @@ int main(void) {
         printf("[!] I2S yakalama yolu kurulamadi.\n");
     }
 
-    /* â”€â”€ Ekran â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /* ── Ekran ──────────────────────────────────────────────────────────
      * QSPI pio0'da, ses pio1'de — state machine çakışması yok.
      *
      * SIRA ZORUNLU (Waveshare örneğindeki sıra):
@@ -3147,7 +3159,7 @@ int main(void) {
      * ekranina girsin diye. Once burada baslatiyoruz; ekrandan (bosluk/n/r
      * disinda) bir tusa basilirsa asagidaki komut dongusune duser, PC
      * baglanmissa teshis komutlari yine erisilebilir kalir. */
-    cmd_result_ekrani();
+    cmd_result_screen();
 
     while (true) {
         printf("> ");
@@ -3181,9 +3193,9 @@ int main(void) {
             case 'X': cmd_binary_ai_verify(); break;
             case 'k': cmd_recognize(false); break;
             case 'K': cmd_recognize(true);  break;
-            case 'c': cmd_result_ekrani();   break;
-            case 'C': cmd_result_karti_demo(); break;
-            case 'F': cmd_card_fb_dok();    break;
+            case 'c': cmd_result_screen();   break;
+            case 'C': cmd_result_card_demo(); break;
+            case 'F': cmd_card_fb_dump();    break;
             case '?': print_help();    break;
             case '\r': case '\n': printf("\r"); break;
             default:  printf("bilinmeyen komut ('?' yardim)\n"); break;
