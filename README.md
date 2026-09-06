@@ -9,6 +9,7 @@ I used AI for multiple parts of the project, but the ideas, architectural design
 ## What it does
 You press the button, hold it up, and it listens. If it is a bird sound, the possible
 species name appears. Here is a [demo](https://youtu.be/FgNcmsRgFls)
+Don't want to build it? Download [pokebird.uf2](https://github.com/saidcim/pokebird/releases/latest)
 
 ## Main problem
 I could not run BirdNET which serves the same purpose on this device, so I used it
@@ -35,7 +36,7 @@ Listening for 8 seconds instead of 3 seconds raises top-1 from 58% to 70% and co
 
 
 ## Hardware
-I used Waveshare [RP2350-Touch-LCD-3.49](https://www.waveshare.com/rp2350-touch-lcd-3.49.htm) 
+I used Waveshare [RP2350B (dual Cortex-M33 @ 150 MHz, 520 KB SRAM, no PSRAM)](https://www.waveshare.com/rp2350-touch-lcd-3.49.htm) 
 module for this project since it has a Built-in LCD, Onboard ES8311 audio codec, Microphone and TF card slot.
 
 ## How it works
