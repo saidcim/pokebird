@@ -1,16 +1,16 @@
 /**
- * tflm_port.cc — TFLM'in platformdan beklediği iki fonksiyon
+ * tflm_port.cc — the two functions TFLM expects the platform to provide
  *
- * TFLM iki şeyi hedefe bırakıyor: günlük çıktısı (DebugLog) ve profilleme
- * saati (micro_time). Referans uyarlamaları CMake tarafında listeden
- * çıkarıldı (cmake/tflm.cmake), yerine bunlar geçiyor.
+ * TFLM leaves two things to the target: log output (DebugLog) and the
+ * profiling clock (micro_time). The reference implementations are excluded on
+ * the CMake side (cmake/tflm.cmake) and these take their place.
  *
- * NEDEN kendi DebugLog'umuz: referans sürüm `vfprintf(stderr, ...)` çağırıyor.
- * Bu, newlib'in tüm stdio kilit makinesini bağlamaya çalışıyor
- * (__retarget_lock_acquire_recursive vb.) ve Pico SDK'nın minimal printf'i
- * onları sağlamıyor — lastsession.md §5.4'te aynı tuzağa `fflush(stdout)`
- * yüzünden bir kez düşülmüştü. `vprintf` Pico SDK'nın kendi printf'ine
- * gidiyor ve USB CDC'ye çıkıyor; zaten teşhis çıktısının tamamı oradan akıyor.
+ * WHY OUR OWN DebugLog: the reference version calls `vfprintf(stderr, ...)`.
+ * That drags in newlib's entire stdio locking machinery
+ * (__retarget_lock_acquire_recursive and friends), which the Pico SDK's
+ * minimal printf does not provide — the same trap was hit once before via
+ * `fflush(stdout)`. `vprintf` goes to the Pico SDK's own printf and out over
+ * USB CDC, which is where all the diagnostic output already flows.
  */
 #include <cstdarg>
 #include <cstdint>
@@ -30,20 +30,20 @@ extern "C" int DebugVsnprintf(char* buffer, size_t buf_size, const char* format,
 }
 
 /**
- * abort() — newlib'inkini BİLEREK eziyoruz.
+ * abort() — we override newlib's DELIBERATELY.
  *
- * TFLM birkaç yerde abort() çağırıyor (micro_utils.cc, reduce_common.cc,
- * quantization_util.cc — TFLITE_ABORT / TFLITE_DCHECK). newlib'in abort'u
- * raise() → signal() → malloc() zincirini çekiyor; malloc da newlib'in
- * kilit makinesini (__retarget_lock_acquire_recursive,
- * __lock___malloc_recursive_mutex) istiyor ve Pico SDK onları sağlamıyor.
- * Belirti bir LİNK hatası olarak çıkıyor — lastsession.md §5.4'teki
- * `fflush(stdout)` tuzağının aynısı, sadece başka bir kapıdan.
+ * TFLM calls abort() in several places (micro_utils.cc, reduce_common.cc,
+ * quantization_util.cc — TFLITE_ABORT / TFLITE_DCHECK). newlib's abort pulls
+ * in the raise() -> signal() -> malloc() chain, and malloc in turn wants
+ * newlib's locking machinery (__retarget_lock_acquire_recursive,
+ * __lock___malloc_recursive_mutex), which the Pico SDK does not provide. The
+ * symptom is a LINK error — the same `fflush(stdout)` trap as before, just
+ * through a different door.
  *
- * Kilit saplamaları yazmak yerine abort'un kendisini eziyoruz. İki kazanç:
- * newlib malloc/signal hiç bağlanmıyor (520 KB'lik bir cihazda heap'i kazara
- * canlandırmak istemiyoruz) ve hata sessiz bir kilitlenme yerine seri porta
- * yazılmış bir panic oluyor.
+ * Rather than writing lock stubs we override abort itself. Two benefits:
+ * newlib's malloc/signal never get linked in (on a 520 KB device we do not
+ * want to resurrect the heap by accident), and a failure becomes a panic
+ * printed to the serial console instead of a silent lockup.
  */
 extern "C" __attribute__((noreturn)) void abort(void) {
     panic("TFLM abort()");
@@ -51,8 +51,9 @@ extern "C" __attribute__((noreturn)) void abort(void) {
 
 namespace tflite {
 
-/* Mikrosaniye. time_us_32() 32 bitte ~71 dakikada sarıyor; katman başına
- * ölçüm için fazlasıyla yeterli, tek çıkarım milisaniye mertebesinde. */
+/* Microseconds. time_us_32() wraps after about 71 minutes at 32 bits, which
+ * is more than enough for per-layer measurement: a single inference is on the
+ * order of milliseconds. */
 uint32_t ticks_per_second() { return 1000000; }
 
 uint32_t GetCurrentTimeTicks() { return time_us_32(); }

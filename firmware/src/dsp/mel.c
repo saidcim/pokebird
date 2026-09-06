@@ -5,16 +5,17 @@
 
 #include "dsp/fft.h"
 
-/* ── Filtre bankası ───────────────────────────────────────────────────────
- * Üçgen filtreler seyrek saklanıyor: her filtre için başlangıç bin'i ve
- * ağırlık dizisi. 64 filtre 257 bin'e yayıldığında sıfır olmayan ağırlık
- * sayısı ~550; tam 64×257'lik matris 66 KB ederdi, seyrek hâli ~2 KB. */
+/* ── The filter bank ──────────────────────────────────────────────────────
+ * The triangular filters are stored sparsely: a start bin and a weight array
+ * per filter. With 64 filters spread over 257 bins there are about 550
+ * non-zero weights; a dense 64x257 matrix would be 66 KB, the sparse form is
+ * about 2 KB. */
 #define PB_MEL_WEIGHTS_MAX 768
 
 typedef struct {
     uint16_t start;   /* ilk bin */
-    uint16_t count;   /* ağırlık sayısı */
-    uint16_t offset;  /* s_weights içindeki konum */
+    uint16_t count;   /* number of weights */
+    uint16_t offset;  /* position within s_weights */
 } mel_filter_t;
 
 static mel_filter_t s_filters[PB_MEL_BANDS];
@@ -22,14 +23,15 @@ static float        s_weights[PB_MEL_WEIGHTS_MAX];
 static uint16_t     s_weight_used = 0;
 static bool         s_inited = false;
 
-/* HTK mel ölçeği. librosa'da htk=True karşılığı. */
+/* The HTK mel scale — librosa's htk=True. */
 static float hz_to_mel(float hz) { return 2595.0f * log10f(1.0f + hz / 700.0f); }
 static float mel_to_hz(float m)  { return 700.0f * (powf(10.0f, m / 2595.0f) - 1.0f); }
 
 void pb_mel_init(void) {
     if (s_inited) return;
 
-    /* Mel ekseninde eşit aralıklı BANDS+2 nokta; her üçlü bir üçgen. */
+    /* BANDS+2 evenly spaced points on the mel axis; each triple is one
+     * triangle. */
     float pts[PB_MEL_BANDS + 2];
     const float m0 = hz_to_mel(PB_MEL_FMIN);
     const float m1 = hz_to_mel(PB_MEL_FMAX);
@@ -47,7 +49,7 @@ void pb_mel_init(void) {
         int k1 = (int)floorf(right);
         if (k0 < 0) k0 = 0;
         if (k1 > PB_FFT_POWER_BINS - 1) k1 = PB_FFT_POWER_BINS - 1;
-        if (k1 < k0) k1 = k0 - 1;                 /* boş filtre */
+        if (k1 < k0) k1 = k0 - 1;                 /* empty filter */
 
         s_filters[f].start  = (uint16_t)k0;
         s_filters[f].offset = s_weight_used;
@@ -70,7 +72,7 @@ void pb_mel_init(void) {
     s_inited = true;
 }
 
-/* dB <-> int8 doğrusal eşleme. Aralık mel.h'de gerekçesiyle birlikte. */
+/* Linear dB <-> int8 mapping. The range and its reasoning are in mel.h. */
 static int8_t db_to_q(float db) {
     if (db < PB_MEL_DB_MIN) db = PB_MEL_DB_MIN;
     if (db > PB_MEL_DB_MAX) db = PB_MEL_DB_MAX;
@@ -99,18 +101,18 @@ void pb_mel_frame(const int16_t *samples, int8_t *out) {
         for (uint16_t i = 0; i < flt->count; i++) {
             acc += w[i] * power[flt->start + i];
         }
-        /* log10'un sıfırda patlamaması için taban ekleniyor; taban değeri
-         * PB_MEL_DB_MIN'in biraz altına denk geliyor ki kırpma orada olsun. */
+        /* A floor is added so log10 does not blow up at zero; its value
+         * sits just below PB_MEL_DB_MIN so that clipping happens there. */
         float db = 10.0f * log10f(acc + 1e-10f);
         out[f] = db_to_q(db);
     }
 }
 
 /* ── Halka tamponu ────────────────────────────────────────────────────────
- * 64×187 int8 = 11.7 KB. Yazma konumu döner; okurken en eskiden en yeniye
- * sırayla kopyalanıyor. */
+ * 64x187 int8 = 11.7 KB. The write position wraps; on read the frames are
+ * copied out oldest to newest. */
 static int8_t   s_ring[PB_MEL_FRAMES][PB_MEL_BANDS];
-static uint32_t s_write = 0;      /* sıradaki yazma satırı */
+static uint32_t s_write = 0;      /* the next row to write */
 static uint32_t s_total = 0;      /* toplam itilen kare */
 
 void pb_mel_reset(void) {
@@ -137,10 +139,10 @@ void pb_mel_push(const int16_t *samples) {
 bool pb_mel_window(int8_t *out) {
     if (s_total < PB_MEL_FRAMES) return false;
 
-    /* En eski kare, bir sonraki yazılacak satırdır. */
+    /* The oldest frame is the row that will be written next. */
     const uint32_t first = s_write;
 
-    /* Pencere içi ortalama ve standart sapma — dB alanında. */
+    /* Per-window mean and standard deviation, in the dB domain. */
     float total = 0.0f, total_frame = 0.0f;
     for (uint32_t r = 0; r < PB_MEL_FRAMES; r++) {
         const int8_t *row = s_ring[(first + r) % PB_MEL_FRAMES];
@@ -156,8 +158,8 @@ bool pb_mel_window(int8_t *out) {
     if (var < 1e-6f) var = 1e-6f;
     const float std = sqrtf(var);
 
-    /* ±4 sigma'yı int8'in tamamına yay. Kırpma nadir ama zararsız: 4 sigma
-     * dışındaki değerler zaten aşırı uçlar. */
+    /* Spread +/-4 sigma across the whole int8 range. Clipping is rare and
+     * harmless: values beyond 4 sigma are extreme outliers anyway. */
     const float scale = 127.0f / (4.0f * std);
 
     for (uint32_t r = 0; r < PB_MEL_FRAMES; r++) {

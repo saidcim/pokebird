@@ -1,19 +1,22 @@
-/* Uretilmis dosya — tools/validation_set.py. ELLE DUZENLEMEYIN.
+/* GENERATED FILE - tools/validation_set.py. DO NOT EDIT BY HAND.
  *
- * CIHAZ-ICI DOGRULAMA SETI (M6 §9l madde 7).
+ * ON-DEVICE VALIDATION SET.
  *
- * 8 pencere data/egitim/pencereler.npy'nin TEST bolumunden secildi;
- * beklenen logit'ler PC'deki TFLite yorumlayicisinin ayni pencereye verdigi
- * int8 ciktisi. Cihaz ayni girdiye BIREBIR ayni cikti vermeli.
+ * 8 windows were picked from the TEST split of data/egitim/pencereler.npy;
+ * the expected logits are the int8 output the PC's TFLite interpreter gives
+ * for the same window. The device must produce EXACTLY the same output for
+ * the same input.
  *
- * PC tarafi REFERANS cekirdeklerle (BUILTIN_REF) calistirildi. Varsayilan
- * yorumlayici XNNPACK delegesini kullaniyor ve int8'i bit-birebir
- * hesaplamiyor (olculdu: en buyuk 2 adim sapma) — altin standart o degil.
+ * The PC side was run with the REFERENCE kernels (BUILTIN_REF). The default
+ * interpreter uses the XNNPACK delegate, which does not compute int8
+ * bit-for-bit (measured: up to 2 steps of deviation), so it is not the gold
+ * standard here.
  *
- * Fark cikarsa sorun mel hattinda DEGIL (ses yolu bu teste hic girmiyor):
- * TFLM cekirdekleri, CMSIS-NN, arena ya da nicelestirme tarafindadir.
+ * If they differ, the problem is NOT in the mel pipeline (the audio path is
+ * not exercised by this test at all): it is in the TFLM kernels, CMSIS-NN,
+ * the arena, or the quantisation.
  *
- * Cikti nicelestirmesi: logit = (q - 83) * 0.278865397
+ * Output quantisation: logit = (q - 83) * 0.278865397
  */
 #ifndef POKEBIRD_VALIDATION_SET_H
 #define POKEBIRD_VALIDATION_SET_H
@@ -25,18 +28,19 @@
 #define PB_VALIDATION_BANDS   64
 #define PB_VALIDATION_CLASSES  179
 
-/* Gercek sinif indeksi (dogruluk icin degil, raporu okunur kilmak icin). */
+/* True class index (not used for correctness, only to make the report
+ * readable). */
 static const int16_t pb_validation_class[PB_VALIDATION_COUNT] = {
       30,  36,  59,  70,  72, 135, 160, 178,
 };
 
-/* PC'nin ayni pencereye verdigi tahmin (argmax). */
+/* The PC's prediction for the same window (argmax). */
 static const int16_t pb_validation_pc_pred[PB_VALIDATION_COUNT] = {
       30,  57, 151,  70,  72, 135, 160, 178,
 };
 
-/* Girdi pencereleri: kare disar (eskiden yeniye), bant icerde —
- * mel.c'deki pb_mel_window() duzeninin aynisi. */
+/* Input windows: frames on the outside (oldest to newest), bands on the
+ * inside - the same layout pb_mel_window() produces in mel.c. */
 static const int8_t pb_validation_input[PB_VALIDATION_COUNT]
                                       [PB_VALIDATION_FRAMES * PB_VALIDATION_BANDS] = {
   {
@@ -6041,7 +6045,7 @@ static const int8_t pb_validation_input[PB_VALIDATION_COUNT]
   },
 };
 
-/* PC'nin ham int8 logit'leri. */
+/* The PC's raw int8 logits. */
 static const int8_t pb_validation_logit[PB_VALIDATION_COUNT][PB_VALIDATION_CLASSES] = {
   {
        7,  20,  36,  21,  38,  22,  21,  20,  42,  47,  52,  55,  33,  35,  20,  36,

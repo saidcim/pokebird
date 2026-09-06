@@ -8,10 +8,10 @@ static float s_im[PB_FFT_SIZE];
 static float s_window[PB_FFT_SIZE];
 static int   s_window_ready = 0;
 
-/* Yerinde radix-2 karmaşık FFT. Kısa ve doğrulanabilir olması için sadelik
+/* In-place radix-2 complex FFT. Kept simple so it stays short and
  * tercih edildi; M3'te CMSIS-DSP devralacak. */
 static void fft_inplace(float *re, float *im, uint32_t n) {
-    /* bit-ters permütasyon */
+    /* bit-reversal permutation */
     for (uint32_t i = 1, j = 0; i < n; i++) {
         uint32_t bit = n >> 1;
         for (; j & bit; bit >>= 1) j ^= bit;
@@ -40,10 +40,11 @@ static void fft_inplace(float *re, float *im, uint32_t n) {
     }
 }
 
-/* Hann penceresi — periyodik (N'e bölünür), simetrik (N-1) DEĞİL.
- * Periyodik olan, ardışık karelerin örtüştüğü spektral analizde doğru olan
- * ve Python tarafının (scipy/librosa `sym=False`) varsayılanı; referansla
- * karşılaştırma yapacağımız için bu ayrım önemli. */
+/* Hann window — periodic (divided by N), NOT symmetric (N-1).
+ * The periodic form is the correct one for spectral analysis with overlapping
+ * frames, and it is what the Python side defaults to (scipy/librosa
+ * `sym=False`). Since we compare against that reference, the distinction
+ * matters. */
 static void window_ensure(void) {
     if (s_window_ready) return;
     for (uint32_t i = 0; i < PB_FFT_SIZE; i++) {
@@ -56,8 +57,8 @@ static void window_ensure(void) {
 void pb_fft_power(const int16_t *samples, float *power) {
     window_ensure();
 
-    /* DC'yi çıkar — mikrofonun sabit bir ofseti var (M1'de ~15 LSB ölçüldü)
-     * ve çıkarılmazsa bin 0'da yapay bir tepe oluşturuyor. */
+    /* Remove DC — the microphone has a constant offset (measured at about
+     * 15 LSB), and left in it produces an artificial peak in bin 0. */
     float mean = 0.0f;
     for (uint32_t i = 0; i < PB_FFT_SIZE; i++) mean += (float)samples[i];
     mean /= (float)PB_FFT_SIZE;
@@ -68,20 +69,22 @@ void pb_fft_power(const int16_t *samples, float *power) {
     }
     fft_inplace(s_re, s_im, PB_FFT_SIZE);
 
-    /* Pencerenin tutarlı kazancıyla normalize: tam ölçekli bir sinüs kendi
-     * bin'inde 1.0 güç versin, yani 0 dBFS.
+    /* Normalise by the window's coherent gain, so a full-scale sine gives a
+     * power of 1.0 in its own bin, i.e. 0 dBFS.
      *
-     * Türetme: x[n] = A·sin(...) Hann ile pencerelenince kendi bin'inde
-     * |X[k]| ≈ A·N/4, güç ise A²N²/16. Bunu A²'ye getirmek için 16/N²
-     * gerekiyor; kazanç sum(w)/N = 0.5 üzerinden yazınca 4/kazanç².
-     * (Önce 2/kazanç² yazılmıştı; o, sinüsün ortalama-karesini yani A²/2'yi
-     * veriyordu ve tam ölçekli sinüs -3 dBFS okunuyordu. Host testi yakaladı.) */
+     * Derivation: for x[n] = A*sin(...) windowed with Hann, the magnitude in
+     * its own bin is |X[k]| ~= A*N/4, so the power is A^2*N^2/16. Bringing
+     * that to A^2 needs 16/N^2, which written in terms of the gain
+     * sum(w)/N = 0.5 is 4/gain^2.
+     *
+     * (It was first written as 2/gain^2, which gives the sine's mean square,
+     * A^2/2, so a full-scale sine read as -3 dBFS. A host test caught it.) */
     const float gain = 0.5f * (float)PB_FFT_SIZE;
     const float scale = 4.0f / (gain * gain);
 
     for (uint32_t k = 0; k < PB_FFT_POWER_BINS; k++) {
         float p = s_re[k] * s_re[k] + s_im[k] * s_im[k];
-        /* DC ve Nyquist'in eşi yok, iki katına çıkarılmaz. */
+        /* DC and Nyquist have no mirror partner, so they are not doubled. */
         power[k] = (k == 0 || k == PB_FFT_SIZE / 2) ? p * (scale * 0.5f)
                                                     : p * scale;
     }
@@ -101,8 +104,9 @@ void pb_fft_spectrum(const int16_t *samples, uint8_t *out, uint32_t n_out,
     }
     fft_inplace(s_re, s_im, PB_FFT_SIZE);
 
-    /* Bin'leri logaritmik grupla: kuş sesinde ilgi çekici detay geniş bir
-     * frekans aralığına yayılıyor, doğrusal gruplama tizleri eziyor. */
+    /* Group the bins logarithmically: in birdsong the interesting detail is
+     * spread over a wide frequency range, and linear grouping crushes the
+     * high end. */
     const float span = 1.0f / (float)n_out;
     for (uint32_t b = 0; b < n_out; b++) {
         float f0 = powf((float)PB_FFT_BINS, (float)b * span);

@@ -1,15 +1,15 @@
-/* Uretilmis dosya — tools/binary_validation_set.py. ELLE DUZENLEMEYIN.
+/* GENERATED FILE - tools/binary_validation_set.py. DO NOT EDIT BY HAND.
  *
- * ASAMA-1 IKILI AG CIHAZ-ICI DOGRULAMA SETI (M7).
+ * ON-DEVICE VALIDATION SET FOR THE STAGE-1 BINARY NET.
  *
- * 8 pencere data/egitim/pencereler.npy'nin TEST bolumunden secildi
- * (4 kus + 4 negatif); beklenen logit PC'deki
- * TFLite REFERANS cekirdek (BUILTIN_REF) ciktisi. Cihaz BIREBIR ayni
- * uretmeli — varsayilan XNNPACK delegesi int8'i bit-birebir hesaplamiyor
- * (M6 §9l'de olculdu), o yuzden BUILTIN_REF kullanildi.
+ * 8 windows were picked from the TEST split of data/egitim/pencereler.npy
+ * (4 bird + 4 negative); the expected logit is the output of the PC's TFLite
+ * REFERENCE kernels (BUILTIN_REF). The device must produce EXACTLY the same
+ * value - the default XNNPACK delegate does not compute int8 bit-for-bit
+ * (measured), which is why BUILTIN_REF is used.
  *
- * Cikti nicelestirmesi: logit = (q - -60) * 0.158146381
- * (sigmoid ONCESI ham deger; p = sigmoid(logit))
+ * Output quantisation: logit = (q - -60) * 0.158146381
+ * (the raw PRE-sigmoid value; p = sigmoid(logit))
  */
 #ifndef POKEBIRD_BINARY_VALIDATION_SET_H
 #define POKEBIRD_BINARY_VALIDATION_SET_H
@@ -20,17 +20,17 @@
 #define PB_BINARY_VALIDATION_FRAMES  187
 #define PB_BINARY_VALIDATION_BANDS  64
 
-/* Gercek ikili etiket: 1 = KUS, 0 = DEGIL. */
+/* True binary label: 1 = BIRD, 0 = NOT. */
 static const int16_t pb_binary_validation_truth[PB_BINARY_VALIDATION_COUNT] = {
        0,   0,   0,   0,   1,   1,   1,   1,
 };
 
-/* PC REFERANS cekirdegin urettigi ham int8 logit (sigmoid oncesi). */
+/* The raw int8 logit produced by the PC's REFERENCE kernels (pre-sigmoid). */
 static const int8_t pb_binary_validation_logit[PB_BINARY_VALIDATION_COUNT] = {
     -108,-101, -57, -57,  67, -61, -17,  22,
 };
 
-/* Girdi pencereleri: kare disar (eskiden yeniye), bant icerde. */
+/* Input windows: frames on the outside (oldest to newest), bands inside. */
 static const int8_t pb_binary_validation_input[PB_BINARY_VALIDATION_COUNT]
                                             [PB_BINARY_VALIDATION_FRAMES * PB_BINARY_VALIDATION_BANDS] = {
   {
