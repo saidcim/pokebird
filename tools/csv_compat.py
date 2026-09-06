@@ -53,6 +53,9 @@ LEGACY = {
     "xc_ab_eu": "xc_count_eu",
     "xc_ab_sa": "xc_count_world",
     "gbif_kayit": "gbif_records",
+    "esc50_dosya": "esc50_file",
+    "kaynak": "source",
+    "lisans": "licence",
 }
 for _m in range(1, 13):
     LEGACY["ay_%02d" % _m] = "month_%02d" % _m
@@ -121,6 +124,7 @@ LEGACY_FILES = {
     "negative": "negatif",
     "birdnet_result": "birdnet_sonuc",
     "segment_samples": "segment_ornek",
+    "esc50_records.csv": "esc50_kayitlar.csv",
 }
 
 

@@ -1,57 +1,61 @@
 #!/usr/bin/env python3
 """
-birdnet_run.py — data/wav altindaki her kaydi BirdNET ile 3 sn'lik dilimlere
-ayirip tur skorlarini yazar. (M4 adim 3)
+birdnet_run.py — split every recording under data/wav into 3-second slices
+with BirdNET and write the species scores.
 
-    .venv-birdnet\\Scripts\\python -u tools/birdnet_run.py --isci 10
+    .venv-birdnet\\Scripts\\python -u tools/birdnet_run.py --workers 10
 
-BU BETIK VENV'IN PYTHON'UYLA CALISIR. Makinedeki varsayilan Python 3.14,
-BirdNET-Analyzer 3.11 istiyor; ayri sanal ortam bu yuzden var.
-
---------------------------------------------------------------------------
-NEDEN --slist YOK
---------------------------------------------------------------------------
-Plan 178 turluk bir liste vermeyi ongoruyordu. Kurulu surumde tur listesi
-filtresi CIKARIMDAN SONRA uygulaniyor (analyze/utils.py:689) — yani liste
-vermek hicbir hiz kazandirmiyor, sadece satir eliyor. Listesiz calistirmak
-ayni surede daha cok bilgi birakiyor; ilk olcum kayitta bunu dogruladi:
-
-    0.0-3.0  Engine                   0.2877   <- kus disi sinif
-    3.0-5.4  Corvus cornix  (hedef)   0.5201
-    3.0-5.4  Corvus corone  (akraba)  0.4368   <- karisma sinyali
-
-`Engine` gibi kus disi siniflar Asama-1 kapisi ve negatif madenciligi icin
-dogrudan degerli; akraba tur skoru da bulasik dilimi ayiklamaya yariyor.
-178 ture suzme tools/birdnet_summary.py'de yapiliyor.
+THIS SCRIPT RUNS WITH THE VENV'S PYTHON. The default Python on this machine
+is 3.14 and BirdNET-Analyzer wants 3.11; that is why the separate virtualenv
+exists.
 
 --------------------------------------------------------------------------
-NEDEN --min_conf 0.1
+WHY THERE IS NO --slist
 --------------------------------------------------------------------------
-Varsayilan 0.25. Bizim isimiz yalnizca "hangi dilim" degil; M5'te damitma
-(distillation) icin BirdNET'in YUMUSAK skorlari ogretmen sinyali olacak.
-Dusuk guvenli dilim de bilgi tasir; esigi egitimde yukseltmek kolay, atilan
-veriyi geri getirmek icin 79 saatlik analizi tekrarlamak gerekir.
+The plan was to pass a list of the 178 species. In the installed version the
+species-list filter is applied AFTER INFERENCE (analyze/utils.py:689) — so
+passing a list buys no speed at all, it only drops rows. Running without one
+leaves more information behind in the same time, and the first measurement
+run confirmed it:
+
+    0.0-3.0  Engine                   0.2877   <- a non-bird class
+    3.0-5.4  Corvus cornix  (target)  0.5201
+    3.0-5.4  Corvus corone  (relative) 0.4368  <- a confusion signal
+
+Non-bird classes like `Engine` are directly useful for the stage-1 gate and
+for negative mining; the score of a related species helps weed out
+contaminated slices. Filtering down to the 178 happens in
+tools/birdnet_summary.py.
 
 --------------------------------------------------------------------------
-!! BIRDNET'IN KENDI SUREC HAVUZU KULLANILMIYOR — KILITLENIYOR
+WHY --min_conf 0.1
 --------------------------------------------------------------------------
-`analyze(threads=14)` iceride multiprocessing.Pool aciyor. Bu makinede
-(Windows + TensorFlow) 40 dosyalik bir turde 37 dosyadan sonra KILITLENDI:
-16 surec ayakta, CPU 962 sn'de sabit, kalan 3 dosya hic islenmedi. Ayni uc
-dosya threads=1 ile sorunsuz bitti (21.4 / 0.7 / 10.9 sn), yani dosyalarda
-sorun yok — havuzda var.
-
-Bu yuzden paralellik BURADA kuruluyor: N bagimsiz surec, her biri kendi tur
-kumesini threads=1 ile isliyor. Surecler birbirinden habersiz oldugu icin
-kilitlenecek ortak nokta kalmiyor; biri olurse digerleri devam eder ve
-gunlugunde sebebi gorunur (M4'te ogrenilen ders: sebebi gorunmeyen arka plan
-isi zaman kaybettiriyor).
+The default is 0.25. Our job is not only "which slice": BirdNET's SOFT scores
+become the teacher signal for distillation in the species net. A
+low-confidence slice still carries information; raising the threshold during
+training is easy, whereas getting discarded data back means repeating a
+79-hour analysis.
 
 --------------------------------------------------------------------------
-YENIDEN BASLATILABILIR
+!! BIRDNET'S OWN PROCESS POOL IS NOT USED — IT DEADLOCKS
 --------------------------------------------------------------------------
-skip_existing_results=True: sonucu olan dosya atlanir. Yarida kesilirse ayni
-komut kaldigi yerden devam eder.
+`analyze(threads=14)` opens a multiprocessing.Pool internally. On this
+machine (Windows + TensorFlow) it DEADLOCKED after 37 of the 40 files in one
+species: 16 processes alive, CPU stuck at 962 s, the remaining 3 files never
+processed. Those same three files finished without trouble at threads=1
+(21.4 / 0.7 / 10.9 s), so the files are fine — the pool is not.
+
+So the parallelism is built HERE: N independent processes, each handling its
+own set of species with threads=1. Since the processes know nothing about
+each other there is no shared point left to deadlock on; if one dies the rest
+carry on and the reason is visible in its log (a lesson learned the hard way:
+background work whose failure is invisible costs time).
+
+--------------------------------------------------------------------------
+RESTARTABLE
+--------------------------------------------------------------------------
+skip_existing_results=True: a file that already has a result is skipped. If
+the run is interrupted, the same command picks up where it left off.
 """
 
 import argparse
@@ -60,15 +64,19 @@ import subprocess
 import sys
 import time
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 WAV_DIR = os.path.join(DATA, "wav")
-RESULT_DIR = os.path.join(DATA, "birdnet_sonuc")
+RESULT_DIR = csv_compat.resolve(os.path.join(DATA, "birdnet_result"))
 LOG_DIR = os.path.join(DATA, "birdnet_log")
 
 
-def species_boyutlari(root):
-    """tur -> toplam bayt. Is dagitimini dosya sayisina degil sese gore yap."""
+def species_sizes(root):
+    """species -> total bytes. Share the work out by audio, not file count."""
     d = {}
     for t in sorted(os.listdir(root)):
         p = os.path.join(root, t)
@@ -79,23 +87,24 @@ def species_boyutlari(root):
     return d
 
 
-def kumelere_bol(boyutlar, n):
-    """En buyukten baslayip en bos kumeye at (LPT) — kumeler dengeli biter."""
-    kumeler = [[] for _ in range(n)]
-    yuk = [0] * n
-    for t, b in sorted(boyutlar.items(), key=lambda x: -x[1]):
-        i = yuk.index(min(yuk))
-        kumeler[i].append(t)
-        yuk[i] += b
-    return kumeler, yuk
+def split_into_sets(sizes, n):
+    """Largest first, onto the emptiest set (LPT) - the sets come out even."""
+    sets = [[] for _ in range(n)]
+    load = [0] * n
+    for t, b in sorted(sizes.items(), key=lambda x: -x[1]):
+        i = load.index(min(load))
+        sets[i].append(t)
+        load[i] += b
+    return sets, load
 
 
 def result_count(root, species):
-    """Yalnizca kapsamdaki turlerin sonuc CSV'lerini say.
+    """Count the result CSVs of the species in scope, and only those.
 
-    Dizindeki her seyi saymak yaniltiyor: BirdNET her cikti dizinine bir de
-    analiz parametre dosyasi yaziyor, ayrica onceki kosulardan baska turlerin
-    sonuclari duruyor. Ilk denemede sayac 120 hedefe karsi 164 gostermisti.
+    Counting everything in the directory misleads: BirdNET also writes an
+    analysis-parameters file into each output directory, and results from
+    other species are left over from earlier runs. On the first attempt the
+    counter read 164 against a target of 120.
     """
     n = 0
     for t in species:
@@ -105,7 +114,7 @@ def result_count(root, species):
     return n
 
 
-def workers_calis(species, inp_root, output_root, min_conf, batch):
+def run_worker(species, inp_root, output_root, min_conf, batch):
     from birdnet_analyzer.analyze.core import analyze
 
     for i, t in enumerate(species, 1):
@@ -120,14 +129,14 @@ def workers_calis(species, inp_root, output_root, min_conf, batch):
             min_conf=min_conf,
             overlap=0.0,
             rtype="csv",
-            merge_consecutive=1,  # 1 = birlestirme KAPALI, her 3 sn ayri satir
+            merge_consecutive=1,  # 1 = merging OFF, one row per 3 s
             skip_existing_results=True,
-            threads=1,  # havuz yok, bkz. yukaridaki not
+            threads=1,  # no pool, see the note above
             batch_size=batch,
             combine_results=False,
         )
         print(
-            f"[{i}/{len(species)}] {t}  {n} dosya  {time.time() - t0:.0f} sn",
+            f"[{i}/{len(species)}] {t}  {n} files  {time.time() - t0:.0f}s",
             flush=True,
         )
 
@@ -138,70 +147,73 @@ def main():
     ap.add_argument("--out", default=RESULT_DIR)
     ap.add_argument("--min-conf", type=float, default=0.1)
     ap.add_argument("--batch", type=int, default=8, help="batch_size")
-    ap.add_argument("--workers", type=int, default=10, help="es zamanli surec")
-    ap.add_argument("--species", nargs="*", help="yalnizca bu ebird kodlari")
-    ap.add_argument("--sub-process", action="store_true", help="ic kullanim")
+    ap.add_argument("--workers", type=int, default=10,
+                    help="concurrent processes")
+    ap.add_argument("--species", nargs="*", help="only these eBird codes")
+    ap.add_argument("--sub-process", action="store_true", help="internal use")
     a = ap.parse_args()
 
     if not os.path.isdir(a.inp):
-        sys.exit(f"girdi dizini yok: {a.inp}")
+        sys.exit(f"the input directory is missing: {a.inp}")
 
-    boyutlar = species_boyutlari(a.inp)
+    sizes = species_sizes(a.inp)
     if a.species:
-        boyutlar = {t: boyutlar[t] for t in a.species}
+        sizes = {t: sizes[t] for t in a.species}
 
-    # --- isci kipi: verilen turleri tek surecte, tek is parcaciginda isle ---
+    # --- worker mode: handle the given species in one process, one thread ---
     if a.sub_process or a.workers <= 1:
-        workers_calis(sorted(boyutlar), a.inp, a.out, a.min_conf, a.batch)
+        run_worker(sorted(sizes), a.inp, a.out, a.min_conf, a.batch)
         return
 
-    # --- ana kip: isi bol, N alt surec baslat, ilerlemeyi bildir ---
+    # --- main mode: split the work, start N subprocesses, report progress ---
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(a.out, exist_ok=True)
-    kumeler, yuk = kumelere_bol(boyutlar, a.workers)
-    target = sum(len(os.listdir(os.path.join(a.inp, t))) for t in boyutlar)
+    sets, load = split_into_sets(sizes, a.workers)
+    target = sum(len(os.listdir(os.path.join(a.inp, t))) for t in sizes)
 
-    print(f"{len(boyutlar)} tur, {target} dosya, {sum(yuk) / 2**30:.1f} GB ses")
-    print(f"{a.workers} isci; kume basina {min(yuk) / 2**30:.1f}-{max(yuk) / 2**30:.1f} GB")
+    print(f"{len(sizes)} species, {target} files, {sum(load) / 2**30:.1f} GB audio")
+    print(f"{a.workers} workers; {min(load) / 2**30:.1f}-"
+          f"{max(load) / 2**30:.1f} GB per set")
 
-    proc, loglar = [], []
-    for i, k in enumerate(kumeler):
+    proc, logs = [], []
+    for i, k in enumerate(sets):
         if not k:
             continue
-        log = os.path.join(LOG_DIR, f"isci_{i}.log")
-        loglar.append(log)
+        log = os.path.join(LOG_DIR, f"worker_{i}.log")
+        logs.append(log)
         f = open(log, "w", encoding="utf-8")
         proc.append(
             (
                 subprocess.Popen(
                     [sys.executable, "-u", os.path.abspath(__file__),
-                     "--alt-surec", "--girdi", a.inp, "--out", a.out,
-                     "--min-conf", str(a.min_conf), "--yigin", str(a.batch),
-                     "--tur", *k],
+                     "--sub-process", "--inp", a.inp, "--out", a.out,
+                     "--min-conf", str(a.min_conf), "--batch", str(a.batch),
+                     "--species", *k],
                     stdout=f, stderr=subprocess.STDOUT,
                 ),
                 f,
             )
         )
-    print(f"gunlukler: {LOG_DIR}\\isci_*.log", flush=True)
+    print(f"logs: {LOG_DIR}\\worker_*.log", flush=True)
 
     t0 = time.time()
-    # Hiz, bu kosuda EKLENEN sonuclardan hesaplaniyor: yarida kesilmis bir isi
-    # surdururken hazir sonuclari hiza saymak kalan sureyi sifira yuvarlardi.
-    basla = result_count(a.out, boyutlar)
+    # The rate is computed from the results ADDED IN THIS RUN: while
+    # resuming an interrupted job, counting the results that were already
+    # there would round the time remaining down to zero.
+    at_start = result_count(a.out, sizes)
     while True:
-        biten = sum(1 for p, _ in proc if p.poll() is not None)
-        n = result_count(a.out, boyutlar)
-        gecen = time.time() - t0
-        rate = (n - basla) / gecen if gecen > 0 else 0
-        kalan = (target - n) / rate / 60 if rate > 0 else 0
+        finished = sum(1 for p, _ in proc if p.poll() is not None)
+        n = result_count(a.out, sizes)
+        elapsed = time.time() - t0
+        rate = (n - at_start) / elapsed if elapsed > 0 else 0
+        remaining = (target - n) / rate / 60 if rate > 0 else 0
         print(
-            f"{time.strftime('%H:%M:%S')}  {n}/{target} sonuc  "
-            f"{rate * 60:.0f} dosya/dk  kalan ~{kalan:.0f} dk  "
-            f"biten isci {biten}/{len(proc)}",
+            f"{time.strftime('%H:%M:%S')}  {n}/{target} results  "
+            f"{rate * 60:.0f} files/min  ~{remaining:.0f} min left  "
+            f"workers finished {finished}/{len(proc)}",
             flush=True,
         )
-        if biten == len(proc):
+        if finished == len(proc):
             break
         time.sleep(60)
 
@@ -209,11 +221,11 @@ def main():
         f.close()
     code = [p.returncode for p, _ in proc]
     print(
-        f"\nbitti: {result_count(a.out, boyutlar)}/{target} sonuc, "
-        f"{(time.time() - t0) / 60:.0f} dk"
+        f"\ndone: {result_count(a.out, sizes)}/{target} results, "
+        f"{(time.time() - t0) / 60:.0f} min"
     )
     if any(code):
-        print(f"!! sifir olmayan cikis kodlari: {code} — gunluklere bakin")
+        print(f"!! non-zero exit codes: {code} - check the logs")
 
 
 if __name__ == "__main__":

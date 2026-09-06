@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-capture_wav.py — PokeBird M1: cihazdan ses kaydı al, WAV'a çevir, analiz et.
+capture_wav.py — record audio from the device, turn it into a WAV, analyse it.
 
-Cihazın USB seri portuna bağlanır, 'r' komutunu gönderir, #WAV-BEGIN /
-#WAV-END arasındaki örnekleri toplayıp WAV dosyası yazar ve gürültü tabanı
-ile spektrum özetini basar.
+Connects to the device's USB serial port, sends the 'r' command, collects the
+samples between #WAV-BEGIN and #WAV-END, writes a WAV file and prints the
+noise floor plus a spectrum summary.
 
-Kullanım:
-    python tools/capture_wav.py --port COM13 --out kayit.wav
-    python tools/capture_wav.py --port COM13 --cmd n     # sadece ölçüm
+Usage:
+    python tools/capture_wav.py --port COM13 --out recording.wav
+    python tools/capture_wav.py --port COM13 --cmd n     # measurement only
 """
 
 import argparse
@@ -22,13 +22,14 @@ import wave
 try:
     import serial  # pyserial
 except ImportError:
-    sys.exit("pyserial gerekli:  pip install pyserial")
+    sys.exit("pyserial is required:  pip install pyserial")
 
 BEGIN_RE = re.compile(r"#WAV-BEGIN\s+rate=(\d+)\s+channels=(\d+)\s+bits=(\d+)\s+samples=(\d+)")
 
 
 def read_until_prompt(ser, timeout=5.0):
-    """Cihaz '> ' istemini basana kadar oku; ara çıktıyı döndür."""
+    """Read until the device prints its '> ' prompt; return what came in
+    between."""
     out, deadline = [], time.time() + timeout
     while time.time() < deadline:
         chunk = ser.read(4096).decode("utf-8", errors="replace")
@@ -42,13 +43,13 @@ def read_until_prompt(ser, timeout=5.0):
 
 
 def run_interactive(ser, cmd):
-    """Etkileşimli teşhis komutları ('d', 'b') için canlı akış.
+    """A live stream for the interactive diagnostic commands ('d', 'b').
 
-    Bu testler ekrana bakıp bir tuşa basmayı gerektiriyor: cihaz durumları
-    sırayla deniyor, siz doğru olanı gördüğünüzde tuşa basıyorsunuz ve cihaz
-    hangi durumda olduğunu kendisi yazıyor (bkz. lastsession.md §5.9).
-    Bu yüzden çıktıyı sonda toplu basmak yerine canlı akıtıp klavyeyi
-    cihaza iletiyoruz.
+    Those tests need someone to look at the screen and press a key: the
+    device walks through its states in turn, you press a key when you see the
+    right one, and the device itself reports which state it was in. So rather
+    than printing everything at the end, the output is streamed live and the
+    keyboard is forwarded to the device.
     """
     try:
         import msvcrt                      # Windows
@@ -65,13 +66,13 @@ def run_interactive(ser, cmd):
     ser.write(cmd.encode())
     ser.flush()
     if cmd in ("c", "C"):
-        # Arayuz komutlari: bosluk/'n' ekran degistiriyor, baska tus cikiyor.
-        # Kaydirma dokunmatikle de calisiyor; bu onun yedegi (lastsession §9q).
-        print("Ekrana bakin. EKRANDA YATAY KAYDIRIN, ya da bosluk/'n' ile")
-        print("ekran degistirin. Cikmak icin baska bir tusa basin.")
+        # UI commands: space or 'n' changes screen, any other key exits.
+        # Swiping works on the touchscreen too; this is the fallback.
+        print("Look at the screen. SWIPE HORIZONTALLY ON IT, or change")
+        print("screen with space / 'n'. Press any other key to leave.")
     else:
-        print("Ekrana bakin. Istenen goruntuyu gordugunuzde bir tusa basin.")
-    print("Cikmak icin Ctrl+C.\n")
+        print("Look at the screen. Press a key when you see what you want.")
+    print("Ctrl+C to quit.\n")
 
     last_data = time.time()
     try:
@@ -88,17 +89,18 @@ def run_interactive(ser, cmd):
                 ser.write(key)
                 ser.flush()
             if not chunk:
-                # Test bitince cihaz istemde bekler; 4 sn sessizlikte cik.
+                # When the test ends the device waits at its prompt; leave
+                # after 4 s of silence.
                 if time.time() - last_data > 4.0:
                     break
                 time.sleep(0.02)
     except KeyboardInterrupt:
-        print("\niptal edildi")
+        print("\ncancelled")
     print()
 
 
 def capture(ser, timeout=60.0):
-    """'r' gönder, örnekleri topla. (rate, samples) döndürür."""
+    """Send 'r' and collect the samples. Returns (rate, samples)."""
     ser.write(b"r")
     ser.flush()
 
@@ -118,9 +120,9 @@ def capture(ser, timeout=60.0):
                 rate, _ch, _bits, expected = (int(m.group(1)), int(m.group(2)),
                                               int(m.group(3)), int(m.group(4)))
                 buf = buf[m.end():]
-                print(f"  akis basladi: {expected} ornek @ {rate} Hz")
+                print(f"  stream started: {expected} samples @ {rate} Hz")
             else:
-                # Basliktan onceki tanisal ciktiyi goster
+                # show the diagnostic output that precedes the header
                 while "\n" in buf:
                     line, buf = buf.split("\n", 1)
                     if line.strip():
@@ -132,15 +134,16 @@ def capture(ser, timeout=60.0):
             samples.extend(int(t) for t in body.split() if t.lstrip("-").isdigit())
             break
 
-        # Tam satirlari isle, kalani tamponda tut
+        # process whole lines, keep the remainder buffered
         if "\n" in buf:
             body, buf = buf.rsplit("\n", 1)
             samples.extend(int(t) for t in body.split() if t.lstrip("-").isdigit())
 
     if rate is None:
-        raise RuntimeError("Cihaz #WAV-BEGIN gondermedi. Dogru port mu?")
+        raise RuntimeError("the device sent no #WAV-BEGIN. Is that the right "
+                           "port?")
     if len(samples) < expected:
-        print(f"  [!] {len(samples)}/{expected} ornek alindi (eksik)")
+        print(f"  [!] got {len(samples)}/{expected} samples (short)")
     return rate, samples
 
 
@@ -155,15 +158,16 @@ def write_wav(path, rate, samples):
 
 def dft_band_energy(samples, rate, n=2048):
     """
-    Basit bant enerjisi analizi — numpy'siz, bagimlilik eklememek icin.
-    Sinyalin ortasindan bir pencere alip oktav bantlarinda RMS hesaplar.
+    A simple band-energy analysis - without numpy, so as not to add a
+    dependency. Takes a window from the middle of the signal and computes the
+    RMS in octave bands.
     """
     if len(samples) < n:
         return []
     start = (len(samples) - n) // 2
     win = samples[start:start + n]
     mean = sum(win) / n
-    # Hann penceresi
+    # Hann window
     x = [(v - mean) * (0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1)))
          for i, v in enumerate(win)]
 
@@ -190,27 +194,31 @@ def dft_band_energy(samples, rate, n=2048):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="PokeBird M1 ses yakalama")
-    ap.add_argument("--port", required=True, help="ornek: COM13 veya /dev/ttyACM0")
-    ap.add_argument("--out", default="kayit.wav")
+    ap = argparse.ArgumentParser(description="PokeBird audio capture")
+    ap.add_argument("--port", required=True,
+                    help="for example COM13 or /dev/ttyACM0")
+    ap.add_argument("--out", default="recording.wav")
     ap.add_argument("--cmd", default="r",
                     choices=["r", "n", "e", "i", "l", "d", "s", "b", "v", "o",
                              "t", "u", "m", "a", "c", "C", "F", "x", "X", "k",
                              "K", "w", "y", "z", "j", "L", "S"],
-                    help="r=kayit al, n=gurultu, e=EMI taramasi, i=bilgi, "
-                         "l=canli seviye, d=ekran testi, b=arka isik, "
-                         "v=QSPI veri yolu teshisi, s=spektrogram (Ctrl+C ile cik), "
-                         "m=mel+kapi hatti, a=tam demo, "
-                         "w=QSPI zamanlama teshisi (goz gerekmez), "
-                         "y=melez yol testi (goz gerekir, etkilesimli), "
-                         "z=satir adresleme testi (goz gerekir, etkilesimli), "
-                         "j=imlec konumlandirma testi (goz gerekir, etkilesimli), "
-                         "x=tur agi cihaz ici dogrulama, k=gercek zamanli tanima, "
-                         "c=SONUC EKRANI: tanima karti + spektrogram (goz gerekir)")
+                    help="r=record, n=noise floor, e=EMI sweep, i=info, "
+                         "l=live level, d=display test, b=backlight, "
+                         "v=QSPI bus diagnostic, s=spectrogram (Ctrl+C to "
+                         "quit), m=mel + gate pipeline, a=full demo, "
+                         "w=QSPI timing diagnostic (no eyes needed), "
+                         "y=hybrid path test (needs eyes, interactive), "
+                         "z=row addressing test (needs eyes, interactive), "
+                         "j=cursor placement test (needs eyes, interactive), "
+                         "x=species-net on-device validation, "
+                         "k=real-time recognition, "
+                         "c=RESULT SCREEN: recognition card + spectrogram "
+                         "(needs eyes)")
     ap.add_argument("--duration", type=float, default=0.0,
-                    help="m/a/c/k icin: bu kadar saniye akit, sonra cihazdan cik")
+                    help="for m/a/c/k: stream this many seconds, then leave "
+                         "the device")
     ap.add_argument("--spectrum", action="store_true",
-                    help="bant enerjisi analizi (yavas, numpy'siz DFT)")
+                    help="band-energy analysis (slow, a DFT without numpy)")
     args = ap.parse_args()
 
     with serial.Serial(args.port, 115200, timeout=0.1) as ser:
@@ -218,10 +226,10 @@ def main():
         ser.reset_input_buffer()
 
         if args.cmd in ("l", "s"):
-            # Canli seviye: cihaz surekli yaziyor, Ctrl+C ile cikilir.
+            # Live level: the device keeps printing; Ctrl+C leaves.
             ser.write(args.cmd.encode())
             ser.flush()
-            print("Canli seviye — el cirpin / konusun. Cikmak icin Ctrl+C.\n")
+            print("Live level - clap or talk. Ctrl+C to quit.\n")
             try:
                 while True:
                     data = ser.read(256).decode("utf-8", errors="replace")
@@ -231,22 +239,23 @@ def main():
                     else:
                         time.sleep(0.02)
             except KeyboardInterrupt:
-                ser.write(b" ")     # cihazdaki dongunun cikis kosulu
+                ser.write(b" ")     # the exit condition of the loop on the device
                 print("\n")
             return
 
         if args.cmd in ("d", "b", "v", "t", "u", "y", "z", "j", "C") or (args.cmd in ("m", "a", "c", "k", "K") and args.duration <= 0):
-            # Etkilesimli teshis: canli akis + klavyeyi cihaza ilet.
+            # Interactive diagnostic: stream live and forward the keyboard.
             run_interactive(ser, args.cmd)
             return
 
         if args.cmd in ("m", "a", "c", "k", "K"):
-            # Zamanli akis: --sure kadar canli bas, sonra cikis tusu gonder
-            # ve ozeti al. Goz gerektirmeyen dogrulama icin.
+            # Timed stream: print live for --duration, then send the exit
+            # key and collect the summary. For verification that needs no
+            # eyes.
             ser.write(args.cmd.encode())
             ser.flush()
-            bitis = time.time() + args.duration
-            while time.time() < bitis:
+            deadline = time.time() + args.duration
+            while time.time() < deadline:
                 data = ser.read(4096).decode("utf-8", errors="replace")
                 if data:
                     sys.stdout.write(data)
@@ -263,11 +272,11 @@ def main():
             print(read_until_prompt(ser, timeout=20.0))
             return
 
-        print(f"{args.port} uzerinden kayit aliniyor...")
+        print(f"recording over {args.port}...")
         rate, samples = capture(ser)
 
     if not samples:
-        sys.exit("Ornek alinamadi.")
+        sys.exit("no samples were received.")
 
     write_wav(args.out, rate, samples)
     dur = len(samples) / rate
@@ -277,17 +286,19 @@ def main():
     peak = max(abs(s) for s in samples)
     dbfs = 20 * math.log10(rms / 32768.0) if rms > 0 else -999
 
-    print(f"\n  yazildi : {args.out}  ({dur:.2f} s, {rate} Hz, {len(samples)} ornek)")
-    print(f"  RMS     : {rms:.1f}  ({dbfs:.1f} dBFS)")
-    print(f"  tepe    : {peak}   DC kaymasi: {mean:.1f}")
+    print(f"\n  wrote : {args.out}  ({dur:.2f} s, {rate} Hz, "
+          f"{len(samples)} samples)")
+    print(f"  RMS   : {rms:.1f}  ({dbfs:.1f} dBFS)")
+    print(f"  peak  : {peak}   DC offset: {mean:.1f}")
 
     if peak >= 32700:
-        print("  [!] Kirpma var — mikrofon kazancini dusurun ('g' komutu).")
+        print("  [!] clipping - turn the microphone gain down ('g').")
     if rms < 1.0:
-        print("  [!] Sinyal yok denecek kadar dusuk — mikrofon yolu acilmamis olabilir.")
+        print("  [!] the signal is next to nothing - the microphone path may "
+              "not be open.")
 
     if args.spectrum:
-        print("\n  Bant enerjisi:")
+        print("\n  Band energy:")
         for lo, hi, db in dft_band_energy(samples, rate):
             bar = "#" * max(0, int((db + 100) / 3))
             print(f"    {lo:5d}-{hi:5d} Hz  {db:7.1f} dBFS  {bar}")

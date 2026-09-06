@@ -1,37 +1,42 @@
 #!/usr/bin/env python3
 """
-esc50_indir.py — Negatif sinifin ses kaynagi: ESC-50 indir, kusu ayikla,
-24 kHz mono WAV'a cevir. (M4 adim 4'un on kosulu, lastsession.md §9f-4)
+esc50_download.py — the audio source for the negative class: download ESC-50,
+weed the birds out, convert to 24 kHz mono WAV.
 
     python tools/esc50_download.py
-    python tools/esc50_download.py --sadece-cevir     # zip zaten indiyse
+    python tools/esc50_download.py --only-convert   # if the zip is already in
 
-Cikti: data/negatif/wav/<kategori>/<dosya>.wav   (24 kHz mono 16-bit, 5 sn)
-       data/negatif/esc50_kayitlar.csv           — lisans/atif + kategori
-
---------------------------------------------------------------------------
-NEDEN BU IS ERTELENMEDI
---------------------------------------------------------------------------
-Negatif TOPLAMA (saha turu: ezan, vapur, simitci) kullanici karariyla M8'e
-ertelendi. Ama negatif SINIFI ertelenmedi: Asama-1'in "kus degil" ve
-Asama-2'nin "bilinmiyor" sinifina hicbir sey konmazsa model her sesi bir
-kusa atar. Kendi XC kayitlarimizdan cikan kus disi dilim sayisi OLCULDU:
-95.033 icinde 204. Yetmiyor. ESC-50 bir *indirme*, saha turu degil.
+Output: data/negative/wav/<category>/<file>.wav  (24 kHz mono 16-bit, 5 s)
+        data/negative/esc50_records.csv          — licence/attribution +
+                                                   category
 
 --------------------------------------------------------------------------
-!! chirping_birds SINIFI CIKARILIYOR
+WHY THIS WORK WAS NOT PUT OFF
 --------------------------------------------------------------------------
-ESC-50'nin 50 sinifindan biri kus sesi. Negatife kus karisirsa Asama-1
-gercek kusu reddetmeyi ogrenir — sessiz ve pahali bir hata. Bu betik o
-sinifi cikariyor; ayrica kalan kliplerin BirdNET'ten gecirilmesi onerilir:
+COLLECTING negatives out in the field (the call to prayer, a ferry, a simit
+seller) was deferred by the user's own decision. But the negative CLASS was
+not deferred: if nothing is put into stage 1's "not a bird" and stage 2's
+"unknown" class, the model assigns every sound to some bird. The number of
+non-bird slices our own XC recordings yield was MEASURED: 204 out of 95,033.
+Not enough. ESC-50 is a *download*, not a field trip.
+
+--------------------------------------------------------------------------
+!! THE chirping_birds CLASS IS REMOVED
+--------------------------------------------------------------------------
+One of ESC-50's 50 classes is bird song. If a bird gets into the negatives,
+stage 1 learns to reject a real bird — a silent and expensive mistake. This
+script drops that class; it is also worth running what remains through
+BirdNET:
 
     .venv-birdnet\\Scripts\\python tools/birdnet_run.py \\
-        --girdi data/negatif/wav --out data/negatif/birdnet_sonuc
+        --inp data/negative/wav --out data/negative/birdnet_result
 
-tools/build_dataset.py o sonuclari bulursa kus duyulan klipleri de eler.
+If tools/build_dataset.py finds those results, it also drops the clips where
+a bird was heard.
 
-Lisans: ESC-50 CC BY-NC 3.0 (K. J. Piczak). Kisisel kullanimla uyumlu,
-ticari dagitimla degil — BirdNET ve XC ile ayni siniftan kisit.
+Licence: ESC-50 is CC BY-NC 3.0 (K. J. Piczak). Compatible with personal use
+but not with commercial distribution — the same class of restriction as
+BirdNET and Xeno-canto.
 """
 
 import argparse
@@ -49,68 +54,73 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NEG = os.path.join(ROOT, "data", "negatif")
+NEG = csv_compat.resolve(os.path.join(ROOT, "data", "negative"))
 ZIP = os.path.join(NEG, "ESC-50-master.zip")
 URL = "https://github.com/karolpiczak/ESC-50/archive/refs/heads/master.zip"
 
-# !! KUS SESI ICEREN SINIFLAR — negatife girmemeli.
+# !! CLASSES THAT CONTAIN BIRD SOUND - these must not go into the negatives.
 #
-# Plan yalnizca `chirping_birds`i soyluyordu. OLCULDU, yetmiyor: 1960 klip
-# BirdNET'ten gecirildiginde 51 klipte kendi 178 turumuzden biri >=0.25
-# guvenle duyuldu ve 26'si `crow` sinifindan cikti — en yuksekleri Corvus
-# frugilegus 1.00 ve Pica pica 0.98. Yani ESC-50'nin "karga" sinifi bizim
-# HEDEF turlerimiz. Negatife konsaydi model kargayi reddetmeyi ogrenirdi.
-# hen/rooster de bird-like: uclerinde 178 turumuzden biri tetiklendi.
-CIKARILAN = {"chirping_birds", "crow", "hen", "rooster"}
+# The plan named only `chirping_birds`. MEASURED, and that is not enough:
+# running the 1,960 clips through BirdNET, one of our own 178 species was
+# heard at >=0.25 confidence in 51 clips, and 26 of those came from the
+# `crow` class - the highest being Corvus frugilegus at 1.00 and Pica pica at
+# 0.98. ESC-50's "crow" class IS one of our TARGET species. Putting it in the
+# negatives would teach the model to reject a crow. hen/rooster are bird-like
+# too: one of our 178 fired on three of them.
+EXCLUDED = {"chirping_birds", "crow", "hen", "rooster"}
 TARGET_SR = 24000
 
 
-def download(url, target, tekrar=5):
-    """Kaldigi yerden devam eden indirme.
+def download(url, target, retries=5):
+    """A resumable download.
 
-    §5.14'un dersi: buyuk dosyayi tek istekle cekmeye guvenmeyin, sunucu
-    ortada birakabiliyor ve hata vermiyor. Range ile devam ediyoruz.
+    The lesson from earlier: do not trust a single request to pull a large
+    file down, the server can drop it halfway without reporting an error. We
+    resume with a Range header.
     """
-    gecici = target + ".parca"
-    for attempt in range(1, tekrar + 1):
-        var = os.path.getsize(gecici) if os.path.exists(gecici) else 0
-        istek = urllib.request.Request(url, headers={"User-Agent": "pokebird/1.0"})
-        if var:
-            istek.add_header("Range", f"bytes={var}-")
+    partial = target + ".part"
+    for attempt in range(1, retries + 1):
+        have = os.path.getsize(partial) if os.path.exists(partial) else 0
+        req = urllib.request.Request(url,
+                                     headers={"User-Agent": "pokebird/1.0"})
+        if have:
+            req.add_header("Range", f"bytes={have}-")
         try:
-            with urllib.request.urlopen(istek, timeout=60) as y:
-                total = int(y.headers.get("Content-Length") or 0) + var
-                kip = "ab" if var and y.status == 206 else "wb"
-                if kip == "wb":
-                    var = 0
+            with urllib.request.urlopen(req, timeout=60) as y:
+                total = int(y.headers.get("Content-Length") or 0) + have
+                mode = "ab" if have and y.status == 206 else "wb"
+                if mode == "wb":
+                    have = 0
                 t0, last = time.time(), time.time()
-                with open(gecici, kip) as f:
+                with open(partial, mode) as f:
                     while True:
-                        blok = y.read(1 << 20)
-                        if not blok:
+                        block = y.read(1 << 20)
+                        if not block:
                             break
-                        f.write(blok)
-                        var += len(blok)
+                        f.write(block)
+                        have += len(block)
                         if time.time() - last > 3:
                             last = time.time()
-                            rate = var / max(time.time() - t0, 1e-6) / 1e6
-                            percent = f" %{100 * var / total:.0f}" if total else ""
-                            print(f"  {var / 1e6:7.1f} MB{percent}  {rate:.1f} MB/s",
-                                  flush=True)
-            if total and var < total:
-                print(f"  eksik kaldi ({var}/{total}), devam ediliyor", flush=True)
+                            rate = have / max(time.time() - t0, 1e-6) / 1e6
+                            percent = (f" {100 * have / total:.0f}%"
+                                       if total else "")
+                            print(f"  {have / 1e6:7.1f} MB{percent}  "
+                                  f"{rate:.1f} MB/s", flush=True)
+            if total and have < total:
+                print(f"  came up short ({have}/{total}), resuming", flush=True)
                 continue
-            os.replace(gecici, target)
+            os.replace(partial, target)
             return
         except Exception as e:
-            print(f"  deneme {attempt}/{tekrar} kesildi: {e}", flush=True)
+            print(f"  attempt {attempt}/{retries} was cut off: {e}", flush=True)
             time.sleep(3)
-    sys.exit("indirme basarisiz — agi kontrol edip tekrar calistirin "
-             "(dosya kaldigi yerden devam eder)")
+    sys.exit("the download failed - check the network and run again "
+             "(the file resumes where it left off)")
 
 
 def convert(source, target):
-    """44.1 kHz -> 24 kHz mono 16-bit. Kus WAV'lariyla AYNI zincir (ffmpeg)."""
+    """44.1 kHz -> 24 kHz mono 16-bit. The SAME chain as the bird WAVs
+    (ffmpeg)."""
     r = subprocess.run(
         ["ffmpeg", "-v", "error", "-y", "-i", source,
          "-ac", "1", "-ar", str(TARGET_SR), "-sample_fmt", "s16", target],
@@ -121,69 +131,71 @@ def convert(source, target):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only-convert", action="store_true",
-                    help="zip elde, yalnizca cikar ve cevir")
+                    help="the zip is already here; only extract and convert")
     ap.add_argument("--zip-delete", action="store_true",
-                    help="cevrim bitince zip'i sil (disk dar)")
+                    help="delete the zip once conversion is done (tight disk)")
     a = ap.parse_args()
 
     os.makedirs(NEG, exist_ok=True)
 
     if not a.only_convert or not os.path.exists(ZIP):
         if os.path.exists(ZIP):
-            print(f"zip zaten var: {ZIP} ({os.path.getsize(ZIP) / 1e6:.0f} MB)")
+            print(f"the zip is already here: {ZIP} "
+                  f"({os.path.getsize(ZIP) / 1e6:.0f} MB)")
         else:
-            print(f"ESC-50 indiriliyor -> {ZIP}")
+            print(f"downloading ESC-50 -> {ZIP}")
             download(URL, ZIP)
-            print(f"  bitti: {os.path.getsize(ZIP) / 1e6:.0f} MB")
+            print(f"  done: {os.path.getsize(ZIP) / 1e6:.0f} MB")
 
-    # ---- meta + ses ----
-    raw = os.path.join(NEG, "ham")
+    # ---- metadata + audio ----
+    raw = os.path.join(NEG, "raw")
     os.makedirs(raw, exist_ok=True)
     with zipfile.ZipFile(ZIP) as z:
-        adlar = z.namelist()
-        meta = next(n for n in adlar if n.endswith("meta/esc50.csv"))
+        names = z.namelist()
+        meta = next(n for n in names if n.endswith("meta/esc50.csv"))
         with z.open(meta) as f:
             row = list(csv_compat.reader(l.decode("utf-8") for l in f))
-        wavlar = [n for n in adlar if n.endswith(".wav") and "/audio/" in n]
-        print(f"zip icinde {len(wavlar)} wav, meta {len(row)} satir")
+        wavs = [n for n in names if n.endswith(".wav") and "/audio/" in n]
+        print(f"{len(wavs)} wavs in the zip, {len(row)} metadata rows")
 
-        kategori = {r["filename"]: r for r in row}
-        secilen = []
-        for n in wavlar:
+        by_name = {r["filename"]: r for r in row}
+        selected = []
+        for n in wavs:
             name = os.path.basename(n)
-            r = kategori.get(name)
+            r = by_name.get(name)
             if r is None:
-                print(f"!! metada yok, atlandi: {name}")
+                print(f"!! not in the metadata, skipped: {name}")
                 continue
-            if r["category"] in CIKARILAN:
+            if r["category"] in EXCLUDED:
                 continue
-            secilen.append((n, name, r))
+            selected.append((n, name, r))
 
-        atilan = len(wavlar) - len(secilen)
-        print(f"cikarilan (kus): {atilan}  ·  kalan: {len(secilen)}")
-        if atilan == 0:
-            sys.exit("!! chirping_birds hic elenmedi — kategori adi degismis "
-                     "olabilir, negatife kus karisir. Durduruldu.")
+        dropped = len(wavs) - len(selected)
+        print(f"dropped (bird): {dropped}  /  kept: {len(selected)}")
+        if dropped == 0:
+            sys.exit("!! nothing was filtered out at all - the category name "
+                     "may have changed, which would let birds into the "
+                     "negatives. Stopped.")
 
-        for n, name, r in secilen:
+        for n, name, r in selected:
             h = os.path.join(raw, name)
             if not os.path.exists(h):
                 with z.open(n) as src, open(h, "wb") as dst:
                     shutil.copyfileobj(src, dst)
 
-    # ---- cevrim ----
+    # ---- conversion ----
     target_root = os.path.join(NEG, "wav")
-    # Onceki kosudan kalan kus sinifi dizinlerini temizle: CIKARILAN
-    # buyuduyse eski dosyalar diskte kalir ve esc50_kayitlar.csv'de
-    # gorunmese de kafa karistirir.
-    for k in CIKARILAN:
+    # Clean out bird-class directories left over from an earlier run: if
+    # EXCLUDED has grown, the old files stay on disk and, though they no
+    # longer appear in esc50_records.csv, they are confusing.
+    for k in EXCLUDED:
         d = os.path.join(target_root, k)
         if os.path.isdir(d):
             shutil.rmtree(d)
-            print(f"onceki kosudan kalan kus sinifi silindi: {k}")
+            print(f"removed a bird class left over from an earlier run: {k}")
     record = []
-    cevrilen = error = skipped = 0
-    for i, (_, name, r) in enumerate(secilen, 1):
+    converted = error = skipped = 0
+    for i, (_, name, r) in enumerate(selected, 1):
         d = os.path.join(target_root, r["category"])
         os.makedirs(d, exist_ok=True)
         target = os.path.join(d, name)
@@ -192,52 +204,56 @@ def main():
         else:
             ok, err = convert(os.path.join(raw, name), target)
             if ok:
-                cevrilen += 1
+                converted += 1
             else:
                 error += 1
-                print(f"!! cevrilemedi {name}: {err}")
+                print(f"!! could not convert {name}: {err}")
                 continue
         record.append({
             "file": os.path.relpath(target, ROOT),
             "category": r["category"],
-            "esc50_dosya": name,
-            # fold ve kaynak dosya SIZINTIYI ONLEMEK icin lazim: ayni Freesound
-            # kaydindan kesilmis birden fazla klip var. ESC-50'nin kendi 5
-            # katmani tam bunun icin ayrilmis; bolmeyi ona gore yapin.
+            "esc50_file": name,
+            # the fold and the source file are needed to PREVENT LEAKAGE:
+            # several clips are cut from the same Freesound recording. The 5
+            # folds ESC-50 ships were separated for exactly this; split along
+            # them.
             "fold": r.get("fold", ""),
-            "kaynak": r.get("src_file", ""),
-            "lisans": "CC BY-NC 3.0 (ESC-50, K. J. Piczak)",
+            "source": r.get("src_file", ""),
+            "licence": "CC BY-NC 3.0 (ESC-50, K. J. Piczak)",
         })
         if i % 200 == 0:
-            print(f"  {i}/{len(secilen)}", flush=True)
+            print(f"  {i}/{len(selected)}", flush=True)
 
-    with open(os.path.join(NEG, "esc50_kayitlar.csv"), "w",
+    with open(os.path.join(NEG, "esc50_records.csv"), "w",
               encoding="utf-8", newline="") as f:
         y = csv.DictWriter(f, fieldnames=list(record[0].keys()))
         y.writeheader()
         y.writerows(record)
 
-    # ---- sagalama: format gercekten 24 kHz mono mu ----
+    # ---- sanity check: is the format really 24 kHz mono ----
     import wave
     import random
     sample = random.Random(0).sample(record, min(20, len(record)))
-    dogru = 0
+    correct = 0
     for k in sample:
         with wave.open(os.path.join(ROOT, k["file"]), "rb") as w:
-            if (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (TARGET_SR, 1, 2):
-                dogru += 1
+            if ((w.getframerate(), w.getnchannels(), w.getsampwidth())
+                    == (TARGET_SR, 1, 2)):
+                correct += 1
 
-    print(f"\ncevrildi {cevrilen} · zaten vardi {skipped} · hata {error}")
-    print(f"format sagalamasi: {dogru}/{len(sample)} dogru (24 kHz mono 16-bit)")
-    print(f"kategori sayisi  : {len(set(k['category'] for k in record))}")
+    print(f"\nconverted {converted} / already there {skipped} / "
+          f"errors {error}")
+    print(f"format check : {correct}/{len(sample)} correct "
+          "(24 kHz mono 16-bit)")
+    print(f"categories   : {len(set(k['category'] for k in record))}")
     print(f"-> {target_root}")
-    if dogru != len(sample):
-        sys.exit("!! format sagalamasi kaldi")
+    if correct != len(sample):
+        sys.exit("!! the format check failed")
 
     shutil.rmtree(raw, ignore_errors=True)
     if a.zip_delete and os.path.exists(ZIP):
         os.remove(ZIP)
-        print("zip silindi")
+        print("the zip was deleted")
 
 
 if __name__ == "__main__":
