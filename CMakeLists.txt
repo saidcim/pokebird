@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.13)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/toolchain.cmake)
 
 set(PICO_BOARD pokebird_rp2350b)
-set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)
+set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/firmware/boards)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/pico_sdk_import.cmake)
 
@@ -22,39 +22,39 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/picotool.cmake)
 pico_sdk_init()
 
 add_executable(pokebird
-    src/main.c
-    src/hal/audio_i2s.c
-    src/hal/es8311.c
-    src/hal/i2c_bus.c
+    firmware/src/main.c
+    firmware/src/hal/audio_i2s.c
+    firmware/src/hal/es8311.c
+    firmware/src/hal/i2c_bus.c
     # Satıcının Touch.c'si BİLEREK alınmadı: I2C çağrıları zaman aşımsız,
     # dokunmatik ACK vermezse tüm cihazı kilitliyor. Protokolü korunarak
-    # zaman aşımlı hâli src/hal/touch.c'ye taşındı.
-    src/hal/touch.c
-    src/hal/display/qspi_pio.c
-    src/hal/display/dev_config.c
-    src/hal/display/lcd_blit.c
-    src/hal/display/LCD_3in49.c
-    src/dsp/fft.c
-    src/dsp/mel.c
-    src/dsp/gate.c
-    src/ui/spectrogram.c
-    src/ui/lv_port.c
-    src/ui/tema.c
-    src/ui/metin.c
-    src/ui/ekran_dinleme.c
-    src/ui/ekran_gunluk.c
-    src/ui/arayuz.c
+    # zaman aşımlı hâli firmware/src/hal/touch.c'ye taşındı.
+    firmware/src/hal/touch.c
+    firmware/src/hal/display/qspi_pio.c
+    firmware/src/hal/display/dev_config.c
+    firmware/src/hal/display/lcd_blit.c
+    firmware/src/hal/display/LCD_3in49.c
+    firmware/src/dsp/fft.c
+    firmware/src/dsp/mel.c
+    firmware/src/dsp/gate.c
+    firmware/src/ui/spectrogram.c
+    firmware/src/ui/lv_port.c
+    firmware/src/ui/tema.c
+    firmware/src/ui/metin.c
+    firmware/src/ui/ekran_dinleme.c
+    firmware/src/ui/ekran_gunluk.c
+    firmware/src/ui/arayuz.c
     # Yazı tipleri ÜRETİLMİŞ (tools/font_uret.py). LVGL'in gömülü
     # Montserrat'ında Türkçe harfler yok; bunlarda var (üretimde doğrulanıyor).
-    src/ui/fonts/pb_font_ad_18.c
-    src/ui/fonts/pb_font_kalin_13.c
-    src/ui/fonts/pb_font_dar_11.c
-    src/ui/fonts/pb_font_mono_10.c
-    src/ai/tur_agi.cc
-    src/ai/ikili_agi.cc
-    src/ai/tanima.c
-    src/ai/karar.c
-    src/ai/tflm_port.cc
+    firmware/src/ui/fonts/pb_font_ad_18.c
+    firmware/src/ui/fonts/pb_font_kalin_13.c
+    firmware/src/ui/fonts/pb_font_dar_11.c
+    firmware/src/ui/fonts/pb_font_mono_10.c
+    firmware/src/ai/tur_agi.cc
+    firmware/src/ai/ikili_agi.cc
+    firmware/src/ai/tanima.c
+    firmware/src/ai/karar.c
+    firmware/src/ai/tflm_port.cc
 )
 
 # ── TFLM + CMSIS-NN ────────────────────────────────────────────────────────
@@ -66,11 +66,11 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/tflm.cmake)
 # third_party/lvgl altına klonlu (git'e girmiyor, .gitignore'da). Yoksa:
 #   git clone -b v9.3.0 --depth 1 https://github.com/lvgl/lvgl.git third_party/lvgl
 # LVGL kendi CMakeLists'inde `lvgl` hedefini tanımlıyor; ayarları
-# src/ui/lv_conf.h'den okuması için mutlak yol veriliyor.
+# firmware/src/ui/lv_conf.h'den okuması için mutlak yol veriliyor.
 # DİKKAT: CMake değişkeninin adı LV_BUILD_CONF_PATH. Belgelerde ve örneklerde
 # geçen LV_CONF_PATH, LVGL'in kendi ürettiği DERLEYİCİ makrosunun adı; CMake
 # tarafında karşılığı yok ve verilirse sessizce yok sayılır.
-set(LV_BUILD_CONF_PATH ${CMAKE_CURRENT_LIST_DIR}/src/ui/lv_conf.h CACHE PATH "" FORCE)
+set(LV_BUILD_CONF_PATH ${CMAKE_CURRENT_LIST_DIR}/firmware/src/ui/lv_conf.h CACHE PATH "" FORCE)
 
 # Demo ve örnekler derlenmesin. lv_conf.h'deki LV_BUILD_EXAMPLES yetmiyor:
 # CMake tarafı bunları ayrı hedefler olarak kuruyor ve `lvgl`e PUBLIC
@@ -81,13 +81,13 @@ option(CONFIG_LV_BUILD_EXAMPLES "" OFF)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/lvgl lvgl)
 
 target_include_directories(pokebird PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/src
-    ${CMAKE_CURRENT_LIST_DIR}/src/hal/display
+    ${CMAKE_CURRENT_LIST_DIR}/firmware/src
+    ${CMAKE_CURRENT_LIST_DIR}/firmware/src/hal/display
 )
 
 # PIO programlarını derle. Üretilen audio_i2s.pio.h build dizinine yazılır.
-pico_generate_pio_header(pokebird ${CMAKE_CURRENT_LIST_DIR}/src/hal/audio_i2s.pio)
-pico_generate_pio_header(pokebird ${CMAKE_CURRENT_LIST_DIR}/src/hal/display/qspi.pio)
+pico_generate_pio_header(pokebird ${CMAKE_CURRENT_LIST_DIR}/firmware/src/hal/audio_i2s.pio)
+pico_generate_pio_header(pokebird ${CMAKE_CURRENT_LIST_DIR}/firmware/src/hal/display/qspi.pio)
 
 target_link_libraries(pokebird PRIVATE
     pico_stdlib
@@ -113,7 +113,7 @@ target_compile_options(pokebird PRIVATE
     -Wall -Wextra -Wno-unused-parameter
 )
 
-# TFLM tensor arena boyutu. Boş bırakılırsa src/ai/tur_agi.cc'deki ölçülmüş
+# TFLM tensor arena boyutu. Boş bırakılırsa firmware/src/ai/tur_agi.cc'deki ölçülmüş
 # varsayılan (120 KB) geçerli. Buradan ezmek iki işe yarıyor: yeni bir model
 # ölçülürken geçici olarak büyütmek, ve bss boyutunu tek değişken olarak
 # oynatıp yerleşim kaynaklı gerilemeleri A/B ile ayırmak (§5.17).
@@ -124,7 +124,7 @@ if(PB_TFLM_ARENA_BAYT)
         PB_TFLM_ARENA_BAYT=${PB_TFLM_ARENA_BAYT})
 endif()
 
-# Asama-1 ikili ag arena'si — ayni gerekce, src/ai/ikili_agi.cc'de.
+# Asama-1 ikili ag arena'si — ayni gerekce, firmware/src/ai/ikili_agi.cc'de.
 set(PB_IKILI_ARENA_BAYT "" CACHE STRING "Ikili ag TFLM tensor arena boyutu (bayt)")
 if(PB_IKILI_ARENA_BAYT)
     target_compile_definitions(pokebird PRIVATE

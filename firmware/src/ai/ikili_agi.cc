@@ -16,7 +16,7 @@
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-#include "../../models/ikili_agi_int8.h"
+#include "../../../models/ikili_agi_int8.h"
 
 /* Arena boyutu — ÖLÇÜLDÜ, tahmin değil (tur_agi.cc'deki gerekçenin aynısı).
  *

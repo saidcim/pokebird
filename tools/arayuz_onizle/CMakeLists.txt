@@ -15,7 +15,7 @@ set(KOK ${CMAKE_CURRENT_LIST_DIR}/../..)
 
 # Cihazla AYNI lv_conf.h — yazı tipi, renk derinliği ve çizim ayarları
 # birebir aynı olsun, yoksa önizleme yanlış şeyi gösterir.
-set(LV_BUILD_CONF_PATH ${KOK}/src/ui/lv_conf.h CACHE PATH "" FORCE)
+set(LV_BUILD_CONF_PATH ${KOK}/firmware/src/ui/lv_conf.h CACHE PATH "" FORCE)
 option(CONFIG_LV_BUILD_DEMOS "" OFF)
 option(CONFIG_LV_BUILD_EXAMPLES "" OFF)
 add_subdirectory(${KOK}/third_party/lvgl lvgl)
@@ -23,23 +23,23 @@ add_subdirectory(${KOK}/third_party/lvgl lvgl)
 add_executable(arayuz_onizle
     onizle.c
     # Cihazın ekran kodunun TA KENDİSİ — taklit yok.
-    ${KOK}/src/ui/tema.c
-    ${KOK}/src/ui/metin.c
-    ${KOK}/src/ui/ekran_dinleme.c
-    ${KOK}/src/ui/ekran_gunluk.c
+    ${KOK}/firmware/src/ui/tema.c
+    ${KOK}/firmware/src/ui/metin.c
+    ${KOK}/firmware/src/ui/ekran_dinleme.c
+    ${KOK}/firmware/src/ui/ekran_gunluk.c
     # Spektrogram panele DOGRUDAN yaziyor; onizleme pb_lcd_blit yerine
     # kendi framebuffer yazicisini veriyor (onizle.c).
-    ${KOK}/src/ui/spectrogram.c
-    ${KOK}/src/ui/fonts/pb_font_ad_18.c
-    ${KOK}/src/ui/fonts/pb_font_kalin_13.c
-    ${KOK}/src/ui/fonts/pb_font_dar_11.c
-    ${KOK}/src/ui/fonts/pb_font_mono_10.c
+    ${KOK}/firmware/src/ui/spectrogram.c
+    ${KOK}/firmware/src/ui/fonts/pb_font_ad_18.c
+    ${KOK}/firmware/src/ui/fonts/pb_font_kalin_13.c
+    ${KOK}/firmware/src/ui/fonts/pb_font_dar_11.c
+    ${KOK}/firmware/src/ui/fonts/pb_font_mono_10.c
 )
 
 # shim/ ÖNCE gelmeli: pico/stdlib.h sahtesi oradan bulunacak.
 target_include_directories(arayuz_onizle PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/shim
-    ${KOK}/src
+    ${KOK}/firmware/src
 )
 target_link_libraries(arayuz_onizle PRIVATE lvgl)
 target_compile_options(arayuz_onizle PRIVATE -Wall -Wextra -Wno-unused-parameter)

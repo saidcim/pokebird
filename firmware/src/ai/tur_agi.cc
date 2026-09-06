@@ -18,7 +18,7 @@
 
 /* Üretilmiş model dizisi. Bu başlık dizinin KENDİSİNİ tanımlıyor (static
  * değil), o yüzden yalnızca bu çeviri biriminden dahil edilmeli. */
-#include "../../models/tur_agi_int8.h"
+#include "../../../models/tur_agi_int8.h"
 
 /* Arena boyutu — ÖLÇÜLDÜ, tahmin değil.
  *

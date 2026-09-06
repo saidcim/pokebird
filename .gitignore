@@ -1,5 +1,6 @@
-# Derleme çıktıları
+# Build outputs
 build/
+build-*/
 *.uf2
 *.elf
 *.bin
@@ -7,12 +8,21 @@ build/
 *.dis
 *.map
 
-# Vendor edilmiş SDK — depoya girmez, cmake/setup ile çekilir
+# Vendored SDKs — not committed, fetched via the setup steps in the README
 third_party/pico-sdk/
 third_party/lvgl/
 
-# Eğitim boru hattı — indirilen ses verileri ve API önbelleği çok büyük.
-# data/species_istanbul.csv GİRER: küçük ve eleme kararlarını taşıyor.
+# TFLM and its dependencies. All vendored third party; versions are pinned
+# in cmake/tflm.cmake and the setup steps are in the README.
+third_party/tflite-micro/
+third_party/flatbuffers/
+third_party/gemmlowp/
+third_party/ruy/
+third_party/cmsis-nn/
+
+# Training pipeline — downloaded audio and the API cache are far too large.
+# data/species_istanbul.csv IS committed: it is small and records the
+# species-selection decisions.
 data/xc/
 data/cache/
 tools/data/
@@ -25,26 +35,18 @@ __pycache__/
 *.pyc
 .venv/
 
-# Editör
-.vscode/
-.idea/
-compile_commands.json
-
-# Referans olarak buraya kopyalanan baska projeler
-rsvpnano/
-
-# Xeno-canto API anahtari — asla depoya girmez
+# Xeno-canto API key — must never be committed
 data/.xc_key
 
-# M4 boru hatti calisma gunlugu
+# Data-collection run logs
 data/m4_run.log
 data/wav/
 data/convert.log
 
-# BirdNET segmentasyonu (M4 adim 3)
-# .venv-birdnet: 3.11 sanal ortami + 260 MB model checkpoint'i
-# birdnet_sonuc/: kayit basina bir CSV, 7.111 dosya
-# segmentler.csv ve birdnet_slist.txt uretilebilir ciktilar
+# BirdNET segmentation stage.
+# .venv-birdnet: a Python 3.11 virtualenv plus a 260 MB model checkpoint.
+# birdnet_sonuc/: one CSV per recording, 7,111 files.
+# segmentler.csv and birdnet_slist.txt are regenerable outputs.
 .venv-birdnet/
 data/birdnet_sonuc/
 data/birdnet_log/
@@ -52,39 +54,41 @@ data/segmentler.csv
 data/birdnet_slist.txt
 data/segment_ornek/
 
-# Egitim kumesi (M4 adim 4) — hepsi uretilebilir cikti
-# egitim/: 62 bin pencere, 739 MB (pencereler.npy)
-# negatif/: ESC-50 (879 MB zip + 1.840 cevrilmis klip)
+# Training set — all regenerable output.
+# egitim/: 62k windows, 739 MB (pencereler.npy)
+# negatif/: ESC-50 (879 MB zip + 1,840 converted clips)
 data/egitim/
 data/negatif/
 
-# M5 egitim ciktilari
-# tur_agi_int8.h ve rapor.txt GIRER: firmware .h'yi derliyor, rapor kayittir.
-# .keras her egitimde yeniden uretiliyor ve buyuk; ilerleme.html gecici pano.
+# Training outputs.
+# tur_agi_int8.h, ikili_agi_int8.h and the .txt reports ARE committed: the
+# firmware compiles the headers in, and the reports are the record.
+# The .keras files are regenerated on every run and are large;
+# ilerleme.html is a scratch dashboard.
 models/*.keras
 models/ilerleme.html
 models/test_olasilik.npy
-
-# M7 Asama-1 ikili ag — ayni gerekce
-# ikili_agi_int8.h ve ikili_rapor.txt GIRER.
 tools/egitim_pano.html
 
-# M6 — TFLM ve bagimliliklari. Hepsi vendor edilmis ucuncu taraf, surumler
-# cmake/tflm.cmake'te sabitlenmis; kurulum README'de.
-third_party/tflite-micro/
-third_party/flatbuffers/
-third_party/gemmlowp/
-third_party/ruy/
-third_party/cmsis-nn/
-
-# A/B probe derlemeleri (bkz. §5.17 uc kosuluk A/B)
-build-*/
-
-# Arayuz onizlemesi (host) — derleme ciktisi ve uretilen goruntuler
+# UI preview (host) — build output and the images it renders
 tools/arayuz_onizle/build/
 
-# M8 saha turlari (docs/M8_SAHA_PROTOKOLU.md)
-# cihaz.log / cihaz.csv / uyum.csv / oturum.txt GIRER: turun kaydi onlar.
-# Telefon kaydi (*.wav zaten yukarida) ve BirdNET ciktisi uretilebilir/buyuk.
+# Field-trip raw data (see docs/M8_SAHA_PROTOKOLU.md).
+# The device log/CSV and the agreement CSV ARE committed: they are the record
+# of the trip. The phone recording (*.wav, above) and the BirdNET output are
+# regenerable and large.
 saha/*/ses/
 saha/*/birdnet/
+
+# Reference copies of other projects kept locally
+rsvpnano/
+
+# Local working files — not part of the shipped project
+lastsession.md
+_to_delete/
+*.bundle
+
+# Editors
+.vscode/
+.idea/
+compile_commands.json
