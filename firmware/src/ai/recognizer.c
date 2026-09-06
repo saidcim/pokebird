@@ -98,13 +98,13 @@ static uint32_t s_core1_heap[2048] __attribute__((aligned(8)));
  * The maximum is subtracted for overflow safety (the standard trick).
  */
 static void softmax(const int8_t *q, float scale, int zero, float *out) {
-    int max_big = q[0];
+    int largest = q[0];
     for (int i = 1; i < PB_SPECIES_NET_CLASSES; i++) {
-        if (q[i] > max_big) max_big = q[i];
+        if (q[i] > largest) largest = q[i];
     }
     float total = 0.0f;
     for (int i = 0; i < PB_SPECIES_NET_CLASSES; i++) {
-        const float z = ((float)q[i] - (float)max_big) * scale;
+        const float z = ((float)q[i] - (float)largest) * scale;
         out[i] = expf(z);
         total += out[i];
     }

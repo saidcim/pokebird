@@ -74,7 +74,7 @@ pio_qspi_t qspi = {
     .pin_dio1 = PIN_DIO1,
     .pin_dio2 = PIN_DIO2,
     .pin_dio3 = PIN_DIO3,
-    .pin_pwr_max = PIN_PWR_MAX,
+    .pin_pwr_en = PIN_PWR_EN,
     .pin_rst = PIN_RST
 };
 
@@ -89,9 +89,9 @@ void QSPI_GPIO_Init(pio_qspi_t qspi){
     gpio_set_dir(qspi.pin_cs,GPIO_OUT);
     gpio_put(qspi.pin_cs,1);
 
-    gpio_init(qspi.pin_pwr_max);
-    gpio_set_dir(qspi.pin_pwr_max,GPIO_OUT);
-    gpio_put(qspi.pin_pwr_max,1);
+    gpio_init(qspi.pin_pwr_en);
+    gpio_set_dir(qspi.pin_pwr_en,GPIO_OUT);
+    gpio_put(qspi.pin_pwr_en,1);
 
     gpio_init(qspi.pin_rst);
     gpio_set_dir(qspi.pin_rst,GPIO_OUT);

@@ -45,7 +45,7 @@
 #define PIN_DIO1    PB_PIN_LCD_D1
 #define PIN_DIO2    PB_PIN_LCD_D2
 #define PIN_DIO3    PB_PIN_LCD_D3
-#define PIN_PWR_MAX  PB_PIN_BL_MAX
+#define PIN_PWR_EN  PB_PIN_BL_EN
 #define PIN_RST     PB_PIN_LCD_RST
 
 #define WAIT_TIME() for(int i=0;i<2;i++) __asm__ volatile("nop");
@@ -61,7 +61,7 @@ typedef struct pio_qspi {
     uint8_t pin_dio1;
     uint8_t pin_dio2;
     uint8_t pin_dio3;
-    uint8_t pin_pwr_max;
+    uint8_t pin_pwr_en;
     uint8_t pin_rst;
 } pio_qspi_t;
 

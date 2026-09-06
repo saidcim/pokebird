@@ -147,15 +147,15 @@ static uint8_t s_mic_gain = PB_MIC_GAIN;
  * Doğrulanmış değil; ucuz ve zararsız olduğu için deniyoruz.
  */
 static void power_latch_init(void) {
-    gpio_init(PB_PIN_SYS_MAX);
-    gpio_set_dir(PB_PIN_SYS_MAX, GPIO_OUT);
-    gpio_put(PB_PIN_SYS_MAX, 1);     /* 1 = acik kal. 0 KAPATIR. */
+    gpio_init(PB_PIN_SYS_EN);
+    gpio_set_dir(PB_PIN_SYS_EN, GPIO_OUT);
+    gpio_put(PB_PIN_SYS_EN, 1);     /* 1 = acik kal. 0 KAPATIR. */
 }
 
 static void backlight_init(void) {
-    gpio_init(PB_PIN_BL_MAX);
-    gpio_set_dir(PB_PIN_BL_MAX, GPIO_OUT);
-    gpio_put(PB_PIN_BL_MAX, 1);
+    gpio_init(PB_PIN_BL_EN);
+    gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
+    gpio_put(PB_PIN_BL_EN, 1);
 
     gpio_init(PB_PIN_LCD_BL);
     gpio_set_dir(PB_PIN_LCD_BL, GPIO_OUT);
@@ -163,7 +163,7 @@ static void backlight_init(void) {
 }
 
 static void backlight_set(bool on) {
-    gpio_put(PB_PIN_BL_MAX, on ? 1 : 0);
+    gpio_put(PB_PIN_BL_EN, on ? 1 : 0);
     gpio_put(PB_PIN_LCD_BL, on ? 0 : 1);
 }
 
@@ -2101,7 +2101,7 @@ static void cmd_datapath_probe(void) {
         printf("   Serbest birakildiginda (dahili pull ile olculdu):\n");
         const struct { uint pin; const char *name; } free[] = {
             { PIN_RST, "RST(34)" }, { PB_PIN_LCD_TE, "TE(35)" },
-            { PB_PIN_LCD_BL, "BL(36)" }, { PB_PIN_BL_MAX, "BL_EN(37)" },
+            { PB_PIN_LCD_BL, "BL(36)" }, { PB_PIN_BL_EN, "BL_EN(37)" },
         };
         for (size_t i = 0; i < sizeof(free) / sizeof(free[0]); i++) {
             gpio_set_function(free[i].pin, GPIO_FUNC_SIO);
@@ -2319,10 +2319,10 @@ static void cmd_backlight_probe(void) {
     printf("EKRANA BAKIN. Isik yandigi anda bir tusa basin.\n");
     printf("Her durum 5 saniye. Hicbiri yanmazsa test kendiliginden biter.\n\n");
 
-    gpio_init(PB_PIN_BL_MAX);
-    gpio_set_dir(PB_PIN_BL_MAX, GPIO_OUT);
+    gpio_init(PB_PIN_BL_EN);
+    gpio_set_dir(PB_PIN_BL_EN, GPIO_OUT);
 
-    const struct { int max; int bl; int pwm_duty; const char *name; } state[] = {
+    const struct { int bl_en; int bl; int pwm_duty; const char *name; } state[] = {
         { 1, 0, -1, "BL_EN=1  LCD_BL=0 (duz GPIO)" },
         { 1, 1, -1, "BL_EN=1  LCD_BL=1 (duz GPIO)" },
         { 0, 0, -1, "BL_EN=0  LCD_BL=0 (duz GPIO)" },
@@ -2332,7 +2332,7 @@ static void cmd_backlight_probe(void) {
     };
 
     for (size_t i = 0; i < sizeof(state) / sizeof(state[0]); i++) {
-        gpio_put(PB_PIN_BL_MAX, state[i].max);
+        gpio_put(PB_PIN_BL_EN, state[i].bl_en);
         if (state[i].pwm_duty < 0) {
             gpio_set_function(PB_PIN_LCD_BL, GPIO_FUNC_SIO);
             gpio_set_dir(PB_PIN_LCD_BL, GPIO_OUT);
@@ -2409,22 +2409,22 @@ static void cmd_ai_verify(void) {
         if (us > time_max) time_max = us;
         time_total += us;
 
-        int diff_max = 0, max_iyi = 0;
+        int diff_max = 0, best = 0;
         for (int c = 0; c < PB_VALIDATION_CLASSES; c++) {
             int d = (int)output[c] - (int)pb_validation_logit[k][c];
             if (d < 0) d = -d;
             if (d > diff_max) diff_max = d;
             diff_total += d;
             diff_count++;
-            if (output[c] > output[max_iyi]) max_iyi = c;
+            if (output[c] > output[best]) best = c;
         }
         if (diff_max == 0) exact++;
         if (diff_max > max_diff) max_diff = diff_max;
-        if (max_iyi == pb_validation_pc_pred[k]) pred_matches++;
+        if (best == pb_validation_pc_pred[k]) pred_matches++;
 
         printf("  pencere %d  sinif %3d  cihaz-tahmin %3d  PC-tahmin %3d  "
                "logit max fark %d  %lu us\n",
-               k, (int)pb_validation_class[k], max_iyi,
+               k, (int)pb_validation_class[k], best,
                (int)pb_validation_pc_pred[k], diff_max, (unsigned long)us);
     }
 
