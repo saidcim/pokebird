@@ -82,3 +82,9 @@ build-*/
 
 # Arayuz onizlemesi (host) — derleme ciktisi ve uretilen goruntuler
 tools/arayuz_onizle/build/
+
+# M8 saha turlari (docs/M8_SAHA_PROTOKOLU.md)
+# cihaz.log / cihaz.csv / uyum.csv / oturum.txt GIRER: turun kaydi onlar.
+# Telefon kaydi (*.wav zaten yukarida) ve BirdNET ciktisi uretilebilir/buyuk.
+saha/*/ses/
+saha/*/birdnet/

@@ -3143,6 +3143,12 @@ int main(void) {
     cmd_info();
     print_help();
 
+    /* Cihaz PC'ye bagli olmadan, elde tasinirken kendiliginden tanima
+     * ekranina girsin diye. Once burada baslatiyoruz; ekrandan (bosluk/n/r
+     * disinda) bir tusa basilirsa asagidaki komut dongusune duser, PC
+     * baglanmissa teshis komutlari yine erisilebilir kalir. */
+    cmd_sonuc_ekrani();
+
     while (true) {
         printf("> ");
         /* getchar_timeout_us(0) HEMEN doner (0 = beklemeden zaman asimi),
