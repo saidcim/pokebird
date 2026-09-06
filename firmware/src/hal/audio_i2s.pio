@@ -1,26 +1,26 @@
 ;
-; audio_i2s.pio — ES8311 için MCLK üretimi ve I2S mikrofon yakalama
+; audio_i2s.pio — MCLK generation and I2S microphone capture for the ES8311
 ;
-; Waveshare'in RP2350-Touch-LCD-3.5 örneğindeki audio_pio.pio dosyasından
-; uyarlandı (MIT). Değişiklikler:
-;   - GPIO numaraları bu kartın şemasına göre düzeltildi (LRCK/BCLK yer değiştirdi)
-;   - Yalnızca yakalama (RX) yolu; çalma (TX) M7'ye kadar gerekmiyor
-;   - DMA ile kullanılmak üzere yapılandırıldı
+; Adapted from audio_pio.pio in Waveshare's RP2350-Touch-LCD-3.5 example
+; (MIT). Changes:
+;   - GPIO numbers corrected for this board's schematic (LRCK/BCLK swapped)
+;   - Capture (RX) path only; playback (TX) is not needed
+;   - Configured for use with DMA
 ;
-; SAAT MİMARİSİ (önemli):
-;   RP2350 yalnızca MCLK üretir (GPIO3). ES8311 I2S MASTER olarak yapılandırılır
-;   ve BCLK (GPIO4) ile LRCK (GPIO5) sinyallerini MCLK'ten kendisi türetir.
-;   Dolayısıyla bu PIO programları saati SÜRMEZ, saati TAKİP EDER.
+; CLOCK ARCHITECTURE (important):
+;   The RP2350 generates MCLK only (GPIO3). The ES8311 is configured as the
+;   I2S MASTER and derives BCLK (GPIO4) and LRCK (GPIO5) from MCLK itself.
+;   So these PIO programs do NOT DRIVE the clock, they FOLLOW it.
 ;
-; DİKKAT: Aşağıdaki `wait ... gpio N` komutlarındaki N MUTLAK GPIO numarasıdır,
-; state machine'in pin eşlemesine göre değil. board_config.h'deki pins
-; değişirse burası da elle güncellenmelidir — audio_i2s.c içindeki
-; static_assert'ler bunu unutmayı imkânsız kılar.
+; NOTE: the N in the `wait ... gpio N` instructions below is an ABSOLUTE GPIO
+; number, not relative to the state machine's pin mapping. If the pins in
+; board_config.h change, this file must be updated by hand — the static_asserts
+; in audio_i2s.c make that impossible to forget.
 ;   GPIO4 = I2S_SCLK (BCLK),  GPIO5 = I2S_LRCK (WS)
 ;
 
-; ── MCLK: GPIO3 üzerinde frame dalga ────────────────────────────────────────
-; Döngü başına 5 komut çalışır; clkdiv buna göre hesaplanır (audio_i2s.c).
+; ── MCLK: a square wave on GPIO3 ────────────────────────────────────────────
+; Five instructions run per loop; clkdiv is computed from that (audio_i2s.c).
 .program mclk_pio
 wrap_target:
     set pins, 1
@@ -29,34 +29,36 @@ wrap_target:
     nop
     jmp wrap_target
 
-; ── I2S RX: ES8311'in ürettiği BCLK/LRCK'yi takip ederek ASDOUT'u örnekle ──
+; ── I2S RX: sample ASDOUT while following the ES8311's BCLK/LRCK ───────────
 ;
-; ES8311 mono olduğu için yalnızca LEFT kanalı okuyoruz; sağ kanal atlanıyor.
-; Her çerçevede baştan yeniden hizalanmak, hizalamanın kaymasını imkânsız kılar
-; ve FIFO trafiğini yarıya indirir.
+; The ES8311 is mono, so we read the LEFT channel only and skip the right one.
+; Realigning from scratch on every frame makes it impossible for the alignment
+; to drift, and it halves the FIFO traffic.
 ;
-; ÖNEMLİ — DETERMİNİZM:
-; İlk sürümde LRCK kenarından hemen sonra `wait 1 gpio 4` vardı. WAIT komutu
-; edge değil SEVİYE tetiklidir: BCLK o an zaten yüksekse komut anında geçiyor,
-; düşükse bekliyordu. Yani başlangıç anına göre bit ofseti değişiyordu ve
-; örnekler bir bit kaymış hâlde okunabiliyordu (tam ölçek kırpma olarak görülür).
-; Çözüm: her zaman önce BCLK'nin DÜŞMESİNİ wait, sonra yükselen kenarı yakala.
-; Böylece nereden başlarsak başlayalım aynı hizaya oturuyoruz.
+; IMPORTANT — DETERMINISM:
+; The first version had `wait 1 gpio 4` immediately after the LRCK edge. The
+; WAIT instruction is LEVEL triggered, not edge triggered: if BCLK happened to
+; be high already the instruction passed through instantly, and if it was low
+; it waited. So the bit offset depended on the moment of starting, and samples
+; could be read shifted by one bit (which shows up as full-scale clipping).
+; The fix: always wait for BCLK to FALL first, then catch the rising edge.
+; That way we land on the same alignment no matter where we start.
 ;
-; Autopush eşiği 16: her çerçevede tek örnek FIFO'ya düşer. Sola kaydırma ile
-; first gelen bit (MSB) bit 15'e oturur; kelimenin bottom 16 biti örnektir.
+; The autopush threshold is 16: one sample lands in the FIFO per frame. With
+; left shifting, the first bit in (the MSB) ends up at bit 15, so the word's
+; low 16 bits are the sample.
 .program i2s_rx_pio
 .wrap_target
-    wait 1 gpio 5           ; LRCK yüksek (sağ kanal ya da boşta)
-    wait 0 gpio 5           ; LRCK düşen kenarı -> left kanal çerçevesi başlıyor
-    wait 0 gpio 4           ; BCLK'nin düşmesini wait (hizayı sabitler)
-    wait 1 gpio 4           ; first yükselen edge: I2S 1-bit gecikmesi, atılır
+    wait 1 gpio 5           ; LRCK high (right channel, or idle)
+    wait 0 gpio 5           ; LRCK falling edge -> the left channel frame starts
+    wait 0 gpio 4           ; wait for BCLK to fall (this fixes the alignment)
+    wait 1 gpio 4           ; first rising edge: the I2S one-bit delay, discarded
     set x, 15
 bitloop:
     wait 0 gpio 4
-    wait 1 gpio 4           ; data BCLK yükselen kenarında geçerli
+    wait 1 gpio 4           ; data is valid on BCLK's rising edge
     in pins, 1
-    jmp x-- bitloop         ; 16 kez çalışır
+    jmp x-- bitloop         ; runs 16 times
 .wrap
 
 % c-sdk {
@@ -74,25 +76,27 @@ static inline void mclk_pio_program_init(PIO pio, uint sm, uint offset, uint mcl
 }
 
 /* din_pin  : ES8311 ASDOUT  (GPIO2)
- * bclk_pin : ES8311 SCLK    (GPIO4)  — yalnızca giriş olarak ayarlanır
- * lrck_pin : ES8311 LRCK    (GPIO5)  — yalnızca giriş olarak ayarlanır
- * Bu üçü PIO tarafından sürülmez; ES8311 master olduğu için hepsi girdidir. */
+ * bclk_pin : ES8311 SCLK    (GPIO4)  — configured as an input only
+ * lrck_pin : ES8311 LRCK    (GPIO5)  — configured as an input only
+ * None of these are driven by PIO; the ES8311 is the master, so all three are
+ * inputs. */
 static inline void i2s_rx_pio_program_init(PIO pio, uint sm, uint offset,
                                            uint din_pin, uint bclk_pin, uint lrck_pin) {
     pio_sm_config c = i2s_rx_pio_program_get_default_config(offset);
 
     sm_config_set_in_pins(&c, din_pin);
-    /* 1. parametre shift_right=false, yani SOLA kaydırma: ilk gelen bit
-     *    kelimenin en üst bitine gider (I2S MSB-first ile uyumlu).
-     * autopush=true, eşik 16: her çerçevede tek mono örnek FIFO'ya düşer.
-     * Kelimenin alt 16 biti örnektir. */
+    /* The first parameter is shift_right=false, i.e. shift LEFT: the first bit
+     *   received goes to the word's top bit (matching I2S, which is MSB
+     *   first).
+     * autopush=true with a threshold of 16: one mono sample lands in the FIFO
+     *   per frame. The word's low 16 bits are the sample. */
     sm_config_set_in_shift(&c, false, true, 16);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
     pio_sm_init(pio, sm, offset, &c);
 
     uint mask = (1u << din_pin) | (1u << bclk_pin) | (1u << lrck_pin);
-    pio_sm_set_pindirs_with_mask(pio, sm, 0, mask);   /* hepsi giriş */
+    pio_sm_set_pindirs_with_mask(pio, sm, 0, mask);   /* all inputs */
 
     pio_gpio_init(pio, din_pin);
     pio_gpio_init(pio, bclk_pin);

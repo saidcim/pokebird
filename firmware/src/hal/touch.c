@@ -8,19 +8,21 @@
 #include "board_config.h"
 #include "hal/i2c_bus.h"
 
-/* Okuma isteği. Baytların çoğunun anlamı belgesiz (veri sayfası elimizde yok)
- * ama 8. bayt (indeks 7) OKUNACAK BAYT SAYISI ve paketin uzunluğuyla birebir
- * uyuşmak zorunda — uyuşmazsa çip senkronu kaybedip sabit 0xDB döndürüyor.
- * Kaynak: rsvpnano/src/input/TouchHandler.cpp (aynı panel, çalışan sürücü). */
+/* The read request. The meaning of most bytes is undocumented (we have no
+ * datasheet), but byte 8 (index 7) is the NUMBER OF BYTES TO READ and must
+ * match the packet length exactly — otherwise the chip loses sync and returns
+ * a constant 0xDB. Source: rsvpnano/src/input/TouchHandler.cpp (same panel,
+ * a working driver). */
 static const uint8_t TP_READ_CMD[11] = {
     0xB5, 0xAB, 0xA5, 0x5A, 0x00, 0x00, 0x00, PB_TOUCH_PACKET_LEN, 0x00, 0x00, 0x00
 };
 
 #define TP_TIMEOUT_US 5000
 
-/* Aynı karede birden fazla yerden okunuyor (LVGL giriş sürücüsü + arayüz
- * kodu). Kısa bir pencerede aynı sonucu döndürüp I2C'ye tek noktadan
- * gidiyoruz; iç içe geçen komut+okuma dizisi çipi bozar. */
+/* This is read from more than one place in the same frame (LVGL's input
+ * driver and the UI code). Within a short window we return the same result
+ * and touch I2C from a single point; an interleaved command+read sequence
+ * corrupts the chip. */
 #define TP_CACHE_US 8000
 
 static uint8_t          s_raw[PB_TOUCH_PACKET_LEN];
@@ -47,7 +49,7 @@ pb_touch_state_t pb_touch_read(void) {
     pb_touch_state_t st;
     memset(&st, 0, sizeof(st));
 
-    /* Komutu yaz (STOP gönderme), hemen ardından paketi oku. */
+    /* Write the command (without STOP), then read the packet immediately. */
     int w = i2c_write_timeout_us(PB_TP_I2C_INST, PB_TP_I2C_ADDR,
                                  TP_READ_CMD, sizeof(TP_READ_CMD),
                                  true, TP_TIMEOUT_US);
@@ -62,12 +64,13 @@ pb_touch_state_t pb_touch_read(void) {
 
     st.ok = true;
 
-    /* Parmak sayısı bayt 1'de. 5 ve üstü geçersiz — çip ara sıra çöp
-     * değer veriyor, dokunulmadı sayıyoruz (rsvpnano da öyle yapıyor). */
+    /* The finger count is in byte 1. Five or more is invalid — the chip
+     * occasionally emits a garbage value, and we treat that as no touch (the
+     * working driver does the same). */
     uint8_t n = s_raw[1];
     st.fingers = (n == 0 || n >= 5) ? 0 : n;
 
-    /* Koordinatlar 12 bit; üst nibble bayrak taşıyor. */
+    /* The coordinates are 12-bit; the top nibble carries flags. */
     st.p.raw_x = (uint16_t)(((s_raw[2] & 0x0F) << 8) | s_raw[3]);
     st.p.raw_y = (uint16_t)(((s_raw[4] & 0x0F) << 8) | s_raw[5]);
 

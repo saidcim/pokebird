@@ -13,53 +13,55 @@ void pb_i2c_init(void) {
     i2c_init(PB_I2C_INST, PB_I2C_BAUD);
     gpio_set_function(PB_PIN_I2C_SDA, GPIO_FUNC_I2C);
     gpio_set_function(PB_PIN_I2C_SCL, GPIO_FUNC_I2C);
-    /* Kartta hat çekme dirençleri var; dahili pull-up'lar yine de zarar vermez
-     * ve kart dışı bir sorunu maskelemeden hattı belirsizlikten kurtarır. */
+    /* The board has bus pull-up resistors already; the internal pull-ups do
+     * no harm and keep the bus out of an undefined state without masking an
+     * off-board problem. */
     gpio_pull_up(PB_PIN_I2C_SDA);
     gpio_pull_up(PB_PIN_I2C_SCL);
 
     s_inited = true;
 }
 
-/* Dokunmatik AYRI bir I2C hattında (i2c0, GPIO32/33). Aynı çip (AXS15231B)
- * ekranı da sürüyor ama ekran QSPI'de; bu hat yalnızca dokunmatik için.
- * Kartta ES8311/IMU/RTC'nin bulunduğu i2c1'den tamamen bağımsız. */
+/* Touch is on a SEPARATE I2C bus (i2c0, GPIO32/33). The same chip
+ * (AXS15231B) also drives the display, but the display is on QSPI; this bus
+ * is for touch alone. It is completely independent of i2c1, where the
+ * ES8311, IMU and RTC live. */
 static bool s_tp_inited = false;
 
 /**
- * I2C hattını takılı kalmış bir slave'den kurtar.
+ * Recover the I2C bus from a stuck slave.
  *
- * Bir slave, aktarımın ortasında master kesilirse SDA'yı aşağıda tutmaya
- * devam edebilir; o andan sonra hattaki her okuma çöp döner. Kurtarma yolu
- * standart: pinleri elle sürüp SDA serbest kalana kadar SCL'e darbe
- * göndermek, sonra düzgün bir STOP üretmek.
+ * If the master is interrupted mid-transfer, a slave can keep holding SDA
+ * low, and from then on every read on the bus returns garbage. The recovery
+ * is the standard one: drive the pins by hand, clock SCL until SDA is
+ * released, then generate a proper STOP.
  *
- * NEDEN GEREKLİ: dokunmatik (AXS15231B) tam bu duruma giriyordu. İlk okuma
- * gerçek veri veriyor, sonrasında sabit 0xDB dönüyor ve yeniden yükleme
- * kurtarmıyordu — RP2350 resetleniyor ama dokunmatik çipi resetlenmiyor
- * (LCD_RST/GPIO34 aşağı çekilemiyor, bkz. lastsession.md §5.9b).
+ * WHY THIS IS NEEDED: the touch controller (AXS15231B) got into exactly this
+ * state. The first read returned real data and every one after it returned a
+ * constant 0xDB, and reflashing did not help — the RP2350 resets but the
+ * touch chip does not (LCD_RST/GPIO34 cannot be pulled low).
  */
 static void i2c_bus_recover(uint sda, uint scl) {
     gpio_set_function(sda, GPIO_FUNC_SIO);
     gpio_set_function(scl, GPIO_FUNC_SIO);
-    gpio_set_dir(sda, GPIO_IN);          /* SDA'yı bırak, slave'i dinle */
+    gpio_set_dir(sda, GPIO_IN);          /* release SDA, listen to the slave */
     gpio_pull_up(sda);
     gpio_set_dir(scl, GPIO_OUT);
     gpio_put(scl, 1);
     sleep_us(10);
 
-    /* SDA serbest kalana kadar darbe. Bir bayt + ACK = 9 çevrim yeter,
-     * pay bırakıyoruz. */
+    /* Clock until SDA is released. One byte plus ACK is 9 cycles, which
+     * would be enough; we leave some margin. */
     for (int i = 0; i < 16 && !gpio_get(sda); i++) {
         gpio_put(scl, 0); sleep_us(5);
         gpio_put(scl, 1); sleep_us(5);
     }
 
-    /* STOP: SCL yüksekken SDA düşükten yükseğe. */
+    /* STOP: SDA goes low to high while SCL is high. */
     gpio_set_dir(sda, GPIO_OUT);
     gpio_put(sda, 0); sleep_us(5);
     gpio_put(scl, 1); sleep_us(5);
-    gpio_set_dir(sda, GPIO_IN);          /* pull-up SDA'yı yukarı çeker */
+    gpio_set_dir(sda, GPIO_IN);          /* the pull-up takes SDA high */
     sleep_us(10);
 }
 
@@ -96,7 +98,8 @@ void DEV_I2C_Write(uint8_t addr, uint8_t reg, uint8_t value) {
 
 uint8_t DEV_I2C_ReadByte(uint8_t addr, uint8_t reg) {
     uint8_t value = 0;
-    /* Register adresini yaz, STOP gönderme (true = hattı tut), sonra oku. */
+    /* Write the register address, do not send STOP (true = hold the bus),
+     * then read. */
     if (i2c_write_timeout_us(PB_I2C_INST, addr, &reg, 1, true, 10000) < 0) {
         return 0;
     }

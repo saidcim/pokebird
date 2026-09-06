@@ -1,14 +1,14 @@
 /**
- * dev_config.c — Waveshare ekran sürücülerinin beklediği paylaşımlı DMA durumu
+ * dev_config.c — the shared DMA state Waveshare's display drivers expect
  *
- * LCD_3in49.c, Waveshare'in DEV_Config.c dosyasında tanımlanan iki global
- * değişkeni kullanıyor: `dma_tx` (kanal numarası) ve `c` (kanal yapılandırması).
- * Waveshare'in DEV_Config.c'sinin tamamını almak yerine (I2C, ADC, RTC, IMU
- * kurulumu da içeriyor ve bizim kendi HAL'imizle çakışır) sadece bu ikisini
- * burada tanımlıyoruz.
+ * LCD_3in49.c uses two globals defined in Waveshare's DEV_Config.c: `dma_tx`
+ * (the channel number) and `c` (the channel configuration). Rather than
+ * taking all of Waveshare's DEV_Config.c (which also sets up I2C, ADC, RTC
+ * and the IMU, and would clash with our own HAL), we define just those two
+ * here.
  *
- * Bu isimler bilerek kısa/genel bırakıldı — satıcı dosyalarını değiştirmemek
- * için. Yeni kod bunları kullanmamalı.
+ * The names are deliberately left short and generic so the vendor files do
+ * not have to be modified. New code should not use them.
  */
 #include "hardware/dma.h"
 #include "hardware/pio.h"
@@ -18,12 +18,12 @@
 uint dma_tx;
 dma_channel_config c;
 
-extern pio_qspi_t qspi;   /* qspi_pio.c içinde tanımlı */
+extern pio_qspi_t qspi;   /* defined in qspi_pio.c */
 
 /**
- * Ekranın DMA kanalını hazırla. LCD_3IN49_Init() öncesinde çağrılmalı.
+ * Prepare the display's DMA channel. Must be called before LCD_3IN49_Init().
  *
- * 8-bit aktarım: QSPI PIO programı bayt bayt besleniyor. Okuma adresi artıyor
+ * 8-bit transfers: the QSPI PIO program is fed byte by byte. The read address
  * (tampondan), yazma adresi sabit (PIO TX FIFO).
  */
 void pb_display_dma_init(void) {

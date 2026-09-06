@@ -33,9 +33,10 @@
 #include "hardware/pio.h"
 #include "hardware/gpio.h"
 
-/* POKEBIRD: pinler board_config.h'den geliyor — tek doğruluk kaynağı orası.
- * Waveshare'in sabit değerleri board_config.h ile birebir aynı (şematikten
- * bağımsız olarak doğrulandı), yine de tek yerden yönetilsin. */
+/* POKEBIRD: the pins come from board_config.h — that is the single source of
+ * truth. Waveshare's hard-coded values match board_config.h exactly (verified
+ * independently against the schematic), but they should still be managed from
+ * one place. */
 #include "board_config.h"
 
 #define PIN_CS      PB_PIN_LCD_CS
@@ -66,7 +67,7 @@ typedef struct pio_qspi {
 
 extern pio_qspi_t qspi;
 
-/* POKEBIRD teshis sayaclari — QSPI_WaitIdle gercekten bekliyor mu (§9n).
+/* POKEBIRD diagnostic counters — is QSPI_WaitIdle actually waiting?
  * `w` komutu okuyor; sifirlamak icin pb_qspi_counters_reset(). */
 extern volatile uint32_t pb_qspi_wait_calls;       /* toplam cagri            */
 extern volatile uint32_t pb_qspi_wait_timeout;        /* zaman asimi (SESSIZ hata)*/

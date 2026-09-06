@@ -1,8 +1,8 @@
 /**
- * audio_i2s.c — ES8311 mikrofonundan I2S yakalama (PIO + DMA)
+ * audio_i2s.c — I2S capture from the ES8311's microphone (PIO + DMA)
  *
- * PIO programları Waveshare'in RP2350-Touch-LCD-3.5 örneğinden uyarlandı (MIT);
- * ayrıntı için audio_i2s.pio başlığına bakın.
+ * The PIO programs were adapted from Waveshare's RP2350-Touch-LCD-3.5 example
+ * (MIT); see the header of audio_i2s.pio for details.
  */
 #include "hal/audio_i2s.h"
 
@@ -17,41 +17,44 @@
 #include "audio_i2s.pio.h"
 #include "board_config.h"
 
-/* audio_i2s.pio içindeki `wait ... gpio N` komutları MUTLAK GPIO numarası
- * kullanır ve C tarafından parametreleştirilemez. Pinler değişirse .pio dosyası
- * da elle güncellenmeli; bu kontroller sessizce yanlış pini dinlememizi önler. */
-static_assert(PB_PIN_I2S_SCLK == 4, "audio_i2s.pio 'wait gpio 4' ile BCLK'yi bekliyor");
-static_assert(PB_PIN_I2S_LRCK == 5, "audio_i2s.pio 'wait gpio 5' ile LRCK'yi bekliyor");
+/* The `wait ... gpio N` instructions inside audio_i2s.pio use ABSOLUTE GPIO
+ * numbers and cannot be parameterised from C. If the pins change, the .pio
+ * file has to be updated by hand; these checks stop us from silently
+ * listening to the wrong pin. */
+static_assert(PB_PIN_I2S_SCLK == 4, "audio_i2s.pio waits for BCLK with 'wait gpio 4'");
+static_assert(PB_PIN_I2S_LRCK == 5, "audio_i2s.pio waits for LRCK with 'wait gpio 5'");
 
 #define PB_PIO              pio1
 #define PB_SM_MCLK          0
 #define PB_SM_RX            1
 
-/* ── Halka tamponu ─────────────────────────────────────────────────────────
+/* ── Ring buffer ──────────────────────────────────────────────────────────
  *
- * DMA'nın adres sarma (ring) özelliği kullanılıyor: yazma adresinin alt
- * bitleri maskeleniyor, böylece kanal tampon sonuna gelince kendiliğinden
- * başa dönüyor. Bunun iki şartı var — tampon boyutu ikinin kuvveti ve tampon
- * kendi boyutuna hizalı olmalı.
+ * This uses DMA's address-wrapping (ring) feature: the low bits of the write
+ * address are masked, so the channel returns to the start by itself when it
+ * reaches the end of the buffer. That has two requirements — the buffer size
+ * must be a power of two, and the buffer must be aligned to its own size.
  *
- * 8192 örnek = 32 KB = 24 kHz'de 341 ms (M6'da 4096'dan büyütüldü; gerekçe
- * audio_i2s.h'de). ⛔ BÜYÜTMEYİN — donanımın DMA ring alanı 4 bit, azami
- * 32 KB (audio_i2s.h'deki M7 uyarısı, §9o adım 3). */
+ * 8192 samples = 32 KB = 341 ms at 24 kHz (raised from 4096 in M6; the
+ * reasoning is in audio_i2s.h). DO NOT GROW IT — the hardware's DMA ring
+ * field is 4 bits, capping the ring at 32 KB (see the warning in
+ * audio_i2s.h). */
 #define PB_RING_WORDS       PB_AUDIO_RING_SAMPLES
 #define PB_RING_MASK        (PB_RING_WORDS - 1)
-#define PB_RING_ADDR_BITS   15                      /* 1<<15 = 32768 bayt — DONANIM TAVANI */
+#define PB_RING_ADDR_BITS   15                  /* 1<<15 = 32768 bytes — HARDWARE CEILING */
 
-static_assert((PB_RING_WORDS & PB_RING_MASK) == 0, "halka boyutu ikinin kuvveti olmali");
+static_assert((PB_RING_WORDS & PB_RING_MASK) == 0, "ring size must be a power of two");
 static_assert((1u << PB_RING_ADDR_BITS) == PB_RING_WORDS * sizeof(uint32_t),
-              "PB_RING_ADDR_BITS halka boyutuyla uyusmuyor");
+              "PB_RING_ADDR_BITS does not match the ring size");
 
-/* DMA yazıyor, CPU okuyor: derleyicinin okumaları önbelleğe almasını
- * engellemek için volatile. */
+/* DMA writes, the CPU reads: volatile so the compiler does not cache the
+ * reads. */
 static volatile uint32_t s_ring[PB_RING_WORDS]
     __attribute__((aligned(1u << PB_RING_ADDR_BITS)));
 
-/* Kontrol kanalının veri kanalına geri yazdığı sayaç değeri. Bilerek RAM'de:
- * DMA'nın flash'tan (XIP) okuması gereksiz bir bağımlılık olurdu. */
+/* The count the control channel writes back into the data channel.
+ * Deliberately in RAM: making DMA read from flash (XIP) would be an
+ * unnecessary dependency. */
 static uint32_t s_reload_words = PB_RING_WORDS;
 
 static uint32_t s_read_idx = 0;
@@ -70,8 +73,8 @@ bool pb_audio_mclk_start(const pb_audio_cfg_t *cfg) {
     uint offset = pio_add_program(PB_PIO, &mclk_pio_program);
     mclk_pio_program_init(PB_PIO, PB_SM_MCLK, offset, PB_PIN_I2S_MCLK);
 
-    /* mclk_pio döngüsü 5 komut sürüyor, dolayısıyla bir MCLK periyodu
-     * 5 x clkdiv sistem saati kadar. 150 MHz / (4.8828125 x 5) = 6.144 MHz. */
+    /* The mclk_pio loop takes 5 instructions, so one MCLK period is
+     * 5 x clkdiv system clocks. 150 MHz / (4.8828125 x 5) = 6.144 MHz. */
     float div = ((float)clock_get_hz(clk_sys) / (float)cfg->mclk_freq) / 5.0f;
     pio_sm_set_clkdiv(PB_PIO, PB_SM_MCLK, div);
     pio_sm_set_enabled(PB_PIO, PB_SM_MCLK, true);
@@ -80,7 +83,7 @@ bool pb_audio_mclk_start(const pb_audio_cfg_t *cfg) {
     return true;
 }
 
-/* ── Yakalama ──────────────────────────────────────────────────────────── */
+/* ── Capture ───────────────────────────────────────────────────────────── */
 
 bool pb_audio_i2s_init(const pb_audio_cfg_t *cfg) {
     if (!pb_audio_mclk_start(cfg)) return false;
@@ -89,36 +92,37 @@ bool pb_audio_i2s_init(const pb_audio_cfg_t *cfg) {
     uint offset = pio_add_program(PB_PIO, &i2s_rx_pio_program);
     i2s_rx_pio_program_init(PB_PIO, PB_SM_RX, offset,
                             PB_PIN_I2S_DSOUT, PB_PIN_I2S_SCLK, PB_PIN_I2S_LRCK);
-    /* RX state machine, ES8311'in ürettiği saati takip ediyor; kendi
-     * bölücüsüyle yavaşlatılmamalı. */
+    /* The RX state machine follows the clock the ES8311 generates; it must
+     * not be slowed down by a divider of its own. */
     pio_sm_set_clkdiv(PB_PIO, PB_SM_RX, 1.0f);
 
     s_dma_data = dma_claim_unused_channel(false);
     s_dma_ctrl = dma_claim_unused_channel(false);
     if (s_dma_data < 0 || s_dma_ctrl < 0) return false;
 
-    /* RX state machine BİR KEZ burada başlatılır ve bir daha durdurulmaz.
+    /* The RX state machine is started ONCE here and never stopped again.
      *
-     * Neden: her yakalamada durdurup pio_sm_restart() ile yeniden başlatmak,
-     * I2S çerçeve kilidinin her seferinde yeniden kurulmasına yol açıyordu.
-     * LRCK ve BCLK kenarları neredeyse aynı anda değiştiği için bu yeniden
-     * kilitlenme yarış hâline geliyor ve kilit bazen yanlış yuvaya oturuyordu;
-     * sonuç, ölçümlerin rastgele bir kısmında tamamen gürültü okumaktı
-     * (ilintisiz, 16 bitin tamamı rastgele — basit bit kayması değil).
+     * Why: stopping it on every capture and restarting with pio_sm_restart()
+     * meant the I2S frame lock had to be re-established each time. Because
+     * the LRCK and BCLK edges change almost simultaneously, that re-lock is a
+     * race, and the lock sometimes landed in the wrong slot. The result was
+     * reading pure noise on a random fraction of measurements (uncorrelated,
+     * all 16 bits random — not a simple bit shift).
      *
-     * Kilit bir kez doğru kurulduğunda kendiliğinden korunuyor: program her
-     * çerçevede LRCK düşen kenarında yeniden hizalanıyor. */
+     * Once the lock is established correctly it maintains itself: the program
+     * realigns on LRCK's falling edge every frame. */
     pio_sm_clear_fifos(PB_PIO, PB_SM_RX);
     pio_sm_restart(PB_PIO, PB_SM_RX);
-    pio_sm_exec(PB_PIO, PB_SM_RX, pio_encode_jmp(offset));  /* PC'yi başa al */
+    pio_sm_exec(PB_PIO, PB_SM_RX, pio_encode_jmp(offset));  /* rewind the PC */
     pio_sm_set_enabled(PB_PIO, PB_SM_RX, true);
 
     s_rx_ready = true;
     return pb_audio_stream_start();
 }
 
-/* PIO FDEBUG'daki RXSTALL biti: RX FIFO doluyken IN komutu tıkandı, yani
- * örnek düştü. Ölçümün güvenilir olup olmadığını söyleyen tek gerçek gösterge. */
+/* The RXSTALL bit in PIO FDEBUG: an IN instruction stalled because the RX
+ * FIFO was full, meaning a sample was dropped. It is the only real indicator
+ * of whether a measurement can be trusted. */
 static inline void fdebug_clear_rxstall(void) {
     PB_PIO->fdebug = (1u << PB_SM_RX);
 }
@@ -126,19 +130,21 @@ static inline bool fdebug_rxstall(void) {
     return (PB_PIO->fdebug & (1u << PB_SM_RX)) != 0;
 }
 
-/* ── Sürekli yakalama: kendini yenileyen DMA ───────────────────────────────
+/* ── Continuous capture: self-refreshing DMA ──────────────────────────────
  *
- * İki kanal kullanılıyor:
- *   veri     — PIO RX FIFO -> halka tamponu, DREQ ile hızlanıyor, sarma açık.
- *              Bittiğinde ZİNCİRLE kontrol kanalını tetikliyor.
- *   kontrol  — tek kelime yazar: veri kanalının sayaç register'ının TETİKLEYEN
- *              takma adına (al1_transfer_count_trig) halka boyutunu koyar,
- *              böylece veri kanalı anında yeniden başlar.
+ * Two channels are used:
+ *   data     — PIO RX FIFO -> ring buffer, paced by DREQ, wrapping enabled.
+ *              When it finishes it CHAINS to the control channel.
+ *   control  — writes a single word: it puts the ring size into the TRIGGERING
+ *              alias of the data channel's count register
+ *              (al1_transfer_count_trig), so the data channel restarts
+ *              immediately.
  *
- * Sonuç: CPU hiç karışmadan sonsuza kadar dönen bir yakalama. Yazma adresi
- * sarma sayesinde tam tur atıp başa döndüğü için kontrol kanalının adresi
- * ayrıca sıfırlamasına gerek yok. İki tur arasındaki birkaç saat çevrimlik
- * boşluğu PIO'nun RX FIFO'su (join ile 8 kelime, ~333 us) fazlasıyla kapatıyor.
+ * The result is a capture that loops forever with no CPU involvement.
+ * Because address wrapping brings the write pointer back to the start on its
+ * own, the control channel does not need to reset the address as well. The
+ * few clock cycles of gap between laps are covered many times over by the
+ * PIO's RX FIFO (8 words when joined, about 333 us).
  */
 
 static bool stream_configure(void) {
@@ -146,20 +152,20 @@ static bool stream_configure(void) {
     channel_config_set_transfer_data_size(&dc, DMA_SIZE_32);
     channel_config_set_read_increment(&dc, false);
     channel_config_set_write_increment(&dc, true);
-    channel_config_set_ring(&dc, true, PB_RING_ADDR_BITS);   /* yazma adresi sarar */
+    channel_config_set_ring(&dc, true, PB_RING_ADDR_BITS);   /* write address wraps */
     channel_config_set_dreq(&dc, pio_get_dreq(PB_PIO, PB_SM_RX, false));
     channel_config_set_chain_to(&dc, (uint)s_dma_ctrl);
     dma_channel_configure((uint)s_dma_data, &dc,
-                          (void *)s_ring,                  /* hedef  */
-                          &PB_PIO->rxf[PB_SM_RX],          /* kaynak */
+                          (void *)s_ring,                  /* destination */
+                          &PB_PIO->rxf[PB_SM_RX],          /* source      */
                           PB_RING_WORDS,
-                          false);                          /* başlatma */
+                          false);                          /* do not start yet */
 
     dma_channel_config cc = dma_channel_get_default_config((uint)s_dma_ctrl);
     channel_config_set_transfer_data_size(&cc, DMA_SIZE_32);
     channel_config_set_read_increment(&cc, false);
     channel_config_set_write_increment(&cc, false);
-    channel_config_set_chain_to(&cc, (uint)s_dma_ctrl);     /* kendine = zincir yok */
+    channel_config_set_chain_to(&cc, (uint)s_dma_ctrl);     /* to itself = no chain */
     dma_channel_configure((uint)s_dma_ctrl, &cc,
                           &dma_hw->ch[s_dma_data].al1_transfer_count_trig,
                           &s_reload_words,
@@ -168,7 +174,7 @@ static bool stream_configure(void) {
     return true;
 }
 
-/** Halkada DMA'nın şu an yazdığı konum (kelime indeksi). */
+/** Where DMA is currently writing in the ring (word index). */
 static inline uint32_t ring_write_index(void) {
     uint32_t off = (uint32_t)((uintptr_t)dma_hw->ch[s_dma_data].write_addr -
                               (uintptr_t)s_ring);
@@ -180,14 +186,15 @@ bool pb_audio_stream_start(void) {
     if (s_stream_running) return true;
     if (!stream_configure()) return false;
 
-    /* Bayat örnekleri at: state machine BAŞTAN BERİ çalışıyor, FIFO'da
-     * bekleyen kelimeler olabilir. State machine durdurulmuyor (§ yukarıda). */
+    /* Drop stale samples: the state machine has been running SINCE STARTUP,
+     * so there may be words waiting in the FIFO. The state machine itself is
+     * not stopped (see the note above). */
     while (!pio_sm_is_rx_fifo_empty(PB_PIO, PB_SM_RX)) {
         (void)pio_sm_get(PB_PIO, PB_SM_RX);
     }
     fdebug_clear_rxstall();
 
-    s_read_idx = 0;                       /* yazma da tamponun başından başlıyor */
+    s_read_idx = 0;                    /* writing also starts at the buffer head */
     dma_channel_start((uint)s_dma_data);
     s_stream_running = true;
     return true;
@@ -196,10 +203,10 @@ bool pb_audio_stream_start(void) {
 void pb_audio_stream_stop(void) {
     if (!s_stream_running) return;
 
-    /* ÖNCE zinciri kır. İptal edilen bir kanal zincirini tetikleyebiliyor;
-     * zincir dururken iptal edilirse kontrol kanalı veri kanalını hemen
-     * yeniden başlatır ve durdurma işe yaramaz. al1_ctrl tetiklemeyen takma
-     * ad, çalışırken yazmak güvenli. */
+    /* Break the chain FIRST. An aborted channel can still fire its chain, so
+     * aborting while the chain stands would have the control channel restart
+     * the data channel immediately and the stop would do nothing. al1_ctrl is
+     * the non-triggering alias, safe to write while running. */
     uint32_t ctrl = dma_hw->ch[s_dma_data].al1_ctrl;
     ctrl &= ~DMA_CH0_CTRL_TRIG_CHAIN_TO_BITS;
     ctrl |= ((uint32_t)s_dma_data << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB);
@@ -236,16 +243,18 @@ pb_capture_result_t pb_audio_stream_read(int16_t *dst, uint32_t n_samples,
         uint32_t avail = pb_audio_stream_available();
 
         if (avail == 0) {
-            /* Saat yoksa (ES8311 BCLK/LRCK üretmiyorsa) halka hiç dolmaz;
-             * burada sonsuza kadar beklemek yerine hata döndürüyoruz. */
+            /* With no clock (the ES8311 not driving BCLK/LRCK) the ring
+             * never fills, so we return an error rather than waiting
+             * forever. */
             if (time_reached(deadline)) { res.timed_out = true; break; }
             tight_loop_contents();
             continue;
         }
 
-        /* Tüketici halkanın dörtte üçü kadar geri kaldıysa en eski örnekler
-         * ezilmek üzere: en tazeye atla ve bunu bildir. Sessizce süreksiz
-         * veri döndürmek, ölçümü sessizce bozardı. */
+        /* If the consumer has fallen three quarters of a ring behind, the
+         * oldest samples are about to be overwritten: jump to the freshest
+         * data and report it. Silently returning discontinuous data would
+         * silently corrupt the measurement. */
         if (avail > (PB_RING_WORDS - PB_RING_WORDS / 4)) {
             res.fifo_overrun = true;
             s_read_idx = (ring_write_index() - PB_AUDIO_MAX_READ) & PB_RING_MASK;
@@ -255,8 +264,8 @@ pb_capture_result_t pb_audio_stream_read(int16_t *dst, uint32_t n_samples,
         uint32_t take = n_samples - got;
         if (take > avail) take = avail;
 
-        /* PIO çerçeve başına tek mono örnek gönderiyor; 16 bitlik autopush
-         * eşiği nedeniyle örnek kelimenin alt 16 bitinde. */
+        /* PIO sends one mono sample per frame; because the autopush
+         * threshold is 16 bits, the sample sits in the word's low 16 bits. */
         for (uint32_t i = 0; i < take; i++) {
             dst[got + i] = (int16_t)(s_ring[(s_read_idx + i) & PB_RING_MASK] & 0xFFFFu);
         }
@@ -264,7 +273,7 @@ pb_capture_result_t pb_audio_stream_read(int16_t *dst, uint32_t n_samples,
         got += take;
     }
 
-    if (fdebug_rxstall()) {          /* DMA yetişemedi: PIO FIFO taştı */
+    if (fdebug_rxstall()) {      /* DMA fell behind: the PIO FIFO overflowed */
         res.fifo_overrun = true;
         fdebug_clear_rxstall();
     }

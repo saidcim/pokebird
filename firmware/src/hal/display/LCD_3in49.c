@@ -137,9 +137,9 @@ static const sh8601_lcd_init_cmd_t lcd_dcs_tail_no_colmod[] =
     {0x29, (uint8_t []){0x00}, 0, 120},
 };
 
-/* POKEBIRD — veri yolu teşhisi için: paneli tek, veri almayan bir DCS komutu
+/* POKEBIRD — for bus diagnostics: drives the panel with a single DCS command
  * yolla (0x28 DISPOFF, 0x29 DISPON, 0x20/0x21 INVOFF/INVON gibi). Komutlar
- * panele ulaşıyor mu sorusunu gözle yanıtlatmak için kullanılıyor. */
+ * that takes no data, to answer by eye whether commands reach the panel. */
 void LCD_3IN49_SendSimpleCmd(uint8_t cmd)
 {
     QSPI_Select(qspi);
@@ -209,7 +209,7 @@ parameter:
         variant :  LCD_3IN49_INIT_* (bkz. LCD_3in49.h)
 
 Varyantlar sadece hata ayiklama icin var; uretim yolu LCD_3IN49_INIT_FULL.
-Ekranda ne oldugunu seri porttan goremedigimiz icin (bkz. lastsession.md §5.9)
+Because we cannot see what is on the screen over the serial console,
 hipotezleri tek tek denemek yerine hepsini tek firmware'e koyup kullaniciya
 sorabilelim diye ayrildi.
 ******************************************************************************/

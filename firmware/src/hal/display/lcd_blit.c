@@ -7,47 +7,48 @@
 #include "qspi_pio.h"
 #include "hardware/dma.h"
 
-/* Bayt sırası çevrilmiş satır tamponu. Panelin bir satırı en fazla PB_PANEL_W
- * piksel; sütun yazarken de aynı tampon kullanılıyor (h=1). */
+/* Byte-swapped row buffer. A panel row is at most PB_PANEL_W pixels; the same
+ * buffer is used when writing a column too (h=1). */
 static uint16_t s_row[PB_PANEL_W];
 
-/* ── Panelin yazma imleci ─────────────────────────────────────────────────
+/* ── The panel's write cursor ─────────────────────────────────────────────
  *
- * Bu panelde RASET (0x2B) YOK SAYILIYOR — kartta ölçüldü (`z`), §9n.
- * Satır konumunu yalnızca iki komut belirliyor:
- *   0x2C RAMWR   -> imleç sütun penceresinin EN ÜST satırına döner
- *   0x3C RAMWRC  -> imleç bir önceki yazmanın bittiği yerden DEVAM eder
- * Sütun aralığı CASET (0x2A) ile ayarlanıyor ve o çalışıyor.
+ * On this panel RASET (0x2B) is IGNORED — measured on the board. The row
+ * position is set by two commands and nothing else:
+ *   0x2C RAMWR   -> the cursor returns to the TOP row of the column window
+ *   0x3C RAMWRC  -> the cursor CONTINUES from where the last write ended
+ * The column range is set with CASET (0x2A), and that does work.
  *
- * Satır, pencere genişliği kadar piksel yazıldıkça ilerliyor. Pencere
- * DARALTILIRSA satır daha ucuza ilerletilebiliyor ve pencere yeniden
- * genişletilip RAMWRC ile devam edildiğinde satır KORUNUYOR (`j` ile
- * ölçüldü). Konumlandırma bu yüzden ucuz: y satır ilerletmek 2*y piksel.
+ * The row advances as pixels are written, at the width of the window. If the
+ * window is NARROWED the row can be advanced more cheaply, and when the
+ * window is widened again and writing continues with RAMWRC the row is
+ * PRESERVED (measured). That is what makes positioning cheap: advancing y
+ * rows costs 2*y pixels.
  *
- * ⚠ 2 PİKSEL HİZALAMA: panel sütun aralığını 2 piksele yuvarlıyor. `j`
- * ölçtü — 1 piksellik pencere (66..66) fiilen 66..67 oluyor, 300 piksel
- * 300 değil 150 satır ilerletiyor ve sonraki yazma bir piksel kaymış hizadan
- * devam ederek dişli/noktalı çıkıyor. Bu yüzden HER pencere x1 çift, x2 tek
- * olacak şekilde genişletiliyor. */
+ * 2-PIXEL ALIGNMENT: the panel rounds the column range to 2 pixels. Measured:
+ * a 1-pixel window (66..66) is effectively 66..67, so 300 pixels advance 150
+ * rows rather than 300, and the next write continues one pixel out of
+ * alignment and comes out jagged. That is why EVERY window is widened so x1
+ * is even and x2 is odd. */
 static bool     s_cursor_valid = false;
 static uint32_t s_cursor_x1, s_cursor_x2, s_cursor_row;
 
-/* ── Atlama şeridi ────────────────────────────────────────────────────────
+/* ── The skip strip ───────────────────────────────────────────────────────
  *
- * Konumlandırma panelin 0. ve 1. sütununu kullanıyor: oraya y satır kadar
- * veri yazılıyor ki imleç y'ye gelsin. Ham hâliyle bu, o iki sütunu
- * SİLERDİ. Onun yerine iki sütunun GERÇEK içeriğini burada tutuyoruz ve
- * atlarken aynısını geri yazıyoruz — atlama böylece tamamen GÖRÜNMEZ oluyor
- * ve ekrandan tek piksel bile feda edilmiyor.
+ * Positioning uses the panel's columns 0 and 1: y rows' worth of data is
+ * written there to walk the cursor down to y. Done naively that would ERASE
+ * those two columns. Instead we keep the REAL contents of the two columns
+ * here and write the same data back while skipping — which makes the skip
+ * completely INVISIBLE without sacrificing a single pixel of screen.
  *
- * Bedeli 640*2*2 = 2.560 bayt. Alternatifi iki sütunu arayüzden düşürmekti
- * (172 -> 170), o da ölçülmüş yön eşlemesini ve spektrogram bantlarını
- * baştan kurmayı gerektirirdi.
+ * The cost is 640*2*2 = 2,560 bytes. The alternative was to drop two columns
+ * from the UI (172 -> 170), which would have meant rebuilding the measured
+ * orientation mapping and the spectrogram bands from scratch.
  *
- * Panele bu dosyanın dışından yazan her kod şeridi geçersiz kılıyor; şerit
- * geçersizken atlama siyah yazar (yalnızca teşhis komutlarından sonra olur,
- * uygulama zaten ardından yeniden çiziyor). */
-static uint16_t s_strip[PB_PANEL_H][2];      /* big-endian, panele gittiği hâliyle */
+ * Any code outside this file that writes to the panel invalidates the strip;
+ * while it is invalid a skip writes black (which only happens after
+ * diagnostic commands, and the application redraws immediately afterwards). */
+static uint16_t s_strip[PB_PANEL_H][2];   /* big-endian, as it goes to the panel */
 static bool     s_strip_valid = false;
 
 void pb_lcd_cursor_invalidate(void) {
@@ -57,7 +58,7 @@ void pb_lcd_cursor_invalidate(void) {
 
 static void caset_inner(uint32_t x1, uint32_t x2) {
     QSPI_Select(qspi);
-    QSPI_REGISTER_Write(qspi, 0x2A);           /* CASET — bu panelde çalışan tek pencere */
+    QSPI_REGISTER_Write(qspi, 0x2A);       /* CASET — the only window that works here */
     QSPI_DATA_Write(qspi, (x1 >> 8) & 0xff);
     QSPI_DATA_Write(qspi, x1 & 0xff);
     QSPI_DATA_Write(qspi, (x2 >> 8) & 0xff);
@@ -67,14 +68,14 @@ static void caset_inner(uint32_t x1, uint32_t x2) {
 
 static void stream_begin_inner(uint8_t ramwr) {
     QSPI_Select(qspi);
-    QSPI_Pixel_Write(qspi, ramwr);          /* 0x2C baştan, 0x3C devam */
+    QSPI_Pixel_Write(qspi, ramwr);          /* 0x2C from the top, 0x3C continue */
     channel_config_set_dreq(&c, pio_get_dreq(qspi.pio, qspi.sm, true));
 }
 
-/* Dışarıya açık hâlleri imleci ve şeridi KENDİLİĞİNDEN geçersiz kılıyor.
- * Teşhis komutları paneli elle sürüyor; her çağrı yerinde geçersiz kılmayı
- * hatırlamak zorunda kalmak sessiz hataya davetiyeydi (bir sonraki blit
- * imlecin yanlış yerde olduğunu bilmeden RAMWRC ile devam ederdi). */
+/* The public versions invalidate the cursor and the strip AUTOMATICALLY. The
+ * diagnostic commands drive the panel by hand, and having to remember to
+ * invalidate at every call site was an invitation to silent bugs (the next
+ * blit would continue with RAMWRC without knowing the cursor had moved). */
 void pb_lcd_column_window(uint32_t x1, uint32_t x2) {
     caset_inner(x1, x2);
     pb_lcd_cursor_invalidate();
@@ -85,49 +86,52 @@ void pb_lcd_stream_begin(uint8_t ramwr) {
     pb_lcd_cursor_invalidate();
 }
 
-/* Son yazılım aşamasının dökümü: DMA'ya giden `s_row`'un kendisi. Buraya
- * kadar her şey ölçüldü (kaynak veri, devrik okuma, satır adımı, hizalama,
- * CS zamanlaması); geriye doğrulanmamış tek aşama buydu. */
+/* A dump of the final software stage: `s_row` itself, as handed to DMA.
+ * Everything up to here had been measured (source data, transposed read, row
+ * stride, alignment, CS timing); this was the one remaining unverified
+ * stage. */
 static int s_row_dump = 0;
 void pb_lcd_request_row_dump(int count) { s_row_dump = count; }
 
-/* ── Aktarım yığını — rsvpnano'nun tekniği ────────────────────────────────
+/* ── The transfer buffer — the reference driver's technique ───────────────
  *
- * Çalışan referans sürücü (rsvpnano/src/drivers/display/axs15231b_pio/
- * axs15231b_pio.cpp, `pushColors`) dikdörtgeni satır satır DEĞİL, bitişik bir
- * tamponda toplayıp **tek DMA** ile yolluyor:
+ * The working reference driver (rsvpnano's
+ * src/drivers/display/axs15231b_pio/axs15231b_pio.cpp, `pushColors`) does NOT
+ * send a rectangle row by row; it gathers it into one contiguous buffer and
+ * sends it with a **single DMA**:
  *
  *     const size_t byteCount = width * height * sizeof(uint16_t);
  *     dma_channel_configure(..., data, byteCount, true);
  *
- * Bizim eski yolumuz her satır için ayrı DMA açıyor ve aralarda CPU bayt
- * sırasını çevirirken hat CS aşağıdayken boşta kalıyordu. Kartta ölçüldü
- * (`S` komutu): dar pencerede satır satır yazınca içerik her satırda kayıyor
- * (merdiven), tam genişlikte kaymıyor. Bayt sırası, pencere komutu ve CS
- * zamanlaması referansla zaten aynıydı; ayrıldığımız tek yer buydu.
+ * Our old path opened a separate DMA per row, and in between the bus sat idle
+ * with CS low while the CPU swapped byte order. Measured on the board (the
+ * `S` command): writing row by row into a narrow window made the content slip
+ * on every row (a staircase), while full-width writes did not. The byte
+ * order, the window command and the CS timing already matched the reference;
+ * this was the only place we diverged.
  *
- * Yığın 4096 piksel = 8 KB. LVGL'in en geniş flush'ı 172 sütun; 4096/172 = 23
- * satır, tipik dar bant (32 sütun) için 128 satır — yani neredeyse her
- * dikdörtgen TEK DMA'ya sığıyor. */
+ * The buffer is 4096 pixels = 8 KB. LVGL's widest flush is 172 columns, so
+ * 4096/172 = 23 rows, and for a typical narrow band (32 columns) 128 rows —
+ * meaning almost every rectangle fits in a SINGLE DMA. */
 #define PB_STACK_PIXELS 4096
-static uint16_t s_heap[PB_STACK_PIXELS];
+static uint16_t s_stack[PB_STACK_PIXELS];
 
-static void yigini_gonder(uint32_t pixel) {
+static void send_stack(uint32_t pixel) {
     dma_channel_configure(dma_tx, &c,
                           &qspi.pio->txf[qspi.sm],
-                          s_heap,
+                          s_stack,
                           pixel * 2,
                           true);
     while (dma_channel_is_busy(dma_tx)) tight_loop_contents();
 }
 
-/** s_row'daki n pikseli (zaten bayt sırası çevrilmiş) panele DMA ile yaz. */
-static void satiri_gonder(uint32_t n) {
+/** DMA the n pixels in s_row (already byte-swapped) to the panel. */
+static void send_row(uint32_t n) {
     if (s_row_dump > 0) {
         s_row_dump--;
-        printf("#SATIR %lu ", (unsigned long)n);
+        printf("#ROW %lu ", (unsigned long)n);
         for (uint32_t i = 0; i < n; i++) {
-            /* s_row big-endian; parlaklık için geri çevir */
+            /* s_row is big-endian; swap back to compute brightness */
             uint16_t px = (uint16_t)((s_row[i] >> 8) | (s_row[i] << 8));
             uint32_t l = ((px >> 11) & 0x1F) + ((px >> 6) & 0x1F) + (px & 0x1F);
             putchar(l < 6 ? '.' : (l < 24 ? '+' : '#'));
@@ -137,7 +141,7 @@ static void satiri_gonder(uint32_t n) {
     dma_channel_configure(dma_tx, &c,
                           &qspi.pio->txf[qspi.sm],
                           s_row,
-                          n * 2,              /* bayt sayısı (8-bit aktarım) */
+                          n * 2,              /* byte count (8-bit transfers) */
                           true);
     while (dma_channel_is_busy(dma_tx)) tight_loop_contents();
 }
@@ -148,7 +152,7 @@ void pb_lcd_stream_color(uint16_t color, uint32_t pixel) {
 
     while (pixel) {
         uint32_t n = (pixel > PB_PANEL_W) ? PB_PANEL_W : pixel;
-        satiri_gonder(n);
+        send_row(n);
         pixel -= n;
     }
 }
@@ -156,10 +160,10 @@ void pb_lcd_stream_color(uint16_t color, uint32_t pixel) {
 void pb_lcd_stream_row(const uint16_t *src, uint32_t n) {
     if (!src || n == 0 || n > PB_PANEL_W) return;
     for (uint32_t i = 0; i < n; i++) {
-        /* Panel big-endian RGB565 istiyor */
+        /* The panel wants big-endian RGB565 */
         s_row[i] = (uint16_t)((src[i] >> 8) | (src[i] << 8));
     }
-    satiri_gonder(n);
+    send_row(n);
 }
 
 void pb_lcd_stream_end(void) {
@@ -167,39 +171,39 @@ void pb_lcd_stream_end(void) {
 }
 
 /**
- * İmleci `y` satırına getir — 0. ve 1. sütunu kullanarak, GÖRÜNMEZ biçimde.
+ * Move the cursor to row `y` — INVISIBLY, using columns 0 and 1.
  *
- * Pencere 2 piksel olduğu için y satır ilerletmek 2*y piksele mal oluyor
- * (tam genişlikte 172*y olurdu). Yazılan veri şeridin gerçek içeriği,
- * dolayısıyla ekranda hiçbir şey değişmiyor.
+ * Because the window is 2 pixels wide, advancing y rows costs 2*y pixels
+ * (at full width it would be 172*y). The data written is the strip's real
+ * content, so nothing on screen changes.
  */
-static void strip_ile_atla(uint32_t y) {
+static void skip_with_strip(uint32_t y) {
     caset_inner(0, 1);
-    stream_begin_inner(0x2C);                        /* satır 0 */
+    stream_begin_inner(0x2C);                        /* row 0 */
 
-    const uint32_t row_start = PB_PANEL_W / 2; /* s_row'a sığan satır sayısı */
+    const uint32_t rows_per_pass = PB_PANEL_W / 2;   /* rows that fit in s_row */
     uint32_t written = 0;
     while (written < y) {
         uint32_t n = y - written;
-        if (n > row_start) n = row_start;
+        if (n > rows_per_pass) n = rows_per_pass;
         for (uint32_t r = 0; r < n; r++) {
             s_row[2 * r]     = s_strip_valid ? s_strip[written + r][0] : 0;
             s_row[2 * r + 1] = s_strip_valid ? s_strip[written + r][1] : 0;
         }
-        satiri_gonder(n * 2);
+        send_row(n * 2);
         written += n;
     }
     pb_lcd_stream_end();
 }
 
 /**
- * İmleci (hizalanmış pencere x1..x2, satır y) konumuna getir ve akışı
- * başlat (CS aşağıda döner).
+ * Move the cursor to (the aligned window x1..x2, row y) and begin streaming
+ * (it returns with CS low).
  */
-static void imleci_konumla(uint32_t x1, uint32_t x2, uint32_t y) {
+static void position_cursor(uint32_t x1, uint32_t x2, uint32_t y) {
     if (s_cursor_valid && s_cursor_x1 == x1 && s_cursor_x2 == x2 &&
         s_cursor_row == y) {
-        stream_begin_inner(0x3C);                    /* RAMWRC — hiç bedeli yok */
+        stream_begin_inner(0x3C);                 /* RAMWRC — costs nothing */
         return;
     }
     if (y == 0) {
@@ -207,12 +211,12 @@ static void imleci_konumla(uint32_t x1, uint32_t x2, uint32_t y) {
         stream_begin_inner(0x2C);
         return;
     }
-    strip_ile_atla(y);                          /* imleç -> satır y */
+    skip_with_strip(y);                           /* cursor -> row y */
     caset_inner(x1, x2);
-    stream_begin_inner(0x3C);                        /* satırı koruyarak devam */
+    stream_begin_inner(0x3C);                     /* continue, preserving the row */
 }
 
-static void imleci_isaretle(uint32_t x1, uint32_t x2, uint32_t row) {
+static void mark_cursor(uint32_t x1, uint32_t x2, uint32_t row) {
     s_cursor_valid = true;
     s_cursor_x1 = x1;
     s_cursor_x2 = x2;
@@ -220,15 +224,15 @@ static void imleci_isaretle(uint32_t x1, uint32_t x2, uint32_t row) {
 }
 
 /**
- * Pencereyi 2 piksele hizala. Dönen aralık x1 çift, x2 tek.
- * `sol` ve `sag`: kaç piksellik kenar dolgusu gerektiği (0 veya 1).
+ * Align the window to 2 pixels. The returned range has an even x1 and an odd
+ * x2. `left` and `right` report how much edge padding is needed (0 or 1).
  */
-static void pencereyi_hizala(uint32_t x, uint32_t w,
-                             uint32_t *x1, uint32_t *x2,
-                             uint32_t *left, uint32_t *right) {
+static void align_window(uint32_t x, uint32_t w,
+                         uint32_t *x1, uint32_t *x2,
+                         uint32_t *left, uint32_t *right) {
     *x1 = x & ~1u;
     *x2 = (x + w - 1) | 1u;
-    if (*x2 >= PB_PANEL_W) *x2 = PB_PANEL_W - 1;   /* 171 zaten tek */
+    if (*x2 >= PB_PANEL_W) *x2 = PB_PANEL_W - 1;   /* 171 is already odd */
     *left = x - *x1;
     *right = *x2 - (x + w - 1);
 }
@@ -241,27 +245,28 @@ void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
     if (y + h > PB_PANEL_H) h = PB_PANEL_H - y;
 
     uint32_t x1, x2, left, right;
-    pencereyi_hizala(x, w, &x1, &x2, &left, &right);
+    align_window(x, w, &x1, &x2, &left, &right);
     const uint32_t pw = x2 - x1 + 1;
 
-    imleci_konumla(x1, x2, y);
+    position_cursor(x1, x2, y);
 
-    /* Satır satır DEĞİL, yığın yığın: bitişik tampon + tek DMA (yukarıya bak) */
-    uint32_t row_start = PB_STACK_PIXELS / pw;
-    if (row_start == 0) row_start = 1;
+    /* Not row by row but chunk by chunk: contiguous buffer, single DMA (see
+     * the note above). */
+    uint32_t rows_per_chunk = PB_STACK_PIXELS / pw;
+    if (rows_per_chunk == 0) rows_per_chunk = 1;
 
-    for (uint32_t row0 = 0; row0 < h; row0 += row_start) {
+    for (uint32_t row0 = 0; row0 < h; row0 += rows_per_chunk) {
         uint32_t n = h - row0;
-        if (n > row_start) n = row_start;
+        if (n > rows_per_chunk) n = rows_per_chunk;
 
-        uint16_t *dst = s_heap;
+        uint16_t *dst = s_stack;
         for (uint32_t r = 0; r < n; r++) {
             const uint16_t *src = buf + (size_t)(row0 + r) * w;
             for (uint32_t i = 0; i < w; i++) {
                 dst[left + i] = (uint16_t)((src[i] >> 8) | (src[i] << 8));
             }
-            /* Hizalama dolgusu: kenar pikseli kopyalanıyor. Hizalı çağrılarda
-             * (LVGL dahil, bkz. lv_port.c'deki alan_yuvarla) hiç çalışmaz. */
+            /* Alignment padding: the edge pixel is duplicated. For aligned
+             * callers (LVGL included) this never runs. */
             if (left) dst[0] = dst[1];
             if (right) dst[pw - 1] = dst[pw - 2];
             if (x1 == 0 && y + row0 + r < PB_PANEL_H) {
@@ -270,36 +275,37 @@ void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
             }
             dst += pw;
         }
-        yigini_gonder(n * pw);
+        send_stack(n * pw);
     }
 
     pb_lcd_stream_end();
-    imleci_isaretle(x1, x2, y + h);
+    mark_cursor(x1, x2, y + h);
 }
 
 void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                          const uint16_t *buf, int32_t col_step, int32_t row_step) {
     if (!buf || w == 0 || h == 0) return;
     if (x >= PB_PANEL_W || y >= PB_PANEL_H) return;
-    /* Kırpma yapmıyoruz: adımlar negatif olabildiği için kırpılmış bir
-     * dikdörtgenin kaynak başlangıcı da kaymalı ve bunu çağıran taraf
-     * bilmeden yapmak sessiz hataya davetiye. Sınır dışı istek reddedilir. */
+    /* No clipping here: because the steps can be negative, a clipped
+     * rectangle would also have to shift its source origin, and doing that
+     * without the caller knowing invites silent bugs. Out-of-bounds requests
+     * are rejected. */
     if (x + w > PB_PANEL_W || y + h > PB_PANEL_H) return;
 
     uint32_t x1, x2, left, right;
-    pencereyi_hizala(x, w, &x1, &x2, &left, &right);
+    align_window(x, w, &x1, &x2, &left, &right);
     const uint32_t pw = x2 - x1 + 1;
 
-    imleci_konumla(x1, x2, y);
+    position_cursor(x1, x2, y);
 
-    uint32_t row_start = PB_STACK_PIXELS / pw;
-    if (row_start == 0) row_start = 1;
+    uint32_t rows_per_chunk = PB_STACK_PIXELS / pw;
+    if (rows_per_chunk == 0) rows_per_chunk = 1;
 
-    for (uint32_t row0 = 0; row0 < h; row0 += row_start) {
+    for (uint32_t row0 = 0; row0 < h; row0 += rows_per_chunk) {
         uint32_t n = h - row0;
-        if (n > row_start) n = row_start;
+        if (n > rows_per_chunk) n = rows_per_chunk;
 
-        uint16_t *dst = s_heap;
+        uint16_t *dst = s_stack;
         for (uint32_t r = 0; r < n; r++) {
             const uint16_t *src = buf + (int32_t)(row0 + r) * row_step;
             for (uint32_t i = 0; i < w; i++) {
@@ -314,17 +320,18 @@ void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
             }
             dst += pw;
         }
-        yigini_gonder(n * pw);
+        send_stack(n * pw);
     }
 
     pb_lcd_stream_end();
-    imleci_isaretle(x1, x2, y + h);
+    mark_cursor(x1, x2, y + h);
 }
 
 void pb_lcd_fill(uint16_t color) {
-    /* Tek geçiş: sütun penceresi tam genişlik, RAMWR, bütün ekran.
-     * Eski hâli 640 ayrı pencere+RAMWR yapıyordu ve her satır aynı ÜST
-     * satıra biniyordu (§9n'in baş belirtisi: "ekran temizlenmiyor"). */
+    /* A single pass: full-width column window, RAMWR, the whole screen.
+     * The old version issued 640 separate window+RAMWR pairs and every row
+     * landed on the same TOP row — the headline symptom of "the screen does
+     * not clear". */
     caset_inner(0, PB_PANEL_W - 1);
     stream_begin_inner(0x2C);
     pb_lcd_stream_color(color, (uint32_t)PB_PANEL_W * PB_PANEL_H);
@@ -333,7 +340,7 @@ void pb_lcd_fill(uint16_t color) {
     const uint16_t be = (uint16_t)((color >> 8) | (color << 8));
     for (uint32_t r = 0; r < PB_PANEL_H; r++) { s_strip[r][0] = be; s_strip[r][1] = be; }
     s_strip_valid = true;
-    imleci_isaretle(0, PB_PANEL_W - 1, PB_PANEL_H);
+    mark_cursor(0, PB_PANEL_W - 1, PB_PANEL_H);
 }
 
 void pb_lcd_stream_flat(uint16_t color, uint32_t pixel) {

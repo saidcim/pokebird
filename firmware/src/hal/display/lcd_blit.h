@@ -1,22 +1,21 @@
 /**
- * lcd_blit.h — Küçük tampondan ekrana dikdörtgen aktarımı
+ * lcd_blit.h — transferring a rectangle from a small buffer to the display
  *
- * NEDEN KENDİ FONKSİYONUMUZ:
- * Waveshare'in LCD_3IN49_DisplayWindows() fonksiyonu, verilen `Image`
- * işaretçisini TAM EKRAN framebuffer sanıyor:
+ * WHY WE HAVE OUR OWN FUNCTION:
+ * Waveshare's LCD_3IN49_DisplayWindows() assumes the `Image` pointer it is
+ * given is a FULL-SCREEN framebuffer:
  *     pixel_offset = (i * LCD_3IN49.WIDTH + Xstart) * 2;
- * Yani küçük bir tampon verirseniz sınırların dışını okuyor. Bizim tasarımımız
- * ise tam framebuffer'ı bilerek reddediyor (220 KB, SRAM'in %42'si — plan §5).
- * Bu yüzden tamponu düz, ardışık piksel dizisi olarak ele alan kendi
- * fonksiyonumuz gerekiyor.
+ * So handing it a small buffer makes it read out of bounds. Our design
+ * deliberately rejects a full framebuffer (220 KB, 42% of SRAM), so we need
+ * our own function that treats the buffer as a flat, contiguous pixel array.
  *
- * KOORDİNATLAR — DİKKAT:
- * Bu fonksiyon panelin DOĞAL yönünde çalışır: X 0..171, Y 0..639.
- * Arayüzün yatay (640x172) koordinatları ui/ katmanında çevrilir.
+ * COORDINATES — NOTE:
+ * This function works in the panel's NATIVE orientation: X 0..171, Y 0..639.
+ * The UI's landscape (640x172) coordinates are converted in the ui/ layer.
  *
- * BAYT SIRASI:
- * Panel RGB565'i big-endian bekliyor. Fonksiyon çeviriyi kendi yapıyor;
- * çağıran normal (little-endian) uint16_t verir.
+ * BYTE ORDER:
+ * The panel expects big-endian RGB565. The function does the swap itself; the
+ * caller passes normal (little-endian) uint16_t values.
  */
 #ifndef POKEBIRD_LCD_BLIT_H
 #define POKEBIRD_LCD_BLIT_H
@@ -27,93 +26,99 @@
 #define PB_PANEL_H 640
 
 /**
- * ⚠ PANELİN SÖZLEŞMESİ — RASET (0x2B) YOK SAYILIYOR (ölçüldü, §9n)
+ * THE PANEL'S CONTRACT — RASET (0x2B) IS IGNORED (measured)
  *
- * Bu panelde satır penceresi diye bir şey yok. Yazma imlecinin satırını
- * yalnızca iki komut belirliyor:
- *   0x2C RAMWR   → imleç sütun penceresinin EN ÜST satırına döner
- *   0x3C RAMWRC  → imleç bir önceki yazmanın bittiği yerden DEVAM eder
- * Sütun aralığı CASET (0x2A) ile ayarlanıyor ve o çalışıyor.
+ * There is no such thing as a row window on this panel. The write cursor's
+ * row is determined by two commands and nothing else:
+ *   0x2C RAMWR   -> the cursor returns to the TOP row of the column window
+ *   0x3C RAMWRC  -> the cursor CONTINUES from where the last write ended
+ * The column range is set with CASET (0x2A), and that does work.
  *
- * Sonuç: **y>0 olan bir dikdörtgene rastgele erişim ücretsiz değil.** Sürücü
- * imleci takip ediyor; imleç zaten hedef satırdaysa RAMWRC ile bedava devam
- * eder, değilse RAMWR'den başlayıp aradaki satırları SİYAHLA geçer — yani
- * **o sütun aralığında yukarısı silinir.** Doğru kullanım: bir kareyi
- * yukarıdan aşağı, sırayla çizmek. Bunu ihlal eden kod sessizce değil,
- * gözle görülür biçimde bozulur.
+ * The consequence: **random access to a rectangle with y>0 is not free.** The
+ * driver tracks the cursor; if it is already on the target row it continues
+ * for free with RAMWRC, and otherwise it starts from RAMWR and crosses the
+ * intervening rows IN BLACK — which means **everything above is erased within
+ * that column range.** The correct usage is to draw a frame in order, top to
+ * bottom. Code that violates this breaks visibly rather than silently.
  *
- * `buf`'taki w*h pikseli panelin (x,y) konumuna yaz.
- * `buf` satır sıralı ve ardışık olmalı (w piksel, sonra bir sonraki satır).
- * Piksel biçimi: normal RGB565 (little-endian uint16_t).
+ * Writes the w*h pixels in `buf` to the panel at (x,y).
+ * `buf` must be row-major and contiguous (w pixels, then the next row).
+ * Pixel format: normal RGB565 (little-endian uint16_t).
  */
 void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                  const uint16_t *buf);
 
 /**
- * Adımlı (strided) blit — kaynağı gezerken satır ve sütun adımı verilebilir.
+ * Strided blit — a row and column step can be given while walking the source.
  *
- * NEDEN: LVGL arayüzü YATAY (640x172), panel ise DİKEY (172x640). Aradaki 90°
- * çevrim normalde tamponun devriğini (transpose) almayı, yani ikinci bir
- * tampon kadar daha RAM'i gerektirir — bizde o RAM yok (plan §5).
+ * WHY: the LVGL UI is LANDSCAPE (640x172) while the panel is PORTRAIT
+ * (172x640). The 90-degree rotation between them would normally mean
+ * transposing the buffer, i.e. as much RAM again for a second buffer — RAM we
+ * do not have.
  *
- * Bunun yerine kaynağı devrik SIRAYLA okuyoruz: panelin bir yatay satırı,
- * LVGL tamponunun bir dikey sütunudur. Negatif adım da geçerli; aynalama
- * bununla hallediliyor. Ek tampon maliyeti SIFIR.
+ * Instead we read the source in TRANSPOSED ORDER: one horizontal row of the
+ * panel is one vertical column of the LVGL buffer. Negative steps are valid
+ * too, which is how mirroring is handled. The extra buffer cost is ZERO.
  *
- * piksel(satır r, sütun c) = buf[r*row_step + c*col_step]
+ * pixel(row r, column c) = buf[r*row_step + c*col_step]
  *
- * `x/y/w/h` panelin doğal koordinatlarında. Sınır dışı istek sessizce
- * kırpılmaz, REDDEDİLİR: negatif adımlarda kırpma kaynak başlangıcını da
- * kaydırmayı gerektirir ve bunu çağıran bilmeden yapmak sessiz hataya yol açar.
+ * `x/y/w/h` are in the panel's native coordinates. An out-of-bounds request
+ * is REJECTED rather than silently clipped: with negative steps, clipping
+ * would also require shifting the source origin, and doing that without the
+ * caller knowing leads to silent errors.
  */
 void pb_lcd_blit_strided(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                          const uint16_t *buf, int32_t col_step, int32_t row_step);
 
-/** Tüm paneli tek renkle doldur. */
+/** Fill the whole panel with one colour. */
 void pb_lcd_fill(uint16_t color);
 
 /**
- * Pencereyi AYARLAMADAN düz renk piksel akıt — melez yol testi için (§9n).
+ * Stream flat-colour pixels WITHOUT setting the window — for the hybrid-path
+ * test.
  *
- * NEDEN AYRI: `pb_lcd_blit` pencereyi kendi ayarlıyor, dolayısıyla "pencere
- * komutu" ile "piksel verisi" aynı yoldan (PIO) gidiyor. Ekran hatasında
- * ikisini ayırmak gerekiyor: pencereyi bit-bang, pikselleri PIO ile (ya da
- * tersi) yollayıp hangisinin düştüğünü görebilmek için. Pencereyi çağıran
- * ayarlar; bu fonksiyon yalnızca RAMWR + veri yolluyor.
+ * WHY SEPARATE: `pb_lcd_blit` sets the window itself, so the "window command"
+ * and the "pixel data" both travel the same path (PIO). Diagnosing a display
+ * fault means separating the two: sending the window by bit-bang and the
+ * pixels by PIO (or the other way round) to see which one is failing. Here
+ * the caller sets the window and this function sends only RAMWR plus data.
  */
 void pb_lcd_stream_flat(uint16_t color, uint32_t pixel);
 
 /**
- * Ham piksel akışı — panelin GERÇEK sözleşmesini ifade eden üçlü.
+ * Raw pixel streaming — the trio that expresses the panel's REAL contract.
  *
- * Bu panelde (AXS15231B) satır penceresi (RASET, 0x2B) YOK SAYILIYOR; yazma
- * imlecinin satırını yalnızca RAMWR/RAMWRC belirliyor:
- *   0x2C (RAMWR)  — imleci sütun penceresinin EN ÜSTÜNE alır
- *   0x3C (RAMWRC) — bir önceki yazmanın bittiği yerden DEVAM eder
- * Sütun aralığı CASET (0x2A) ile ayrı ayarlanır. Kaynak: panelin çalışan iki
- * bağımsız sürücüsü (rsvpnano, ESP32 ve RP2350-PIO) — ikisi de RASET
- * yollamıyor. Ayrıntı lastsession.md §9n.
+ * On this panel (AXS15231B) the row window (RASET, 0x2B) is IGNORED; the
+ * write cursor's row is set only by RAMWR/RAMWRC:
+ *   0x2C (RAMWR)  — moves the cursor to the TOP of the column window
+ *   0x3C (RAMWRC) — CONTINUES from where the previous write ended
+ * The column range is set separately with CASET (0x2A). The source for this:
+ * both independent working drivers for this panel (rsvpnano's ESP32 one and
+ * the RP2350-PIO one) send no RASET at all.
  *
- * `basla` CS'i indirip komutu yollar, `renk` düz renk akıtır (kaç kez
- * çağrılırsa), `bitir` CS'i kaldırır. Pencereyi çağıran ayarlar.
+ * `begin` lowers CS and sends the command, `color` streams a flat colour (as
+ * many times as it is called), and `end` raises CS. The caller sets the
+ * window.
  */
 void pb_lcd_stream_begin(uint8_t ramwr);
 void pb_lcd_stream_color(uint16_t color, uint32_t pixel);
-/** Tek satır (n piksel, normal RGB565) akıt; bayt sırasını kendi çevirir. */
+/** Stream one row (n pixels, normal RGB565); it swaps the byte order itself. */
 void pb_lcd_stream_row(const uint16_t *src, uint32_t n);
 void pb_lcd_stream_end(void);
 
-/** Sütun aralığı (CASET, 0x2A). Kapsayıcı: x1 ve x2 dahil. */
+/** Column range (CASET, 0x2A). Inclusive: both x1 and x2 are included. */
 void pb_lcd_column_window(uint32_t x1, uint32_t x2);
 
 /**
- * Panele bu dosyanın dışından komut/veri yollayan her kod bunu çağırmalı.
- * Sürücü imlecin nerede olduğunu takip ediyor; başkası panele yazınca bu
- * bilgi yanlışa döner ve bir sonraki blit sessizce yanlış yere düşer.
+ * Any code outside this file that sends a command or data to the panel must
+ * call this. The driver tracks where the cursor is, and if someone else
+ * writes to the panel that knowledge goes stale — the next blit then lands
+ * silently in the wrong place.
  */
 void pb_lcd_cursor_invalidate(void);
 
-/** Sonraki `adet` satırı DMA'ya giderken seri porta ASCII dök (teşhis). */
+/** Dump the next `count` rows to the serial console as ASCII on their way to
+ *  DMA (diagnostic). */
 void pb_lcd_request_row_dump(int count);
 
 #endif /* POKEBIRD_LCD_BLIT_H */

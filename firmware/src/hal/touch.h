@@ -1,21 +1,23 @@
 /**
- * touch.h — AXS15231B kapasitif dokunmatik (I2C0, GPIO32/33, adres 0x3B)
+ * touch.h — AXS15231B capacitive touch (I2C0, GPIO32/33, address 0x3B)
  *
- * NEDEN SATICI `Touch.c`'Sİ DEĞİL — iki ayrı sebep:
+ * WHY NOT THE VENDOR'S `Touch.c` — two separate reasons:
  *
- * 1. Waveshare'in Touch.c'si `i2c_write_blocking` / `i2c_read_blocking`
- *    kullanıyor, zaman aşımı yok. Dokunmatik ACK vermezse çağrı geri dönmüyor
- *    ve TÜM cihaz kilitleniyor. Ses hattı gerçek zamanlı, göze alınamaz.
+ * 1. Waveshare's Touch.c uses `i2c_write_blocking` / `i2c_read_blocking` with
+ *    no timeout. If the touch controller fails to ACK, the call never returns
+ *    and the WHOLE device locks up. The audio pipeline is real-time; that is
+ *    not a risk worth taking.
  *
- * 2. Daha önemlisi: Waveshare'in okuma protokolü YANLIŞ. Komut dizisinin
- *    7. baytı okunacak bayt sayısı; Waveshare oraya 0x0E yazıp 32 bayt
- *    okuyor. Bu uyuşmazlık çipin senkronunu bozuyor — kartta ölçüldü, ilk
- *    okumadan sonra hep 0xDB dönüyordu. Aynı panelin çalışan sürücüsü
- *    (rsvpnano/src/input/TouchHandler.cpp) 0x08 yazıp 8 bayt okuyor.
+ * 2. More importantly: Waveshare's read protocol is WRONG. Byte 7 of the
+ *    command sequence is the number of bytes to read; Waveshare writes 0x0E
+ *    there and then reads 32 bytes. That mismatch desynchronises the chip —
+ *    measured on the board, every read after the first returned 0xDB. The
+ *    working driver for the same panel
+ *    (rsvpnano/src/input/TouchHandler.cpp) writes 0x08 and reads 8 bytes.
  *
- * KOORDİNATLAR: çip zaten yatay veriyor — ham x uzun eksen (0..640),
- * ham y kısa eksen (0..172). Aynalama gerekip gerekmediği `t` komutuyla
- * ölçülür, varsayılmaz.
+ * COORDINATES: the chip already reports in landscape — raw x is the long axis
+ * (0..640) and raw y the short axis (0..172). Whether mirroring is needed is
+ * MEASURED with the `t` command, not assumed.
  */
 #ifndef POKEBIRD_TOUCH_H
 #define POKEBIRD_TOUCH_H
@@ -23,28 +25,29 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/** Çipin bir okumada verdiği paket uzunluğu. Komuttaki uzunluk baytıyla
- *  AYNI olmak zorunda; uyuşmazsa çip senkronu kaybediyor. */
+/** The packet length the chip returns in one read. It must MATCH the length
+ *  byte in the command; a mismatch desynchronises the chip. */
 #define PB_TOUCH_PACKET_LEN 8
 
 typedef struct {
-    uint16_t raw_x;     /**< uzun eksen, 0..640 */
-    uint16_t raw_y;     /**< kısa eksen, 0..172 */
+    uint16_t raw_x;     /**< long axis, 0..640 */
+    uint16_t raw_y;     /**< short axis, 0..172 */
 } pb_touch_point_t;
 
 typedef struct {
-    bool             ok;        /**< I2C işlemi başarılı mı */
-    uint8_t          fingers;   /**< 0 = dokunulmuyor */
-    pb_touch_point_t p;         /**< 8 baytlık paket tek nokta taşıyor */
+    bool             ok;        /**< did the I2C transaction succeed */
+    uint8_t          fingers;   /**< 0 = not being touched */
+    pb_touch_point_t p;         /**< the 8-byte packet carries a single point */
 } pb_touch_state_t;
 
-/** I2C0'ı başlat ve çipin yanıt verdiğini doğrula. */
+/** Start I2C0 and confirm the chip responds. */
 bool pb_touch_init(void);
 
-/** Anlık durumu oku. Hat yanıt vermezse .ok = false döner, bloklamaz. */
+/** Read the current state. Returns .ok = false if the bus does not respond;
+ *  never blocks. */
 pb_touch_state_t pb_touch_read(void);
 
-/** Son okumanın ham paketi — teşhis için. */
+/** The raw packet from the last read — for diagnostics. */
 void pb_touch_last_raw(uint8_t out[PB_TOUCH_PACKET_LEN]);
 
 #endif /* POKEBIRD_TOUCH_H */

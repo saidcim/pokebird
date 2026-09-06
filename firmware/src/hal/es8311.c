@@ -1,28 +1,28 @@
 /* ===========================================================================
- * POKEBIRD NOTU — KAYNAK, DEĞİŞİKLİKLER VE LİSANS UYARISI
+ * POKEBIRD NOTE - SOURCE, CHANGES AND A LICENSING WARNING
  *
- * Kaynak: Waveshare RP2350-Touch-LCD-3.5 örneği (examples/C/03_ES8311),
- *         o da Espressif'in ES8311 sürücüsünden türetilmiş.
+ * Source: Waveshare's RP2350-Touch-LCD-3.5 example (examples/C/03_ES8311),
+ *         which is itself derived from Espressif's ES8311 driver.
  *
- * Bu dosyadaki değişiklikler:
+ * Changes made in this file:
  *   - "DEV_Config.h" (Waveshare HAL) yerine hal/i2c_bus.h
  *   - DEV_Delay_ms() -> sleep_ms()
- *   - pico_audio_t   -> pb_audio_cfg_t (alan adları korundu)
- *   Register dizileri ve MCLK/örnekleme oranı bölücü tablosu değiştirilmedi;
- *   bunlar donanımda çalıştığı doğrulanmış değerler.
+ *   - pico_audio_t   -> pb_audio_cfg_t (field names preserved)
+ *   The register sequences and the MCLK/sample-rate divider table are
+ *   unchanged; those are values verified to work on the hardware.
  *
- * !! LİSANS UYARISI !!
- * Aşağıdaki lisans standart MIT DEĞİL. "ESPRESSIF MIT License", kullanım
- * iznini açıkça Espressif ürünleriyle sınırlıyor ("for use on all ESPRESSIF
- * SYSTEMS products"). Bu kart bir Raspberry Pi RP2350; yani Espressif ürünü
- * değil. Waveshare bu dosyayı RP2350 örneğinde dağıtıyor olsa da bu, lisans
- * kapsamını genişletmiyor.
+ * !! LICENSING WARNING !!
+ * The licence below is NOT standard MIT. The "ESPRESSIF MIT License" limits
+ * the grant explicitly to Espressif products ("for use on all ESPRESSIF
+ * SYSTEMS products"). This board is a Raspberry Pi RP2350, which is not an
+ * Espressif product. Waveshare distributing this file in an RP2350 example
+ * does not widen the licence's scope.
  *
- * Sonuç: kişisel/deneysel kullanım için pratikte sorun yok, ancak bu projeyi
- * DAĞITMADAN veya TİCARİLEŞTİRMEDEN önce bu dosya ES8311 veri sayfasından
- * kendi yazacağımız bir sürücüyle değiştirilmelidir. Gereken şey ~20 register
- * yazımı ile MCLK bölücü tablosu; kapsamlı bir iş değil.
- * Ayrıntı: docs/ARCHITECTURE.md §6 (lisans notları).
+ * In practice this is fine for personal and experimental use, but before
+ * DISTRIBUTING or COMMERCIALISING this project the file should be replaced
+ * with a driver written from the ES8311 datasheet. What is needed is about
+ * 20 register writes plus the MCLK divider table — not a large job.
+ * See NOTICE and docs/ARCHITECTURE.md for the licensing notes.
  * ===========================================================================
  */
 

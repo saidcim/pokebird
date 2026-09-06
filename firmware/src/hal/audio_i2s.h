@@ -1,8 +1,9 @@
 /**
- * audio_i2s.h — ES8311 mikrofonundan I2S yakalama (PIO + DMA)
+ * audio_i2s.h — I2S capture from the ES8311's microphone (PIO + DMA)
  *
- * Saat mimarisi: RP2350 sadece MCLK üretir; ES8311 I2S master olarak BCLK ve
- * LRCK'yi ondan türetir. Bu katman saati takip eder, sürmez.
+ * Clock architecture: the RP2350 only produces MCLK; the ES8311 is the I2S
+ * master and derives BCLK and LRCK from it. This layer follows the clock, it
+ * does not drive it.
  */
 #ifndef POKEBIRD_AUDIO_I2S_H
 #define POKEBIRD_AUDIO_I2S_H
@@ -11,113 +12,120 @@
 #include <stdint.h>
 
 /**
- * ES8311 sürücüsünün beklediği yapılandırma.
+ * The configuration the ES8311 driver expects.
  *
- * Alan adları Waveshare'in orijinal `pico_audio_t` yapısıyla bilerek aynı
- * tutuldu; böylece es8311.c'nin register dizileri satır satır değiştirilmeden
- * kullanılabiliyor (bkz. es8311.c başlığındaki atıf notu).
+ * The field names are deliberately identical to Waveshare's original
+ * `pico_audio_t` struct, so es8311.c's register sequences can be used
+ * line for line without modification (see the attribution note at the top of
+ * es8311.c).
  */
 typedef struct {
-    uint32_t mclk_freq;     /* Hz — RP2350'nin PIO ile ürettiği MCLK        */
-    uint32_t sample_freq;   /* Hz — ES8311'in MCLK'ten türeteceği LRCK      */
-    uint8_t  res_in;        /* bit — ADC (mikrofon) çözünürlüğü             */
-    uint8_t  res_out;       /* bit — DAC (hoparlör) çözünürlüğü             */
+    uint32_t mclk_freq;     /* Hz — the MCLK the RP2350 generates with PIO  */
+    uint32_t sample_freq;   /* Hz — the LRCK the ES8311 derives from MCLK   */
+    uint8_t  res_in;        /* bits — ADC (microphone) resolution           */
+    uint8_t  res_out;       /* bits — DAC (speaker) resolution              */
 } pb_audio_cfg_t;
 
-/** Yakalama sırasında oluşan sorunlar — ölçümün güvenilirliğini gösterir. */
+/** Problems encountered during capture — they tell you whether a measurement
+ *  can be trusted. */
 typedef struct {
-    uint32_t samples;       /* gerçekten okunan örnek sayısı                */
-    bool     fifo_overrun;  /* true ise örnek DÜŞTÜ, ölçüm güvenilmez       */
-    bool     timed_out;     /* saat gelmedi (ES8311 BCLK/LRCK üretmiyor)    */
+    uint32_t samples;       /* samples actually read                        */
+    bool     fifo_overrun;  /* true means samples were DROPPED, untrustworthy */
+    bool     timed_out;     /* no clock (the ES8311 is not driving BCLK/LRCK) */
 } pb_capture_result_t;
 
 /**
- * Halka tamponunun kapasitesi (örnek). 24 kHz'de ~341 ms.
+ * Ring buffer capacity, in samples. About 341 ms at 24 kHz.
  *
- * M6'DA 4096'DAN BÜYÜTÜLDÜ — ÖLÇÜME DAYALI KARAR (170 ms -> 256 ms tolerans,
- * tür ağının 190 ms'lik çıkarımına 1,35× pay).
+ * RAISED FROM 4096 IN M6 — A MEASUREMENT-DRIVEN DECISION (170 ms -> 256 ms of
+ * tolerance, giving 1.35x headroom over the species net's 190 ms inference).
  *
- * ⛔ 8192 (32 KB) DONANIMIN KESİN TAVANI — BÜYÜTMEYİ DENEMEYİN.
- * M7'de Aşama-1 ikili ağ eklenince (§9o adım 3) toplam çıkarım süresi 259 ms
- * oldu ve 256 ms eşiğini aştı; "ring'i 16384'e büyüt" denendi ve KARTI
- * TAMAMEN KİLİTLEDİ. Kök neden: RP2350'nin DMA `RING_SIZE` alanı 4 bit
- * (dma.h: `DMA_CHx_CTRL_TRIG_RING_SIZE_BITS`, MSB 11 LSB 8) — azami temsil
- * edilebilir değer 15, yani azami ring **2^15 = 32.768 bayt = 8192 örnek**.
- * `PB_RING_ADDR_BITS 16` verilince donanım kaydı sessizce yanlış/bozuk bir
- * değer aldı ve DMA çöktü. Doğru çözüm: ikili ağ ile tür ağını AYNI
- * pencerede asla ikisini birden çalıştırmama (bkz. tanima.c,
- * s_ikili_beklemede) — worst-case çıkarım süresi hâlâ 190 ms'de kalıyor,
- * bu halka hiç büyümeden yetiyor.
+ * 8192 (32 KB) IS THE HARDWARE'S ABSOLUTE CEILING — DO NOT TRY TO RAISE IT.
+ * When the stage-1 binary net was added in M7 the total inference time became
+ * 259 ms and crossed the 256 ms threshold. "Grow the ring to 16384" was tried
+ * and it LOCKED THE BOARD UP COMPLETELY. The root cause: the RP2350's DMA
+ * `RING_SIZE` field is 4 bits (dma.h: `DMA_CHx_CTRL_TRIG_RING_SIZE_BITS`,
+ * MSB 11 LSB 8), so the largest representable value is 15 and the maximum
+ * ring is **2^15 = 32,768 bytes = 8192 samples**. Setting
+ * `PB_RING_ADDR_BITS 16` made the hardware register take a silently wrong
+ * value and the DMA collapsed.
+ *
+ * The correct fix is never to run the binary net and the species net on the
+ * SAME window (see recognizer.c, binary_pending) — the worst-case inference
+ * time then stays at 190 ms, which this ring handles without growing at all.
  */
 #define PB_AUDIO_RING_SAMPLES  8192
 
 /**
- * Tek çağrıda okunabilecek en büyük öbek.
+ * The largest chunk that can be read in one call.
  *
- * Halka boyutuna BAĞLANMADI (eskiden RING/2 idi): teşhis komutlarının
- * yakalama tamponu `s_chunk` bu sabitle boyutlanıyor ve halkayı büyütmek
- * onu da büyütürdü — §9g'de 96 KB'dan 4 KB'a indirilen tampon bu.
+ * Deliberately NOT tied to the ring size (it used to be RING/2): the
+ * diagnostic commands size their capture buffer `s_chunk` from this constant,
+ * so growing the ring would have grown that too — this is the buffer that was
+ * cut from 96 KB to 4 KB.
  */
 #define PB_AUDIO_MAX_READ      2048
 
 /**
- * MCLK'i başlat, I2S yakalama yolunu kur ve sürekli yakalamayı başlat.
- * ES8311 I2C üzerinden ayrı olarak yapılandırılmalıdır (es8311_init).
- * MCLK'in ES8311 yapılandırılmadan ÖNCE çalışıyor olması gerekir — codec'in
- * dahili PLL'i MCLK olmadan register yazımlarına düzgün tepki vermez.
+ * Start MCLK, set up the I2S capture path and begin continuous capture.
+ * The ES8311 must be configured separately over I2C (es8311_init). MCLK has
+ * to be running BEFORE the ES8311 is configured — the codec's internal PLL
+ * does not respond properly to register writes without it.
  */
 bool pb_audio_i2s_init(const pb_audio_cfg_t *cfg);
 
-/** MCLK'i tek başına başlat (ES8311 yapılandırmasından önce çağrılır). */
+/** Start MCLK on its own (called before configuring the ES8311). */
 bool pb_audio_mclk_start(const pb_audio_cfg_t *cfg);
 
-/* ── Sürekli yakalama ──────────────────────────────────────────────────────
+/* ── Continuous capture ────────────────────────────────────────────────────
  *
- * DMA hiç durmadan halka tamponunu doldurur; tüketici kendi hızında okur.
- * Okuma ile bir sonraki okuma arasında geçen sürede örnek KAYBOLMAZ — işlem
- * süresi halkanın kapasitesini (170 ms) aşmadığı sürece.
+ * DMA fills the ring buffer without ever stopping and the consumer reads at
+ * its own pace. No samples are LOST between one read and the next, as long as
+ * the processing time stays within the ring's capacity.
  *
- * Neden böyle: eski `pb_audio_capture` her çağrıda FIFO'yu boşaltıp sıfırdan
- * DMA başlatıyordu. Aradaki işlem süresi boyunca gelen örnekler PIO'nun 8
- * kelimelik FIFO'sunu taşırıp düşüyordu; mel hattı bu yüzden gerçek zamanın
- * ancak %91'inde koşabiliyordu (62.5 yerine ~57 kare/s).
+ * Why it works this way: the old `pb_audio_capture` flushed the FIFO and
+ * restarted DMA from scratch on every call. Samples arriving during the
+ * processing gap overflowed the PIO's 8-word FIFO and were dropped, which is
+ * why the mel pipeline could only run at 91% of real time (about 57 fps
+ * instead of 62.5).
  */
 
-/** Sürekli yakalamayı başlat. `pb_audio_i2s_init` zaten çağırıyor. */
+/** Start continuous capture. `pb_audio_i2s_init` already calls this. */
 bool pb_audio_stream_start(void);
 
-/** Sürekli yakalamayı durdur (DMA zinciri kırılır, PIO çalışmaya devam eder). */
+/** Stop continuous capture (the DMA chain breaks, PIO keeps running). */
 void pb_audio_stream_stop(void);
 
 /**
- * Birikmiş örnekleri at, en tazeden devam et.
- * Canlı göstergeler (seviye, spektrogram) için: gecikmiş veriyi göstermek
- * yerine güncel olana atlarlar. Mel hattı bunu ÇAĞIRMAZ — sürekliliğe
- * ihtiyacı var.
+ * Discard whatever has accumulated and continue from the freshest sample.
+ * For live indicators (level, spectrogram): rather than showing stale data
+ * they jump to the current point. The mel pipeline does NOT call this — it
+ * needs continuity.
  */
 void pb_audio_stream_flush(void);
 
-/** Halkada okunmayı bekleyen örnek sayısı. */
+/** How many samples are waiting to be read in the ring. */
 uint32_t pb_audio_stream_available(void);
 
 /**
- * Akıştan `n_samples` örnek oku (en fazla PB_AUDIO_MAX_READ).
- * Yeterli örnek birikene kadar bekler; `timeout_ms` içinde birikmezse
- * `timed_out` ile döner (saat yok demektir).
+ * Read `n_samples` samples from the stream (at most PB_AUDIO_MAX_READ).
+ * Waits until enough samples accumulate; if they do not within `timeout_ms`
+ * it returns with `timed_out` set (which means there is no clock).
  *
- * Tüketici halkanın kapasitesi kadar geride kalırsa en eski örnekler
- * yazıcı tarafından ezilir: bu durumda okuma en tazeye atlar ve
- * `fifo_overrun` ile bildirir — sessizce bozuk veri döndürmez.
+ * If the consumer falls a full ring behind, the oldest samples are overwritten
+ * by the writer. In that case the read jumps to the freshest data and reports
+ * `fifo_overrun` — it never silently returns corrupt data.
  */
 pb_capture_result_t pb_audio_stream_read(int16_t *dst, uint32_t n_samples,
                                          uint32_t timeout_ms);
 
 /**
- * Kolaylık sarmalayıcısı: birikmişi at, ardından `n_samples` örneği
- * kesintisiz oku. `n_samples` halkadan büyük olabilir — okuma gerçek zamandan
- * hızlı olduğu için halka dolup taşmaz.
+ * Convenience wrapper: discard the backlog, then read `n_samples` samples
+ * without interruption. `n_samples` may exceed the ring size — because
+ * reading is faster than real time, the ring never overflows.
  *
- * Teşhis komutları için; gerçek zamanlı hat `pb_audio_stream_read` kullanır.
+ * For the diagnostic commands; the real-time pipeline uses
+ * `pb_audio_stream_read`.
  */
 pb_capture_result_t pb_audio_capture(int16_t *dst, uint32_t n_samples);
 

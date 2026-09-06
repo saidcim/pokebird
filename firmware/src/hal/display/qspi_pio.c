@@ -30,10 +30,10 @@
 #include "pico/stdlib.h"
 #include "hardware/timer.h"
 
-/* POKEBIRD teshis sayaclari — bkz. lastsession.md §9n.
+/* POKEBIRD diagnostic counters.
  *
  * QSPI_WaitIdle'in 50 ms'lik zaman asimi SESSIZ: zaman asimina girerse
- * hicbir sey beklemeden doner ve §5.9'un hatasi geri gelir (CS, veri hatta
+ * returns without waiting for anything and the old bug returns (CS goes
  * cikmadan yukselir). "Bekleme gercekten calisiyor mu" sorusunu ekrana
  * bakmadan yanitlayabilmek icin sayiliyor.
  *
@@ -128,7 +128,7 @@ Zaman asimi var: SM kapaliysa TXSTALL hic kurulmaz, sonsuz donguye girmeyelim.
 void QSPI_WaitIdle(pio_qspi_t qspi){
     const uint32_t stall = 1u << (PIO_FDEBUG_TXSTALL_LSB + qspi.sm);
 
-    /* --- TESHIS (§9n) — fonksiyon gercekten bekliyor mu? -------------------
+    /* --- DIAGNOSTIC: is this function actually waiting? -------------------
      * Girerken FIFO'da bayt varsa bekleme GEREKLI demektir; cikarken hala
      * varsa bekleme ISE YARAMAMIS demektir. Ikisi de sayiliyor. */
     pb_qspi_wait_calls++;
@@ -203,7 +203,7 @@ function : QSPI PIO'yu bit-bang testinden sonra geri al  (POKEBIRD eklemesi)
 Bit-bang teshisi (cmd_display_test'in 4. varyanti, `v`'nin 6. adimi) SCLK ve
 D0..D3'u gpio_set_function(SIO) ile PIO'nun elinden aliyor ve SM'i kapatiyor.
 Geri vermeyi kimse yapmiyordu: bit-bang'den SONRA calistirilan her ekran testi
-sahte bicimde "bozuk" gorunuyordu (lastsession.md §9n'deki uyari).
+looked spuriously "corrupt".
 
 pio_add_program'i TEKRAR CAGIRMIYORUZ; yalnizca pin islevleri, SM
 yapilandirmasi ve FIFO'lar sifirlaniyor.
