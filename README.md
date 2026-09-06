@@ -37,7 +37,8 @@ Listening for 8 seconds instead of 3 seconds raises top-1 from 58% to 70% and co
 
 
 ## Hardware
-I used Waveshare [RP2350B (dual Cortex-M33 @ 150 MHz, 520 KB SRAM, no PSRAM)](https://www.waveshare.com/rp2350-touch-lcd-3.49.htm) 
+I used Waveshare [RP2350-Touch-LCD-3.49](https://www.waveshare.com/rp2350-touch-lcd-3.49.htm)
+module (RP2350B: dual Cortex-M33 @ 150 MHz, 520 KB SRAM, no PSRAM) 
 module for this project since it has a Built-in LCD, Onboard ES8311 audio codec, Microphone and TF card slot.
 
 ## How it works
