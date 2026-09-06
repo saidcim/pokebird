@@ -105,7 +105,7 @@ def main():
     ap.add_argument("--result", default=RESULT_DIR)
     ap.add_argument("--wav", default=WAV_DIR)
     ap.add_argument("--name-map", default=os.path.join(DATA, "birdnet_ad_haritasi.csv"))
-    ap.add_argument("--out", default=os.path.join(DATA, "segmentler.csv"))
+    ap.add_argument("--out", default=os.path.join(DATA, "segments.csv"))
     ap.add_argument(
         "--zayif-threshold", type=int, default=100,
         help="bu sayidan az dilimi olan turler zayif diye bildirilir"

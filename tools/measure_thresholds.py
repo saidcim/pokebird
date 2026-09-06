@@ -36,8 +36,8 @@ import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAIN = os.path.join(ROOT, "data", "egitim")
-MODELLER = os.path.join(ROOT, "models")
-ONBELLEK = os.path.join(MODELLER, "test_olasilik.npy")
+MODELS = os.path.join(ROOT, "models")
+CACHE = csv_compat.resolve(os.path.join(MODELS, "test_probs.npy"))
 
 NEGATIVE = 178          # siniflar.csv'nin son sinifi: negatif / bilinmiyor
 WINDOW = 8            # cihazdaki birlestirme penceresi (PB_VOTE_WINDOWS)
@@ -92,13 +92,13 @@ def pick(row, target_isabet):
 
 
 def main():
-    if not os.path.exists(ONBELLEK):
-        sys.exit(f"{ONBELLEK} yok — once .venv-birdnet ile "
+    if not os.path.exists(CACHE):
+        sys.exit(f"{CACHE} yok — once .venv-birdnet ile "
                  "tools/measure_voting.py calistirin (onbellegi o uretiyor).")
 
-    P = np.load(ONBELLEK)
-    y = np.load(os.path.join(TRAIN, "etiket.npy"))
-    with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
+    P = np.load(CACHE)
+    y = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy")))
+    with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
         r = list(csv_compat.reader(f))
 
     idx = np.array([i for i, x in enumerate(r) if x["split"] == "test"])
@@ -162,7 +162,7 @@ def main():
 
     text = "\n".join(s)
     print("\n" + text)
-    with open(os.path.join(MODELLER, "esik.txt"), "w", encoding="utf-8") as f:
+    with open(os.path.join(MODELS, "esik.txt"), "w", encoding="utf-8") as f:
         f.write(text + "\n")
     return 0
 

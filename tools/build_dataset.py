@@ -202,7 +202,7 @@ def checksum():
 
     # --- gercek bir dilim bul (yoksa sentetik) ---
     sample = None
-    seg = os.path.join(DATA, "segmentler.csv")
+    seg = os.path.join(DATA, "segments.csv")
     if os.path.exists(seg):
         with open(seg, encoding="utf-8") as f:
             for r in csv_compat.reader(f):
@@ -299,9 +299,9 @@ def output_verify(out, n):
     yanlis turle etiketlenir ve HICBIR SEY hata vermez — model sadece
     ogrenemez. Bu yuzden kalici bir kip.
     """
-    X = np.load(os.path.join(out, "pencereler.npy"), mmap_mode="r")
-    y = np.load(os.path.join(out, "etiket.npy"))
-    with open(os.path.join(out, "ornekler.csv"), encoding="utf-8") as f:
+    X = np.load(csv_compat.resolve(os.path.join(out, "windows.npy")), mmap_mode="r")
+    y = np.load(csv_compat.resolve(os.path.join(out, "labels.npy")))
+    with open(csv_compat.resolve(os.path.join(out, "samples.csv")), encoding="utf-8") as f:
         rows = list(csv_compat.reader(f))
 
     if len(rows) != len(X) or len(y) != len(X):
@@ -375,7 +375,7 @@ def listen(out, n):
     dogrudan gozlem dinlemekti; egitim kumesinde de oyle: dosya adinda tur,
     bolum ve guven yaziyor, dinleyip etiketle karsilastirin.
     """
-    with open(os.path.join(out, "ornekler.csv"), encoding="utf-8") as f:
+    with open(csv_compat.resolve(os.path.join(out, "samples.csv")), encoding="utf-8") as f:
         rows = list(csv_compat.reader(f))
     d = os.path.join(out, "ornek_ses")
     os.makedirs(d, exist_ok=True)
@@ -549,7 +549,7 @@ def main():
     kisi = kaydedenler()
 
     # ---- 5.1 dilim listesi ----
-    seg = os.path.join(DATA, "segmentler.csv")
+    seg = os.path.join(DATA, "segments.csv")
     if not os.path.exists(seg):
         sys.exit(f"{seg} yok — once tools/birdnet_summary.py")
 
@@ -631,7 +631,7 @@ def main():
 
     # ---- 5.4 cikarim ----
     os.makedirs(a.out, exist_ok=True)
-    X = np.lib.format.open_memmap(os.path.join(a.out, "pencereler.npy"), mode="w+",
+    X = np.lib.format.open_memmap(os.path.join(a.out, "windows.npy"), mode="w+",
                                   dtype=np.int8, shape=(total, FRAMES, N_MELS))
     y = np.zeros(total, dtype=np.int16)
     T = np.zeros((total, len(kodlar)), dtype=np.float16)
@@ -707,7 +707,7 @@ def main():
     X.flush()
     del X
     if write != total:
-        old = np.load(os.path.join(a.out, "pencereler.npy"), mmap_mode="r")
+        old = np.load(csv_compat.resolve(os.path.join(a.out, "windows.npy")), mmap_mode="r")
         fresh = np.lib.format.open_memmap(
             os.path.join(a.out, "pencereler.tmp.npy"), mode="w+",
             dtype=np.int8, shape=(write, FRAMES, N_MELS))
@@ -717,17 +717,17 @@ def main():
         fresh.flush()
         del fresh, old
         os.replace(os.path.join(a.out, "pencereler.tmp.npy"),
-                   os.path.join(a.out, "pencereler.npy"))
-    np.save(os.path.join(a.out, "etiket.npy"), y[:write])
-    np.save(os.path.join(a.out, "ogretmen.npy"), T[:write])
+                   os.path.join(a.out, "windows.npy"))
+    np.save(os.path.join(a.out, "labels.npy"), y[:write])
+    np.save(os.path.join(a.out, "teacher.npy"), T[:write])
 
-    with open(os.path.join(a.out, "ornekler.csv"), "w", encoding="utf-8",
+    with open(csv_compat.resolve(os.path.join(a.out, "samples.csv")), "w", encoding="utf-8",
               newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
 
-    with open(os.path.join(a.out, "siniflar.csv"), "w", encoding="utf-8",
+    with open(csv_compat.resolve(os.path.join(a.out, "classes.csv")), "w", encoding="utf-8",
               newline="") as f:
         w = csv.writer(f)
         w.writerow(["class_index", "ebird_code", "turkish_name", "birdnet_scientific_name"])
@@ -855,7 +855,7 @@ def rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, total,
 
     text = "\n".join(row)
     print("\n" + text)
-    with open(os.path.join(a.out, "ozet.txt"), "w", encoding="utf-8") as f:
+    with open(csv_compat.resolve(os.path.join(a.out, "summary.txt")), "w", encoding="utf-8") as f:
         f.write(text + "\n")
     print(f"\n-> {a.out}")
 

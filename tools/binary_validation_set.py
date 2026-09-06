@@ -31,7 +31,7 @@ import csv_compat  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRAIN = ROOT / "data" / "egitim"
-MODEL = ROOT / "models" / "ikili_agi_int8.tflite"
+MODEL = csv_compat.resolve(ROOT / "models" / "binary_net_int8.tflite")
 OUTPUT = ROOT / "src" / "ai" / "ikili_dogrulama_seti.h"
 
 KARE, BAND = 187, 64
@@ -40,9 +40,9 @@ COUNT_HER_TARAF = 4   # 4 kus + 4 negatif = 8 pencere
 
 
 def sample_pick(seed: int) -> list[int]:
-    label = np.load(TRAIN / "etiket.npy")
+    label = np.load(csv_compat.resolve(TRAIN / "labels.npy"))
     split = []
-    with open(TRAIN / "ornekler.csv", encoding="utf-8") as f:
+    with open(csv_compat.resolve(TRAIN / "samples.csv"), encoding="utf-8") as f:
         for row in csv_compat.reader(f):
             split.append(row["split"])
     split = np.array(split)
@@ -82,8 +82,8 @@ def main() -> None:
         sys.exit(f"{MODEL} yok — once tools/train_binary.py calistirin.")
 
     selection = sample_pick(20260803)
-    windows = np.load(TRAIN / "pencereler.npy", mmap_mode="r")
-    label = np.load(TRAIN / "etiket.npy")
+    windows = np.load(csv_compat.resolve(TRAIN / "windows.npy"), mmap_mode="r")
+    label = np.load(csv_compat.resolve(TRAIN / "labels.npy"))
 
     # BUILTIN_REF — dogrulama_seti.py'deki uyarinin aynisi: XNNPACK int8'i
     # bit-birebir hesaplamiyor (olculdu, M6 §9l), altin standart REF cekirdek.

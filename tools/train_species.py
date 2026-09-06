@@ -57,7 +57,7 @@ import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAIN = os.path.join(ROOT, "data", "egitim")
-MODELLER = os.path.join(ROOT, "models")
+MODELS = os.path.join(ROOT, "models")
 
 FRAMES, BANDS = 187, 64
 SIGMA_SCALE = 4.0 / 127.0        # int8 -> sigma; mel.c'deki +-4 sigma yayilimi
@@ -67,12 +67,12 @@ ARENA_BUDGET = 180 * 1024         # ARCHITECTURE §5
 
 # ══ Veri ════════════════════════════════════════════════════════════════
 def data_yukle():
-    X = np.load(os.path.join(TRAIN, "pencereler.npy"), mmap_mode="r")
-    y = np.load(os.path.join(TRAIN, "etiket.npy")).astype(np.int32)
-    T = np.load(os.path.join(TRAIN, "ogretmen.npy")).astype(np.float32)
-    with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
+    X = np.load(csv_compat.resolve(os.path.join(TRAIN, "windows.npy")), mmap_mode="r")
+    y = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy"))).astype(np.int32)
+    T = np.load(csv_compat.resolve(os.path.join(TRAIN, "teacher.npy"))).astype(np.float32)
+    with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
         row = list(csv_compat.reader(f))
-    with open(os.path.join(TRAIN, "siniflar.csv"), encoding="utf-8") as f:
+    with open(csv_compat.resolve(os.path.join(TRAIN, "classes.csv")), encoding="utf-8") as f:
         classes = list(csv_compat.reader(f))
     if not (len(X) == len(y) == len(T) == len(row)):
         sys.exit(f"uzunluklar tutmuyor: X {len(X)} y {len(y)} T {len(T)} "
@@ -295,7 +295,7 @@ def main():
     ap.add_argument("--width", type=float, default=1.0)
     ap.add_argument("--gamma", type=float, default=2.0, help="focal loss")
     ap.add_argument("--kd", type=float, default=0.5, help="damitma agirligi")
-    ap.add_argument("--out", default=MODELLER)
+    ap.add_argument("--out", default=MODELS)
     a = ap.parse_args()
 
     os.makedirs(a.out, exist_ok=True)
@@ -359,8 +359,8 @@ def main():
         return loss
 
     best = -1.0
-    path = os.path.join(a.out, "tur_agi.keras")
-    pano = os.path.join(a.out, "ilerleme.html")
+    path = os.path.join(a.out, "species_net.keras")
+    pano = os.path.join(a.out, "progress.html")
     bilgi = (f"{par:,} parametre · {mac / 1e6:.1f} MMAC · "
              f"{len(idx['egitim'])} egitim / {len(idx['dogrulama'])} dogrulama")
     history = []
@@ -422,7 +422,7 @@ def quantize(model, X, train_idx, out):
     d.inference_output_type = tf.int8
     tfl = d.convert()
 
-    path = os.path.join(out, "tur_agi_int8.tflite")
+    path = os.path.join(out, "species_net_int8.tflite")
     with open(path, "wb") as f:
         f.write(tfl)
 

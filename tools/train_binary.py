@@ -64,7 +64,7 @@ import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAIN = os.path.join(ROOT, "data", "egitim")
-MODELLER = os.path.join(ROOT, "models")
+MODELS = os.path.join(ROOT, "models")
 
 FRAMES, BANDS = 187, 64
 SIGMA_SCALE = 4.0 / 127.0
@@ -74,9 +74,9 @@ SIZE_BUDGET = 15 * 1024     # ARCHITECTURE §4
 
 
 def data_yukle():
-    X = np.load(os.path.join(TRAIN, "pencereler.npy"), mmap_mode="r")
-    y_species = np.load(os.path.join(TRAIN, "etiket.npy")).astype(np.int32)
-    with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
+    X = np.load(csv_compat.resolve(os.path.join(TRAIN, "windows.npy")), mmap_mode="r")
+    y_species = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy"))).astype(np.int32)
+    with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
         row = list(csv_compat.reader(f))
     if not (len(X) == len(y_species) == len(row)):
         sys.exit(f"uzunluklar tutmuyor: X {len(X)} y {len(y_species)} "
@@ -222,7 +222,7 @@ def main():
     ap.add_argument("--width", type=float, default=1.0)
     ap.add_argument("--weight", type=float, default=0.0,
                     help="negatif sinif agirligi; 0 = olculen 16,5 kullan")
-    ap.add_argument("--out", default=MODELLER)
+    ap.add_argument("--out", default=MODELS)
     a = ap.parse_args()
 
     os.makedirs(a.out, exist_ok=True)
@@ -279,7 +279,7 @@ def main():
         return loss
 
     best = -1.0
-    path = os.path.join(a.out, "ikili_agi.keras")
+    path = os.path.join(a.out, "binary_net.keras")
     history = []
     basladi = time.time()
     for epochs in range(1, a.epochs + 1):
@@ -342,7 +342,7 @@ def quantize(model, X, train_idx, out):
     d.inference_output_type = tf.int8
     tfl = d.convert()
 
-    path = os.path.join(out, "ikili_agi_int8.tflite")
+    path = os.path.join(out, "binary_net_int8.tflite")
     with open(path, "wb") as f:
         f.write(tfl)
 

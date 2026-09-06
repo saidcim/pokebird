@@ -40,7 +40,7 @@ import csv_compat  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRAIN = ROOT / "data" / "egitim"
-MODEL = ROOT / "models" / "tur_agi_int8.tflite"
+MODEL = csv_compat.resolve(ROOT / "models" / "species_net_int8.tflite")
 OUTPUT = ROOT / "src" / "ai" / "dogrulama_seti.h"
 
 KARE = 187
@@ -58,9 +58,9 @@ def sample_pick(count: int, seed: int) -> list[int]:
     yol (global ortalama → tam bağlı) diğerlerinden farklı bir aktivasyon
     aralığı görüyor.
     """
-    label = np.load(TRAIN / "etiket.npy")
+    label = np.load(csv_compat.resolve(TRAIN / "labels.npy"))
     split = []
-    with open(TRAIN / "ornekler.csv", encoding="utf-8") as f:
+    with open(csv_compat.resolve(TRAIN / "samples.csv"), encoding="utf-8") as f:
         for row in csv_compat.reader(f):
             split.append(row["split"])
     split = np.array(split)
@@ -109,11 +109,11 @@ def main() -> None:
         sys.exit(f"{MODEL} yok — once tools/train_species.py calistirin.")
 
     selection = sample_pick(args.count, args.seed)
-    windows = np.load(TRAIN / "pencereler.npy", mmap_mode="r")
-    label = np.load(TRAIN / "etiket.npy")
+    windows = np.load(csv_compat.resolve(TRAIN / "windows.npy"), mmap_mode="r")
+    label = np.load(csv_compat.resolve(TRAIN / "labels.npy"))
 
     name = {}
-    with open(TRAIN / "siniflar.csv", encoding="utf-8") as f:
+    with open(csv_compat.resolve(TRAIN / "classes.csv"), encoding="utf-8") as f:
         for s in csv_compat.reader(f):
             name[int(s["class_index"])] = (s["ebird_code"], s["turkish_name"])
 

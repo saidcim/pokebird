@@ -47,7 +47,7 @@ def cut(source, target, start, end):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--segments", default=os.path.join(DATA, "segmentler.csv"))
+    ap.add_argument("--segments", default=os.path.join(DATA, "segments.csv"))
     ap.add_argument("--wav", default=os.path.join(DATA, "wav"))
     ap.add_argument("--out", default=os.path.join(DATA, "segment_ornek"))
     ap.add_argument("--species", nargs="*", help="yalnizca bu ebird kodlari")

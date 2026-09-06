@@ -36,17 +36,17 @@ import csv_compat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAIN = os.path.join(ROOT, "data", "egitim")
-MODELLER = os.path.join(ROOT, "models")
-TFLITE = os.path.join(MODELLER, "tur_agi_int8.tflite")
-ONBELLEK = os.path.join(MODELLER, "test_olasilik.npy")
+MODELS = os.path.join(ROOT, "models")
+TFLITE = csv_compat.resolve(os.path.join(MODELS, "species_net_int8.tflite"))
+CACHE = csv_compat.resolve(os.path.join(MODELS, "test_probs.npy"))
 
 
 def olasiliklar(idx, X):
     """Test penceresi basina softmax. Bir kez hesaplanip onbellege alinir."""
-    if os.path.exists(ONBELLEK):
-        P = np.load(ONBELLEK)
+    if os.path.exists(CACHE):
+        P = np.load(CACHE)
         if len(P) == len(idx):
-            print(f"onbellekten okundu: {ONBELLEK}")
+            print(f"onbellekten okundu: {CACHE}")
             return P
     it = tf.lite.Interpreter(model_path=TFLITE, num_threads=10)
     it.allocate_tensors()
@@ -61,19 +61,19 @@ def olasiliklar(idx, X):
         P[k] = e / e.sum()
         if k % 1000 == 0:
             print(f"  {k}/{len(idx)}", flush=True)
-    np.save(ONBELLEK, P)
+    np.save(CACHE, P)
     return P
 
 
 def main():
     if not os.path.exists(TFLITE):
         sys.exit(f"{TFLITE} yok — once tools/train_species.py")
-    X = np.load(os.path.join(TRAIN, "pencereler.npy"), mmap_mode="r")
-    y = np.load(os.path.join(TRAIN, "etiket.npy"))
-    with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
+    X = np.load(csv_compat.resolve(os.path.join(TRAIN, "windows.npy")), mmap_mode="r")
+    y = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy")))
+    with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
         r = list(csv_compat.reader(f))
     name = {int(s["class_index"]): s["turkish_name"] for s in
-          csv_compat.reader(open(os.path.join(TRAIN, "siniflar.csv"),
+          csv_compat.reader(open(csv_compat.resolve(os.path.join(TRAIN, "classes.csv")),
                               encoding="utf-8"))}
 
     idx = np.array([i for i, x in enumerate(r) if x["split"] == "test"])
@@ -130,7 +130,7 @@ def main():
 
     text = "\n".join(s)
     print("\n" + text)
-    with open(os.path.join(MODELLER, "birlestirme.txt"), "w",
+    with open(os.path.join(MODELS, "birlestirme.txt"), "w",
               encoding="utf-8") as f:
         f.write(text + "\n")
     return 0

@@ -74,3 +74,47 @@ def rows(path, encoding="utf-8"):
     """Convenience: read a whole CSV into a list of dicts."""
     with open(path, encoding=encoding) as f:
         return list(reader(f))
+
+
+# ── Generated artifact names ──────────────────────────────────────────────
+#
+# The pipeline's generated files were named in Turkish. They now have English
+# names, but an existing data/ or models/ directory from an earlier run still
+# holds the old ones, so `resolve()` falls back to the legacy name when the
+# current one is absent. Writers always use the current name.
+
+import os as _os
+
+LEGACY_FILES = {
+    "windows.npy": "pencereler.npy",
+    "labels.npy": "etiket.npy",
+    "teacher.npy": "ogretmen.npy",
+    "samples.csv": "ornekler.csv",
+    "classes.csv": "siniflar.csv",
+    "summary.txt": "ozet.txt",
+    "segments.csv": "segmentler.csv",
+    "test_probs.npy": "test_olasilik.npy",
+    "progress.html": "ilerleme.html",
+    "species_net_int8.tflite": "tur_agi_int8.tflite",
+    "binary_net_int8.tflite": "ikili_agi_int8.tflite",
+    "species_net.keras": "tur_agi.keras",
+    "binary_net.keras": "ikili_agi.keras",
+}
+
+
+def resolve(path):
+    """Return `path`, or its legacy-named equivalent if only that exists.
+
+    Accepts str or pathlib.Path and returns the same type it was given.
+    """
+    p = str(path)
+    if _os.path.exists(p):
+        return path
+    base = _os.path.basename(p)
+    legacy = LEGACY_FILES.get(base)
+    if not legacy:
+        return path
+    alt = _os.path.join(_os.path.dirname(p), legacy)
+    if _os.path.exists(alt):
+        return type(path)(alt) if not isinstance(path, str) else alt
+    return path
