@@ -25,6 +25,10 @@ import sys
 
 import numpy as np
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRAIN = ROOT / "data" / "egitim"
 MODEL = ROOT / "models" / "ikili_agi_int8.tflite"
@@ -39,8 +43,8 @@ def sample_pick(seed: int) -> list[int]:
     label = np.load(TRAIN / "etiket.npy")
     split = []
     with open(TRAIN / "ornekler.csv", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            split.append(row["bolum"])
+        for row in csv_compat.reader(f):
+            split.append(row["split"])
     split = np.array(split)
 
     test = np.flatnonzero(split == "test")

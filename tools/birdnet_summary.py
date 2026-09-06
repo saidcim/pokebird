@@ -37,6 +37,10 @@ import sys
 import wave
 from collections import defaultdict
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 WAV_DIR = os.path.join(DATA, "wav")
@@ -73,7 +77,7 @@ def species_haritasi(map_yolu):
     with open(map_yolu, encoding="utf-8") as f:
         return {
             r["ebird_code"]: (r["birdnet_scientific_name"], r["turkish_name"])
-            for r in csv.DictReader(f)
+            for r in csv_compat.reader(f)
         }
 
 
@@ -89,7 +93,7 @@ def file_oku(path):
     """sonuc CSV -> {(bas, bit): [(bilimsel_ad, guven), ...]}"""
     slice = defaultdict(list)
     with open(path, encoding="utf-8") as f:
-        for r in csv.DictReader(f):
+        for r in csv_compat.reader(f):
             slice[(float(r["Start (s)"]), float(r["End (s)"]))].append(
                 (r["Scientific name"], float(r["Confidence"]))
             )
@@ -127,8 +131,8 @@ def main():
     with open(a.out, "w", encoding="utf-8", newline="") as f:
         y = csv.writer(f)
         y.writerow([
-            "ebird_code", "file", "baslangic", "bitis", "hedef_guven",
-            "best_species", "en_iyi_guven", "kus_disi_tur", "kus_disi_guven",
+            "ebird_code", "file", "start", "end", "target_confidence",
+            "best_species", "best_confidence", "non_bird_species", "non_bird_confidence",
         ])
 
         for code in species:

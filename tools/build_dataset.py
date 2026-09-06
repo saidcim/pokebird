@@ -77,6 +77,7 @@ from collections import defaultdict
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
 from mel_reference import (  # noqa: E402  — parametrelerin TEK kaynagi
     DB_MAX, DB_MIN, N_FFT, N_MELS, SR, mel_filterbank, power_spectrum,
     quantize_db,
@@ -204,12 +205,12 @@ def checksum():
     seg = os.path.join(DATA, "segmentler.csv")
     if os.path.exists(seg):
         with open(seg, encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                if float(r["hedef_guven"]) >= 0.9:
+            for r in csv_compat.reader(f):
+                if float(r["target_confidence"]) >= 0.9:
                     y = os.path.join(DATA, "wav", r["ebird_code"], r["file"] + ".wav")
                     if os.path.exists(y):
                         s = wav_oku(y)
-                        b = int(round(float(r["baslangic"]) * SR))
+                        b = int(round(float(r["start"]) * SR))
                         if len(s) >= b + WINDOW_SAMPLES:
                             sample = s[b:b + WINDOW_SAMPLES]
                             print(f"girdi: {r['ebird_kodu']}/{r['dosya']} "
@@ -245,12 +246,12 @@ def checksum():
     with tempfile.TemporaryDirectory() as d:
         raw = os.path.join(d, "dilim.s16")
         sample[:WINDOW_SAMPLES].astype("<i2").tofile(raw)
-        output = subprocess.run([exe, "--pencere", raw], capture_output=True,
+        output = subprocess.run([exe, "--window", raw], capture_output=True,
                                text=True, check=True).stdout
 
     c = np.zeros((FRAMES, N_MELS), dtype=np.int16)
-    for r in csv.DictReader(output.splitlines()):
-        c[int(r["kare"]), int(r["bant"])] = int(r["q"])
+    for r in csv_compat.reader(output.splitlines()):
+        c[int(r["frame"]), int(r["band"])] = int(r["q"])
 
     d = np.abs(c.astype(int) - py.astype(int))
     esit = (d == 0).mean()
@@ -283,7 +284,7 @@ def _row_audio(s):
     if s["ebird_code"] == NEGATIVE_CODE:
         record = os.path.join(DATA, "negatif", "esc50_kayitlar.csv")
         with open(record, encoding="utf-8") as f:
-            for r in csv.DictReader(f):
+            for r in csv_compat.reader(f):
                 if os.path.basename(r["file"]) == s["file"]:
                     return os.path.join(ROOT, r["file"])
         return None
@@ -301,7 +302,7 @@ def output_verify(out, n):
     X = np.load(os.path.join(out, "pencereler.npy"), mmap_mode="r")
     y = np.load(os.path.join(out, "etiket.npy"))
     with open(os.path.join(out, "ornekler.csv"), encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+        rows = list(csv_compat.reader(f))
 
     if len(rows) != len(X) or len(y) != len(X):
         print(f"KALDI: uzunluklar tutmuyor — csv {len(rows)}, "
@@ -319,9 +320,9 @@ def output_verify(out, n):
     for s in rows:
         if s["ebird_code"] == NEGATIVE_CODE:
             continue
-        record_split[(s["ebird_code"], s["file"])].add(s["bolum"])
-        if s["kaydeden"]:
-            kisi_split[(s["ebird_code"], s["kaydeden"])].add(s["bolum"])
+        record_split[(s["ebird_code"], s["file"])].add(s["split"])
+        if s["recordist"]:
+            kisi_split[(s["ebird_code"], s["recordist"])].add(s["split"])
     bol_record = [k for k, v in record_split.items() if len(v) > 1]
     bol_kisi = [k for k, v in kisi_split.items() if len(v) > 1]
     print(f"sizinti · birden fazla bolumde olan kayit : {len(bol_record)}  (0 olmali)")
@@ -340,13 +341,13 @@ def output_verify(out, n):
     ayni = kontrol = 0
     for i in sorted(selection.tolist()):
         s = rows[i]
-        if int(s["indeks"]) != i:
+        if int(s["index"]) != i:
             print(f"KALDI: satir {i} indeks sutununda {s['indeks']} yaziyor")
             return 1
         path = _row_audio(s)
         if not path or not os.path.exists(path):
             continue
-        start = int(s["pencere_ornek"])
+        start = int(s["window_samples"])
         p, _ = mel_penceresi(wav_oku(path)[start:start + WINDOW_SAMPLES])
         kontrol += 1
         if np.array_equal(p, X[i]):
@@ -375,7 +376,7 @@ def listen(out, n):
     bolum ve guven yaziyor, dinleyip etiketle karsilastirin.
     """
     with open(os.path.join(out, "ornekler.csv"), encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+        rows = list(csv_compat.reader(f))
     d = os.path.join(out, "ornek_ses")
     os.makedirs(d, exist_ok=True)
     rng = np.random.default_rng(1)
@@ -384,7 +385,7 @@ def listen(out, n):
         path = _row_audio(s)
         if not path or not os.path.exists(path):
             continue
-        start = int(s["pencere_ornek"])
+        start = int(s["window_samples"])
         audio = wav_oku(path)[start:start + WINDOW_SAMPLES]
         name = (f"{s['indeks']}_{s['ebird_kodu']}_{s['bolum']}"
               f"{'_BULASIK' if s['bulasik'] == '1' else ''}"
@@ -423,7 +424,7 @@ def species_haritasi():
     if not os.path.exists(path):
         sys.exit(f"ad haritasi yok: {path} — once tools/birdnet_slist.py (§5.16)")
     with open(path, encoding="utf-8") as f:
-        r = list(csv.DictReader(f))
+        r = list(csv_compat.reader(f))
     return ({x["ebird_code"]: x["birdnet_scientific_name"] for x in r},
             {x["ebird_code"]: x["turkish_name"] for x in r},
             {x["ebird_code"]: x["our_scientific_name"] for x in r})
@@ -437,8 +438,8 @@ def kaydedenler():
               f"(kisi bazinda degil)")
         return {}
     with open(path, encoding="utf-8") as f:
-        return {os.path.splitext(os.path.basename(r["file"]))[0]: r["kaydeden"]
-                for r in csv.DictReader(f)}
+        return {os.path.splitext(os.path.basename(r["file"]))[0]: r["recordist"]
+                for r in csv_compat.reader(f)}
 
 
 def ogretmen_oku(path, cls_indeks, name_cls):
@@ -447,7 +448,7 @@ def ogretmen_oku(path, cls_indeks, name_cls):
     if not os.path.exists(path):
         return d
     with open(path, encoding="utf-8") as f:
-        for r in csv.DictReader(f):
+        for r in csv_compat.reader(f):
             i = name_cls.get(r["Scientific name"])
             if i is not None:
                 key = (round(float(r["Start (s)"]), 1), round(float(r["End (s)"]), 1))
@@ -556,13 +557,13 @@ def main():
     candidate = []            # (kod, dosya, baslangic, hedef_guven, bulasik, en_iyi..)
     threshold_alti = loss_wav = kisa = 0
     with open(seg, encoding="utf-8") as f:
-        for r in csv.DictReader(f):
+        for r in csv_compat.reader(f):
             code = r["ebird_code"]
             if a.species and code not in a.species:
                 continue
             if code not in cls_indeks:
                 continue
-            if float(r["hedef_guven"]) < a.threshold:
+            if float(r["target_confidence"]) < a.threshold:
                 threshold_alti += 1
                 continue
             path = os.path.join(DATA, "wav", code, r["file"] + ".wav")
@@ -579,14 +580,14 @@ def main():
             # yine pencerenin icinde kalir, veri kaybedilmez. Sifir doldurmak
             # yerine bu tercih edildi — sifir bandi mel'de -90 dB'lik yapay
             # bir blok yapar ve pencere normalizasyonunu bozar.
-            start = int(round(float(r["baslangic"]) * SR))
+            start = int(round(float(r["start"]) * SR))
             start = max(0, min(start, n - WINDOW_SAMPLES))
             contaminated = int(r["best_species"] != birdnet_name[code])
             if contaminated and a.contaminated == "at":
                 continue
-            candidate.append((code, r["file"], start, float(r["baslangic"]),
-                         float(r["hedef_guven"]), contaminated,
-                         r["best_species"], float(r["en_iyi_guven"] or 0)))
+            candidate.append((code, r["file"], start, float(r["start"]),
+                         float(r["target_confidence"]), contaminated,
+                         r["best_species"], float(r["best_confidence"] or 0)))
             if a.limit and len(candidate) >= a.limit:
                 break
 
@@ -666,13 +667,13 @@ def main():
             for j, c in ogr.get((round(start_sn, 1), round(start_sn + 3.0, 1)), {}).items():
                 T[write, j] = c
             rows.append({
-                "indeks": write, "class_index": cls_indeks[code], "ebird_code": code,
+                "index": write, "class_index": cls_indeks[code], "ebird_code": code,
                 "turkish_name": turkce[code], "file": file,
-                "baslangic": f"{start_sn:.1f}", "pencere_ornek": start,
-                "bolum": split_of[i], "bulasik": contaminated,
-                "hedef_guven": f"{guven:.4f}", "best_species": best,
-                "en_iyi_guven": f"{max_iyi_g:.4f}",
-                "kaydeden": kisi.get(file, ""),
+                "start": f"{start_sn:.1f}", "window_samples": start,
+                "split": split_of[i], "bulasik": contaminated,
+                "target_confidence": f"{guven:.4f}", "best_species": best,
+                "best_confidence": f"{max_iyi_g:.4f}",
+                "recordist": kisi.get(file, ""),
             })
             write += 1
         if sayac % 500 == 0:
@@ -694,11 +695,11 @@ def main():
         X[write] = p
         y[write] = negative_indeks
         rows.append({
-            "indeks": write, "class_index": negative_indeks, "ebird_code": NEGATIVE_CODE,
+            "index": write, "class_index": negative_indeks, "ebird_code": NEGATIVE_CODE,
             "turkish_name": kategori, "file": os.path.basename(path),
-            "baslangic": f"{ofset / SR:.1f}", "pencere_ornek": ofset,
-            "bolum": split, "bulasik": 0, "hedef_guven": "",
-            "best_species": "", "en_iyi_guven": "", "kaydeden": "ESC-50",
+            "start": f"{ofset / SR:.1f}", "window_samples": ofset,
+            "split": split, "bulasik": 0, "target_confidence": "",
+            "best_species": "", "best_confidence": "", "recordist": "ESC-50",
         })
         write += 1
 
@@ -764,7 +765,7 @@ def negative_listesi(a, name_cls):
                     continue
                 highest = 0.0
                 with open(os.path.join(root, d), encoding="utf-8") as f:
-                    for r in csv.DictReader(f):
+                    for r in csv_compat.reader(f):
                         if r["Scientific name"] in name_cls:
                             highest = max(highest, float(r["Confidence"]))
                 dirty[d.replace(".BirdNET.results.csv", ".wav")] = highest
@@ -776,7 +777,7 @@ def negative_listesi(a, name_cls):
 
     out, elenen = [], 0
     with open(record, encoding="utf-8") as f:
-        for r in csv.DictReader(f):
+        for r in csv_compat.reader(f):
             name = os.path.basename(r["file"])
             if dirty.get(name, 0.0) >= a.negative_bird_threshold:
                 elenen += 1
@@ -803,8 +804,8 @@ def rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, total,
     species_split = defaultdict(lambda: defaultdict(int))
     contaminated_count = defaultdict(int)
     for s in rows:
-        split_count[s["bolum"]] += 1
-        species_split[s["ebird_code"]][s["bolum"]] += 1
+        split_count[s["split"]] += 1
+        species_split[s["ebird_code"]][s["split"]] += 1
         if s["bulasik"]:
             contaminated_count[s["ebird_code"]] += 1
 

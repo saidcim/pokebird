@@ -439,7 +439,7 @@ int main(int argc, char **argv) {
         dump_frame();
         return 0;
     }
-    if (argc > 2 && strcmp(argv[1], "--pencere") == 0) {
+    if (argc > 2 && strcmp(argv[1], "--window") == 0) {
         return dump_window(argv[2]);
     }
 

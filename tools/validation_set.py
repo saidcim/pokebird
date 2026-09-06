@@ -34,6 +34,10 @@ import sys
 
 import numpy as np
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRAIN = ROOT / "data" / "egitim"
 MODEL = ROOT / "models" / "tur_agi_int8.tflite"
@@ -57,8 +61,8 @@ def sample_pick(count: int, seed: int) -> list[int]:
     label = np.load(TRAIN / "etiket.npy")
     split = []
     with open(TRAIN / "ornekler.csv", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            split.append(row["bolum"])
+        for row in csv_compat.reader(f):
+            split.append(row["split"])
     split = np.array(split)
     if len(split) != len(label):
         sys.exit(f"ornekler.csv {len(split)} satir, etiket.npy {len(label)} — hizasiz")
@@ -110,7 +114,7 @@ def main() -> None:
 
     name = {}
     with open(TRAIN / "siniflar.csv", encoding="utf-8") as f:
-        for s in csv.DictReader(f):
+        for s in csv_compat.reader(f):
             name[int(s["class_index"])] = (s["ebird_code"], s["turkish_name"])
 
     # ⚠ BUILTIN_REF — varsayılanı KULLANMAYIN.

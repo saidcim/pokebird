@@ -30,6 +30,10 @@ from collections import defaultdict
 import numpy as np
 import tensorflow as tf
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAIN = os.path.join(ROOT, "data", "egitim")
 MODELLER = os.path.join(ROOT, "models")
@@ -67,12 +71,12 @@ def main():
     X = np.load(os.path.join(TRAIN, "pencereler.npy"), mmap_mode="r")
     y = np.load(os.path.join(TRAIN, "etiket.npy"))
     with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
-        r = list(csv.DictReader(f))
+        r = list(csv_compat.reader(f))
     name = {int(s["class_index"]): s["turkish_name"] for s in
-          csv.DictReader(open(os.path.join(TRAIN, "siniflar.csv"),
+          csv_compat.reader(open(os.path.join(TRAIN, "siniflar.csv"),
                               encoding="utf-8"))}
 
-    idx = np.array([i for i, x in enumerate(r) if x["bolum"] == "test"])
+    idx = np.array([i for i, x in enumerate(r) if x["split"] == "test"])
     P = olasiliklar(idx, X)
     Y = y[idx]
 
@@ -80,7 +84,7 @@ def main():
     record = defaultdict(list)
     for k, i in enumerate(idx):
         record[(r[i]["ebird_code"], r[i]["file"])].append(
-            (float(r[i]["baslangic"]), k))
+            (float(r[i]["start"]), k))
     for v in record.values():
         v.sort()
 

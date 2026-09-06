@@ -44,6 +44,10 @@ import time
 import urllib.request
 import zipfile
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NEG = os.path.join(ROOT, "data", "negatif")
 ZIP = os.path.join(NEG, "ESC-50-master.zip")
@@ -139,7 +143,7 @@ def main():
         adlar = z.namelist()
         meta = next(n for n in adlar if n.endswith("meta/esc50.csv"))
         with z.open(meta) as f:
-            row = list(csv.DictReader(l.decode("utf-8") for l in f))
+            row = list(csv_compat.reader(l.decode("utf-8") for l in f))
         wavlar = [n for n in adlar if n.endswith(".wav") and "/audio/" in n]
         print(f"zip icinde {len(wavlar)} wav, meta {len(row)} satir")
 

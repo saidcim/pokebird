@@ -25,6 +25,10 @@ import json
 import os
 import sys
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 VENV_PKG = os.path.join(
@@ -86,7 +90,7 @@ def main():
         scientific.setdefault(et.split("_", 1)[0], et)
 
     with open(a.csv, encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if r["status"] == "included"]
+        rows = [r for r in csv_compat.reader(f) if r["status"] == "included"]
 
     label_subset = set(labels)
     secilen, missing, farkli = [], [], []

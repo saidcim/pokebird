@@ -20,6 +20,10 @@ import csv
 import pathlib
 import sys
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INP = ROOT / "data" / "egitim" / "siniflar.csv"
 SPECIES = ROOT / "data" / "species_istanbul.csv"
@@ -47,7 +51,7 @@ def english_names() -> dict[str, str]:
         sys.exit(f"{SPECIES} is missing")
     with open(SPECIES, encoding="utf-8") as f:
         return {r["ebird_code"]: r["english_name"].strip()
-                for r in csv.DictReader(f)}
+                for r in csv_compat.reader(f)}
 
 
 def main() -> None:
@@ -69,7 +73,7 @@ def main() -> None:
 
     rows = []
     with open(INP, encoding="utf-8") as f:
-        for s in csv.DictReader(f):
+        for s in csv_compat.reader(f):
             code = col(s, "ebird_code")
             if code in NEGATIVE_CODES:
                 code = NEGATIVE_CODE

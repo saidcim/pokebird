@@ -58,6 +58,10 @@ import numpy as np
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 import tensorflow as tf  # noqa: E402
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAIN = os.path.join(ROOT, "data", "egitim")
 MODELLER = os.path.join(ROOT, "models")
@@ -73,12 +77,12 @@ def data_yukle():
     X = np.load(os.path.join(TRAIN, "pencereler.npy"), mmap_mode="r")
     y_species = np.load(os.path.join(TRAIN, "etiket.npy")).astype(np.int32)
     with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
-        row = list(csv.DictReader(f))
+        row = list(csv_compat.reader(f))
     if not (len(X) == len(y_species) == len(row)):
         sys.exit(f"uzunluklar tutmuyor: X {len(X)} y {len(y_species)} "
                  f"csv {len(row)}")
 
-    split = np.array([s["bolum"] for s in row])
+    split = np.array([s["split"] for s in row])
     y = (y_species != NEGATIVE_CLS).astype(np.int32)   # 1=kus, 0=degil
     return X, y, split
 

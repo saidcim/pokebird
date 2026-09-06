@@ -47,6 +47,10 @@ import os
 import sys
 from collections import defaultdict
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 # Windows konsolu (cp857/cp1254) Turkce tur adlarindaki bazi karakterleri
 # basamayabilir; eski konsolda print() UnicodeEncodeError atar ve SAHADA
 # turu yarida keser. Onun yerine bozuk karakteri isaretleyip devam et --
@@ -66,7 +70,7 @@ def map_yukle():
         sys.exit("eslesme tablosu yok: " + MAP)
     d = {}
     with open(MAP, encoding="utf-8") as f:
-        for s in csv.DictReader(f):
+        for s in csv_compat.reader(f):
             d[s["birdnet_scientific_name"].strip()] = (s["ebird_code"].strip(),
                                                    s["turkish_name"].strip())
     return d
@@ -76,7 +80,7 @@ def cihaz_yukle(path):
     """cihaz.csv -> (isaretler[datetime], tur_olaylari[(dt, kod, ad, guven)])"""
     isaretler, olaylar = [], []
     with open(path, encoding="utf-8") as f:
-        for s in csv.DictReader(f):
+        for s in csv_compat.reader(f):
             t = dt.datetime.fromisoformat(s["duvar_saati"])
             if s["kip"] == "ISARET":
                 isaretler.append(t)
@@ -90,7 +94,7 @@ def birdnet_yukle(path, threshold, name_map):
     """BirdNET results.csv -> (bilinen[(bas, bit, kod, ad, skor)], kapsam_disi)"""
     bilinen, kapsam_disi = [], defaultdict(float)
     with open(path, encoding="utf-8") as f:
-        for s in csv.DictReader(f):
+        for s in csv_compat.reader(f):
             skor = float(s["Confidence"])
             if skor < threshold:
                 continue

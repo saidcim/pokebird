@@ -30,6 +30,10 @@ from collections import defaultdict
 
 import numpy as np
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAIN = os.path.join(ROOT, "data", "egitim")
 MODELLER = os.path.join(ROOT, "models")
@@ -95,9 +99,9 @@ def main():
     P = np.load(ONBELLEK)
     y = np.load(os.path.join(TRAIN, "etiket.npy"))
     with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
-        r = list(csv.DictReader(f))
+        r = list(csv_compat.reader(f))
 
-    idx = np.array([i for i, x in enumerate(r) if x["bolum"] == "test"])
+    idx = np.array([i for i, x in enumerate(r) if x["split"] == "test"])
     if len(P) != len(idx):
         sys.exit(f"onbellek {len(P)} satir, test kumesi {len(idx)} — "
                  "esitlenmemis. birlestirme_olc.py'yi yeniden calistirin.")
@@ -106,7 +110,7 @@ def main():
     records = defaultdict(list)
     for k, i in enumerate(idx):
         records[(r[i]["ebird_code"], r[i]["file"])].append(
-            (float(r[i]["baslangic"]), k))
+            (float(r[i]["start"]), k))
     for v in records.values():
         v.sort()
 

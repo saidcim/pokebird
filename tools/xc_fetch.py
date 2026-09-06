@@ -257,7 +257,7 @@ def komut_download(key, species_basina, only_ab, nd_include):
         w = csv.writer(kf)
         if fresh_file:
             w.writerow(["file", "scientific_name", "ebird_code", "xc_id",
-                        "kalite", "lisans", "kaydeden", "ulke", "sure_sn"])
+                        "kalite", "lisans", "recordist", "ulke", "sure_sn"])
 
         total_nd_atlandi = 0
 
@@ -390,7 +390,8 @@ def main():
     ap = argparse.ArgumentParser(description="PokeBird M4: Xeno-canto")
     ap.add_argument("--key", default="",
                     help="Xeno-canto API anahtari (yoksa XC_KEY ya da data/.xc_key)")
-    ap.add_argument("--count", action="store_true", help="kayit sayilarini cek ve nihai listeyi olustur")
+    ap.add_argument("--survey", action="store_true",
+                    help="fetch recording counts and build the final species list")
     ap.add_argument("--download", action="store_true", help="nihai listedeki turlerin kayitlarini indir")
     ap.add_argument("--threshold", type=int, default=VARSAYILAN_THRESHOLD,
                     help=f"yaygin turler icin asgari A/B kayit (varsayilan {VARSAYILAN_THRESHOLD})")
@@ -398,7 +399,8 @@ def main():
                     help=f"nadir turler icin asgari A/B kayit (varsayilan {RARE_THRESHOLD})")
     ap.add_argument("--common-gbif", type=int, default=COMMON_GBIF,
                     help=f"bu kadar GBIF kaydi olan tur 'yaygin' sayilir (varsayilan {COMMON_GBIF})")
-    ap.add_argument("--count", type=int, default=60, help="tur basina indirilecek kayit (varsayilan 60)")
+    ap.add_argument("--per-species", type=int, default=60,
+                    help="recordings to download per species (default 60)")
     ap.add_argument("--all-quality", action="store_true", help="A/B disinda C/D/E kayitlari da indir")
     ap.add_argument("--nd-include", action="store_true",
                     help="ND (turev yasak) lisansli kayitlari da indir — sorumluluk sizde")
@@ -415,10 +417,10 @@ def main():
             "           \"ANAHTAR\" | Out-File -Encoding ascii -NoNewline data\\.xc_key\n\n"
             "    Alternatif:  $env:XC_KEY = \"ANAHTAR\"   ya da   --key ANAHTAR\n")
 
-    if args.count:
+    if args.survey:
         komut_count(key, args.threshold, args.rare_threshold, args.common_gbif)
     elif args.download:
-        komut_download(key, args.count, not args.all_quality, args.nd_include)
+        komut_download(key, args.per_species, not args.all_quality, args.nd_include)
     else:
         ap.print_help()
 

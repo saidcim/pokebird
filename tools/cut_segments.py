@@ -24,6 +24,10 @@ import os
 import random
 import wave
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 
@@ -54,8 +58,8 @@ def main():
 
     with open(a.segments, encoding="utf-8") as f:
         row = [
-            r for r in csv.DictReader(f)
-            if float(r["hedef_guven"]) >= a.threshold
+            r for r in csv_compat.reader(f)
+            if float(r["target_confidence"]) >= a.threshold
             and (not a.species or r["ebird_code"] in a.species)
         ]
     if not row:
@@ -68,14 +72,14 @@ def main():
     print(f"{len(row)} uygun dilimden {len(selection)} tanesi kesiliyor -> {a.out}\n")
     for r in sorted(selection, key=lambda x: (x["ebird_code"], x["file"])):
         code, file = r["ebird_code"], r["file"]
-        start, end = float(r["baslangic"]), float(r["bitis"])
+        start, end = float(r["start"]), float(r["end"])
         source = os.path.join(a.wav, code, file + ".wav")
         name = f"{code}_{file}_{start:06.1f}.wav"
         cut(source, os.path.join(a.out, name), start, end)
         print(
             f"{name}\n    hedef {float(r['hedef_guven']):.2f}   "
             f"en iyi: {r['en_iyi_tur']} {float(r['en_iyi_guven']):.2f}"
-            + (f"   kus disi: {r['kus_disi_tur']}" if r["kus_disi_tur"] else "")
+            + (f"   kus disi: {r['kus_disi_tur']}" if r["non_bird_species"] else "")
         )
 
 

@@ -18,6 +18,10 @@ import os
 import subprocess
 import sys
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import csv_compat  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSV_PATH = os.path.join(ROOT, "data", "species_istanbul.csv")
 PY = sys.executable
@@ -32,7 +36,7 @@ def calistir(args):
 
 def include_count():
     with open(CSV_PATH, encoding="utf-8") as f:
-        return sum(1 for r in csv.DictReader(f) if r["status"] == "included")
+        return sum(1 for r in csv_compat.reader(f) if r["status"] == "included")
 
 
 def main():
@@ -43,7 +47,7 @@ def main():
     args = ap.parse_args()
 
     # 1. Havuzu tazele (GBIF/eBird önbellekten, saniyeler sürer)
-    calistir(["tools/species_list.py", "--aylik"])
+    calistir(["tools/species_list.py", "--monthly"])
 
     # 2. Sayım + eleme. Nadir tür eşiğini hedefe en yakın sonucu verecek
     #    şekilde ara: sayım önbelleğe alındığı için tekrarlar bedava.
@@ -51,8 +55,8 @@ def main():
     best, max_iyi_fark, max_iyi_count = None, 10**9, 0
 
     for rare in adaylar:
-        calistir(["tools/xc_fetch.py", "--say",
-                  "--esik", str(args.common_threshold), "--nadir-esik", str(rare)])
+        calistir(["tools/xc_fetch.py", "--survey",
+                  "--threshold", str(args.common_threshold), "--rare-threshold", str(rare)])
         count = include_count()
         fark = abs(count - args.target_species)
         print(f"\n>>> nadir-esik {rare} -> {count} tur (hedef {args.target_species}, "
@@ -60,14 +64,14 @@ def main():
         if fark < max_iyi_fark:
             best, max_iyi_fark, max_iyi_count = rare, fark, count
         # Havuz her turda daralıyor; bir sonraki eşik için tazele.
-        calistir(["tools/species_list.py", "--aylik"])
+        calistir(["tools/species_list.py", "--monthly"])
 
     print(f"\n=== SECILEN: nadir-esik {best} -> {max_iyi_count} tur ===\n", flush=True)
-    calistir(["tools/xc_fetch.py", "--say",
-              "--esik", str(args.common_threshold), "--nadir-esik", str(best)])
+    calistir(["tools/xc_fetch.py", "--survey",
+              "--threshold", str(args.common_threshold), "--rare-threshold", str(best)])
 
     # 3. İndirme
-    calistir(["tools/xc_fetch.py", "--indir", "--adet", str(args.count)])
+    calistir(["tools/xc_fetch.py", "--download", "--per-species", str(args.count)])
     print("\n=== M4 VERI HATTI TAMAM ===", flush=True)
 
 
