@@ -62,7 +62,7 @@
 #define PB_PIN_LCD_RST      34
 #define PB_PIN_LCD_TE       35      /* tearing effect — to avoid tearing        */
 #define PB_PIN_LCD_BL       36      /* backlight PWM                            */
-#define PB_PIN_BL_EN        37      /* arka ışık yükseltici enable              */
+#define PB_PIN_BL_EN        37      /* backlight boost converter enable        */
 
 #define PB_LCD_NATIVE_W     172
 #define PB_LCD_NATIVE_H     640
@@ -80,7 +80,7 @@
 
 /* ── Power ── */
 #define PB_PIN_SYS_OUT      38      /* power latch: state                      */
-#define PB_PIN_SYS_EN       39      /* güç mandalı: kendini kapatmak için      */
+#define PB_PIN_SYS_EN       39      /* power latch: used to switch itself off  */
 #define PB_PIN_BAT_ADC      40      /* battery voltage (ADC)                   */
 #define PB_BAT_ADC_CHANNEL  (PB_PIN_BAT_ADC - 40)   /* RP2350B: ADC0 = GPIO40  */
 /* The divider on the schematic: R15 100K / R3 200K -> Vbat = Vadc * 1.5 */

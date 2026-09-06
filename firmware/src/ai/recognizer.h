@@ -1,7 +1,7 @@
 /**
  * recognizer.h — the real-time recognition pipeline (core 1)
  *
- * The split of work from ARCHITECTURE §7:
+ * The split of work from docs/ARCHITECTURE.md:
  *   Core 1  audio + inference   I2S/DMA -> mel -> gate -> species net -> vote
  *   Core 0  UI + storage
  *

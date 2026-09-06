@@ -1,15 +1,17 @@
 /*
- * pokebird_rp2350b.h — Waveshare RP2350-Touch-LCD-3.49 için Pico SDK board tanımı
+ * pokebird_rp2350b.h - Pico SDK board definition for the Waveshare
+ * RP2350-Touch-LCD-3.49
  *
- * SDK'da bu kart için hazır bir başlık yok. RP2350B (48 GPIO) varyantını ve
- * 16 MB flash'ı doğru seçebilmek için kendi board dosyamızı tanımlıyoruz.
+ * The SDK has no ready-made header for this board. We define our own board
+ * file so the RP2350B (48 GPIO) variant and the 16 MB of flash are selected
+ * correctly.
  *
- * Pin ayrıntıları src/board_config.h içinde; burada yalnızca SDK'nın kendi
- * başlatma kodunun ihtiyaç duyduğu tanımlar var.
+ * The pin details live in firmware/src/board_config.h; only the definitions
+ * the SDK's own startup code needs are here.
  *
  * -----------------------------------------------------
- * NOT: BU BAŞLIK ASSEMBLER TARAFINDAN DA OKUNUR,
- *      SADECE ÖNİŞLEMCİ DİREKTİFİ İÇEREBİLİR.
+ * NOTE: THIS HEADER IS ALSO READ BY THE ASSEMBLER,
+ *       SO IT MAY CONTAIN PREPROCESSOR DIRECTIVES ONLY.
  * -----------------------------------------------------
  */
 #ifndef _BOARDS_POKEBIRD_RP2350B_H
@@ -17,12 +19,12 @@
 
 pico_board_cmake_set(PICO_PLATFORM, rp2350)
 
-// Kart tespiti için
+// For board detection
 #define POKEBIRD_RP2350B
 
 // --- RP2350 VARYANTI ---
-// 0 = RP2350B (QFN-80, 48 GPIO). Bu kart B varyantını kullanıyor; GPIO40+
-// (BAT_ADC) yalnızca B'de var, dolayısıyla bu satır zorunlu.
+// 0 = RP2350B (QFN-80, 48 GPIO). This board uses the B variant; GPIO40+
+// (BAT_ADC) exists only on the B, so this line is mandatory.
 #define PICO_RP2350A 0
 
 // --- FLASH: PY25Q128HA, 128 Mbit = 16 MB ---
@@ -32,11 +34,12 @@ pico_board_cmake_set_default(PICO_FLASH_SIZE_BYTES, (16 * 1024 * 1024))
 #endif
 
 // --- LED YOK ---
-// Karttaki tek LED (LED1) ETA6098 şarj durum LED'i; GPIO'ya bağlı değil,
-// yazılımdan kontrol edilemez. PICO_DEFAULT_LED_PIN bilerek tanımlanmadı —
-// canlılık göstergesi olarak ekran arka ışığı kullanılıyor (bkz. src/main.c).
+// The board's only LED (LED1) is the ETA6098 charge status LED; it is not
+// wired to a GPIO and cannot be controlled from software.
+// PICO_DEFAULT_LED_PIN is deliberately left undefined - the display backlight
+// serves as the liveness indicator instead (see firmware/src/main.c).
 
-// --- UART: hata ayıklama için boş P3 başlığı pinlerine ---
+// --- UART: on the free P3 header pins, for debugging ---
 #ifndef PICO_DEFAULT_UART
 #define PICO_DEFAULT_UART 0
 #endif
@@ -47,7 +50,7 @@ pico_board_cmake_set_default(PICO_FLASH_SIZE_BYTES, (16 * 1024 * 1024))
 #define PICO_DEFAULT_UART_RX_PIN 13
 #endif
 
-// --- I2C: ES8311 codec kontrol hattı (GPIO6/7 -> I2C1) ---
+// --- I2C: the ES8311 codec control bus (GPIO6/7 -> I2C1) ---
 #ifndef PICO_DEFAULT_I2C
 #define PICO_DEFAULT_I2C 1
 #endif
@@ -83,6 +86,6 @@ pico_board_cmake_set_default(PICO_FLASH_SIZE_BYTES, (16 * 1024 * 1024))
 #define PICO_FLASH_SPI_CLKDIV 2
 #endif
 
-// SDK'nın varsayılan RAM/stack ayarları 520 KB SRAM için uygun.
+// The SDK's default RAM/stack settings suit 520 KB of SRAM.
 
 #endif /* _BOARDS_POKEBIRD_RP2350B_H */
