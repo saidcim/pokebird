@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """
-mel_reference.py — Cihazdaki mel hattını bağımsız bir uygulamayla karşılaştır.
+mel_reference.py — compare the device's mel pipeline against an independent
+implementation.
 
-Plan §M3'ün kabul ölçütü: "Cihazdaki mel, Python'daki mel ile ≈aynı".
+The acceptance criterion: the mel on the device matches the mel in Python.
 
-Buradaki uygulama numpy ile SIFIRDAN yazıldı; C tarafıyla ortak kod yok.
-Amaç bu: iki bağımsız yol aynı sayıyı veriyorsa ölçekleme, pencereleme,
-bin indeksleme ve filtre bankası kurulumunda hata olma ihtimali çok düşer.
-Aynı formülleri paylaşıyor olmaları kaçınılmaz (aynı şeyi hesaplıyorlar),
-ama uygulama hataları ortak değil.
+The implementation here was written FROM SCRATCH with numpy; it shares no code
+with the C side. That is the point: if two independent paths produce the same
+numbers, the chance of an error in the scaling, the windowing, the bin
+indexing or the filter bank construction drops sharply. They inevitably share
+the same formulas (they compute the same thing), but they do not share
+implementation mistakes.
 
-Kullanım:
-    cmake -S test -B test/build -G Ninja && cmake --build test/build
-    ./test/build/dsp_test --dump > /tmp/mel_c.csv
-    python tools/mel_reference.py /tmp/mel_c.csv
+Usage:
+    cmake -S firmware/test -B firmware/test/build -G Ninja
+    cmake --build firmware/test/build
+    ./firmware/test/build/dsp_test --dump > mel_c.csv
+    python tools/mel_reference.py mel_c.csv
 
-Argümansız çalıştırılırsa dsp_test'i kendisi bulup çalıştırmayı dener.
+Run without an argument and it tries to find and run dsp_test itself.
 
-librosa karşılığı (kurulu değilse gerekmiyor, formüller aşağıda):
+The librosa equivalent (not required if it is not installed; the formulas are
+below):
     librosa.filters.mel(sr=24000, n_fft=512, n_mels=64,
                         fmin=150, fmax=11500, htk=True, norm=None)
 """
@@ -38,9 +42,9 @@ FMAX = 11500.0
 DB_MIN = -90.0
 DB_MAX = 0.0
 
-# Farkın kabul edilebilir üst sınırı. int8 saklama adımı
-# (DB_MAX-DB_MIN)/255 = 0.353 dB; bir adımlık yuvarlama farkı normal.
-TOLERANS_DB = 0.60
+# The acceptable upper bound on the difference. The int8 storage step is
+# (DB_MAX-DB_MIN)/255 = 0.353 dB, so a one-step rounding difference is normal.
+TOLERANCE_DB = 0.60
 
 
 def hz_to_mel(hz):
@@ -52,7 +56,7 @@ def mel_to_hz(m):
 
 
 def mel_filterbank():
-    """HTK mel, alan normalizasyonu YOK (librosa htk=True, norm=None)."""
+    """HTK mel, with NO area normalisation (librosa htk=True, norm=None)."""
     pts_mel = np.linspace(hz_to_mel(FMIN), hz_to_mel(FMAX), N_MELS + 2)
     pts_bin = mel_to_hz(pts_mel) * N_FFT / SR
 
@@ -71,11 +75,11 @@ def mel_filterbank():
 
 
 def power_spectrum(samples_i16):
-    """C tarafındaki pb_fft_power ile aynı sözleşme.
+    """The same contract as pb_fft_power on the C side.
 
-    - DC çıkarılır (mikrofonun sabit ofseti var)
-    - periyodik Hann (sym=False)
-    - tam ölçekli sinüs kendi bin'inde 1.0 güç -> 0 dBFS
+    - DC is removed (the microphone has a constant offset)
+    - periodic Hann (sym=False)
+    - a full-scale sine gives 1.0 power in its own bin -> 0 dBFS
     """
     x = samples_i16.astype(np.float64)
     x = (x - x.mean()) / 32768.0
@@ -86,7 +90,7 @@ def power_spectrum(samples_i16):
     gain = 0.5 * N_FFT
     scale = 4.0 / (gain * gain)
     p *= scale
-    p[0] *= 0.5          # DC ve Nyquist'in negatif frekans eşi yok
+    p[0] *= 0.5          # DC and Nyquist have no negative-frequency partner
     p[-1] *= 0.5
     return p
 
@@ -98,7 +102,7 @@ def quantize_db(db):
 
 
 def test_signal():
-    """dsp_test.c içindeki dump_frame() ile BİREBİR aynı girdi."""
+    """EXACTLY the same input as dump_frame() in dsp_test.c."""
     i = np.arange(N_FFT)
     t = i / SR
     v = (0.40 * np.sin(2 * np.pi * 1000.0 * t)
@@ -117,7 +121,7 @@ def reference_mel():
 def read_c_output(text):
     rows = list(csv.DictReader(io.StringIO(text)))
     if not rows:
-        sys.exit("dsp_test --dump ciktisi bos.")
+        sys.exit("the output of dsp_test --dump is empty.")
     q = np.array([int(r["q"]) for r in rows], dtype=np.int16)
     db = np.array([float(r["db"]) for r in rows], dtype=np.float64)
     return q, db
@@ -128,15 +132,17 @@ def main():
         text = Path(sys.argv[1]).read_text()
     else:
         exe = None
-        for candidate in ("test/build/dsp_test.exe", "test/build/dsp_test"):
+        for candidate in ("firmware/test/build/dsp_test.exe",
+                          "firmware/test/build/dsp_test"):
             if Path(candidate).exists():
-                # Mutlak yol: Windows'ta gorece yol PATH'te aranir ve bulunamaz.
+                # Absolute path: on Windows a relative one is looked up on
+                # PATH and would not be found.
                 exe = str(Path(candidate).resolve())
                 break
         if exe is None:
-            sys.exit("dsp_test bulunamadi. Once:\n"
-                     "  cmake -S test -B test/build -G Ninja\n"
-                     "  cmake --build test/build")
+            sys.exit("dsp_test not found. First run:\n"
+                     "  cmake -S firmware/test -B firmware/test/build -G Ninja\n"
+                     "  cmake --build firmware/test/build")
         text = subprocess.run([exe, "--dump"], capture_output=True,
                               text=True, check=True).stdout
 
@@ -144,29 +150,32 @@ def main():
     ref_db, ref_q = reference_mel()
 
     if len(c_q) != N_MELS:
-        sys.exit(f"Bant sayisi uyusmuyor: C {len(c_q)}, referans {N_MELS}")
+        sys.exit(f"band count mismatch: C {len(c_q)}, reference {N_MELS}")
 
-    # int8 saklamasindan cozulmus dB uzerinden karsilastir; ham dB'ler
-    # kirpma araligi disinda ayrilabilir ve bu bilgi zaten saklanmiyor.
+    # Compare on the dB decoded back from int8 storage: the raw dB values can
+    # diverge outside the clipping range, and that information is not stored
+    # anyway.
     ref_db_q = DB_MIN + (ref_q.astype(np.float64) + 128.0) / 255.0 * (DB_MAX - DB_MIN)
-    fark = np.abs(c_db - ref_db_q)
-    q_fark = np.abs(c_q.astype(int) - ref_q.astype(int))
+    diff = np.abs(c_db - ref_db_q)
+    q_diff = np.abs(c_q.astype(int) - ref_q.astype(int))
 
-    print(f"{'bant':>4} {'C (dB)':>9} {'ref (dB)':>9} {'fark':>7}  {'C q':>5} {'ref q':>6}")
+    print(f"{'band':>4} {'C (dB)':>9} {'ref (dB)':>9} {'diff':>7}  "
+          f"{'C q':>5} {'ref q':>6}")
     for b in range(N_MELS):
-        marker = "  <<<" if fark[b] > TOLERANS_DB else ""
-        print(f"{b:>4} {c_db[b]:>9.3f} {ref_db_q[b]:>9.3f} {fark[b]:>7.3f} "
+        marker = "  <<<" if diff[b] > TOLERANCE_DB else ""
+        print(f"{b:>4} {c_db[b]:>9.3f} {ref_db_q[b]:>9.3f} {diff[b]:>7.3f} "
               f"{c_q[b]:>5} {ref_q[b]:>6}{marker}")
 
     print()
-    print(f"en buyuk fark : {fark.max():.4f} dB  (tolerans {TOLERANS_DB})")
-    print(f"ortalama fark : {fark.mean():.4f} dB")
-    print(f"int8 adiminda en buyuk sapma: {q_fark.max()}")
+    print(f"largest difference : {diff.max():.4f} dB  "
+          f"(tolerance {TOLERANCE_DB})")
+    print(f"mean difference    : {diff.mean():.4f} dB")
+    print(f"largest deviation in int8 steps: {q_diff.max()}")
 
-    if fark.max() > TOLERANS_DB:
-        print("\nKALDI: mel hatti referansla uyusmuyor.")
+    if diff.max() > TOLERANCE_DB:
+        print("\nFAILED: the mel pipeline does not match the reference.")
         return 1
-    print("\nGECTI: cihazdaki mel, bagimsiz referansla uyusuyor.")
+    print("\nPASSED: the device's mel matches the independent reference.")
     return 0
 
 
