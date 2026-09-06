@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-ppm_png.py — ui_preview'nin bıraktığı PPM'leri PNG'ye çevirir.
+ppm_png.py — converts the PPMs ui_preview leaves behind into PNGs.
 
-Saf stdlib (zlib + struct); Pillow gerekmiyor. Ayrıca her görüntüyü BÜYÜTÜP
-kaydediyor: ekran 640x172 ve 1:1 bakıldığında yazı tipi ayrıntısı seçilmiyor.
+Pure stdlib (zlib + struct); Pillow is not required. Each image is also saved
+SCALED UP: the screen is 640x172, and at 1:1 the font detail is hard to make
+out.
 
     python tools/ui_preview/ppm_png.py
 """
@@ -20,7 +21,7 @@ OLCEK = 2
 
 def ppm_oku(yol: pathlib.Path) -> tuple[int, int, bytes]:
     ham = yol.read_bytes()
-    # Başlık: P6\n<w> <h>\n255\n — üç alanı sırayla ayıkla.
+    # Header: P6\n<w> <h>\n255\n — parse the three fields in order.
     alanlar, i = [], 0
     while len(alanlar) < 4:
         while i < len(ham) and ham[i : i + 1].isspace():
@@ -30,7 +31,7 @@ def ppm_oku(yol: pathlib.Path) -> tuple[int, int, bytes]:
             j += 1
         alanlar.append(ham[i:j].decode())
         i = j
-    i += 1  # tek boşluk ayracı
+    i += 1  # the single whitespace separator
     w, h = int(alanlar[1]), int(alanlar[2])
     return w, h, ham[i : i + w * h * 3]
 
@@ -46,7 +47,7 @@ def png_yaz(yol: pathlib.Path, w: int, h: int, rgb: bytes, olcek: int = 1) -> No
             buyuk += satir * olcek
         rgb, w, h = bytes(buyuk), w * olcek, h * olcek
 
-    # Her satırın başına filtre baytı (0 = None).
+    # A filter byte at the start of each row (0 = None).
     ham = bytearray()
     for y in range(h):
         ham.append(0)

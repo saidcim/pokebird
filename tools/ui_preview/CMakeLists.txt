@@ -1,8 +1,8 @@
-# Arayüz önizlemesi — CİHAZDAKİ ekran kodunu host'ta derleyip PNG üretir.
+# UI preview — compiles THE DEVICE'S screen code on the host and renders PNGs.
 #
-# NEDEN AYRI PROJE: ana CMakeLists ARM çapraz derleyicisini zorluyor. Bu
-# hedef PC'de çalışır ve arayüzün nasıl göründüğünü karta yüklemeden,
-# kullanıcıdan ekrana bakmasını istemeden gösterir.
+# WHY A SEPARATE PROJECT: the main CMakeLists forces the ARM cross compiler.
+# This target runs on the PC and shows what the UI looks like without
+# flashing the board or asking anyone to look at the screen.
 #
 #   cmake -S tools/ui_preview -B tools/ui_preview/build -G Ninja
 #   cmake --build tools/ui_preview/build
@@ -13,8 +13,8 @@ project(pokebird_ui_preview C)
 set(CMAKE_C_STANDARD 11)
 set(KOK ${CMAKE_CURRENT_LIST_DIR}/../..)
 
-# Cihazla AYNI lv_conf.h — yazı tipi, renk derinliği ve çizim ayarları
-# birebir aynı olsun, yoksa önizleme yanlış şeyi gösterir.
+# The SAME lv_conf.h as the device, so the fonts, colour depth and drawing
+# settings match exactly; otherwise the preview shows the wrong thing.
 set(LV_BUILD_CONF_PATH ${KOK}/firmware/src/ui/lv_conf.h CACHE PATH "" FORCE)
 option(CONFIG_LV_BUILD_DEMOS "" OFF)
 option(CONFIG_LV_BUILD_EXAMPLES "" OFF)
@@ -22,7 +22,7 @@ add_subdirectory(${KOK}/third_party/lvgl lvgl)
 
 add_executable(ui_preview
     preview.c
-    # Cihazın ekran kodunun TA KENDİSİ — taklit yok.
+    # The device's screen code ITSELF — nothing is reimplemented.
     ${KOK}/firmware/src/ui/theme.c
     ${KOK}/firmware/src/ui/text.c
     ${KOK}/firmware/src/ui/screen_listen.c
@@ -36,7 +36,7 @@ add_executable(ui_preview
     ${KOK}/firmware/src/ui/fonts/pb_font_mono_10.c
 )
 
-# shim/ ÖNCE gelmeli: pico/stdlib.h sahtesi oradan bulunacak.
+# shim/ must come FIRST: that is where the fake pico/stdlib.h is found.
 target_include_directories(ui_preview PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/shim
     ${KOK}/firmware/src

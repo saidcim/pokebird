@@ -1,13 +1,13 @@
 /**
- * pico/stdlib.h — host önizlemesi için SAHTE Pico SDK başlığı
+ * pico/stdlib.h — a FAKE Pico SDK header for the host preview
  *
- * Arayüz dosyaları (ekran_gunluk.c) yalnızca zaman için Pico SDK'ya bakıyor.
- * Host'ta gerçek SDK yok; burada o iki çağrının karşılığı veriliyor ve saat
- * ELLE sürülüyor — böylece "az once" / "3 dk once" satırlarının hepsi tek
- * render'da gösterilebiliyor.
+ * The UI files (screen_log.c) reach into the Pico SDK only for the time. On
+ * the host there is no real SDK, so those two calls are provided here and the
+ * clock is driven BY HAND — which lets the "just now" / "3 min ago" rows all
+ * be shown in a single render.
  *
- * Bu dosya YALNIZCA tools/ui_preview derlemesinde görünür (include yolu
- * oraya özel); cihaz derlemesi gerçek SDK'yı kullanmaya devam ediyor.
+ * This file is visible ONLY in the tools/ui_preview build (its include path
+ * is specific to that target); the device build keeps using the real SDK.
  */
 #ifndef POKEBIRD_PREVIEW_PICO_STDLIB_H
 #define POKEBIRD_PREVIEW_PICO_STDLIB_H
@@ -19,7 +19,7 @@
 
 typedef uint64_t absolute_time_t;
 
-/** Önizlemenin sahte saati (ms). Test kodu doğrudan yazıyor. */
+/** The preview's fake clock (ms). The test code writes it directly. */
 extern uint32_t pb_preview_ms;
 
 static inline absolute_time_t get_absolute_time(void) {
