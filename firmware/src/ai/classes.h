@@ -188,7 +188,7 @@ static const char *const pb_class_code[PB_CLASS_COUNT] = {
   "woosan",
   "yelgul1",
   "yellow2",
-  "__negatif__",
+  "__negative__",
 };
 
 static const char *const pb_class_name[PB_CLASS_COUNT] = {

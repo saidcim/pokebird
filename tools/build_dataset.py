@@ -91,7 +91,7 @@ FRAMES = 187
 FMIN, FMAX = 150.0, 11500.0
 WINDOW_SAMPLES = (FRAMES - 1) * HOP + N_FFT      # 71.936 ornek ≈ 3,00 s
 
-NEGATIVE_NAME = "__negatif__"
+NEGATIVE_CODE = "__negative__"
 
 # Pencere ici dB standart sapmasi bunun altindaysa ortada ses yok demektir
 # (dijital sessizlik). Cihazdaki normalizasyon var<1e-6 durumunda olcegi
@@ -280,7 +280,7 @@ def checksum():
 # ══ 3b. Uretilen kumeyi dogrula ═════════════════════════════════════════
 def _row_audio(s):
     """ornekler.csv satiri -> kaynak WAV yolu ve pencere ornekleri."""
-    if s["ebird_code"] == NEGATIVE_NAME:
+    if s["ebird_code"] == NEGATIVE_CODE:
         record = os.path.join(DATA, "negatif", "esc50_kayitlar.csv")
         with open(record, encoding="utf-8") as f:
             for r in csv.DictReader(f):
@@ -317,7 +317,7 @@ def output_verify(out, n):
     record_split = defaultdict(set)
     kisi_split = defaultdict(set)
     for s in rows:
-        if s["ebird_code"] == NEGATIVE_NAME:
+        if s["ebird_code"] == NEGATIVE_CODE:
             continue
         record_split[(s["ebird_code"], s["file"])].add(s["bolum"])
         if s["kaydeden"]:
@@ -694,7 +694,7 @@ def main():
         X[write] = p
         y[write] = negative_indeks
         rows.append({
-            "indeks": write, "class_index": negative_indeks, "ebird_code": NEGATIVE_NAME,
+            "indeks": write, "class_index": negative_indeks, "ebird_code": NEGATIVE_CODE,
             "turkish_name": kategori, "file": os.path.basename(path),
             "baslangic": f"{ofset / SR:.1f}", "pencere_ornek": ofset,
             "bolum": split, "bulasik": 0, "hedef_guven": "",
@@ -732,7 +732,7 @@ def main():
         w.writerow(["class_index", "ebird_code", "turkish_name", "birdnet_scientific_name"])
         for k in kodlar:
             w.writerow([cls_indeks[k], k, turkce[k], birdnet_name[k]])
-        w.writerow([negative_indeks, NEGATIVE_NAME, "negatif / bilinmiyor", ""])
+        w.writerow([negative_indeks, NEGATIVE_CODE, "negatif / bilinmiyor", ""])
 
     rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, write,
           record_bazina_dusen, contaminated_dusen)
@@ -822,7 +822,7 @@ def rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, total,
     row.append(f"bulasik (yalniz egitimde)  : {sum(contaminated_count.values())}")
     row.append(f"bulasik oldugu icin dusen  : {contaminated_dusen}  "
                  f"(dogrulama/test grubuna dusmuslerdi)")
-    nb = species_split[NEGATIVE_NAME]
+    nb = species_split[NEGATIVE_CODE]
     row.append(f"negatif (sinif {negative_indeks})      : "
                  f"{sum(nb.values())}  (egitim {nb['egitim']}, "
                  f"dog {nb['dogrulama']}, test {nb['test']})")
