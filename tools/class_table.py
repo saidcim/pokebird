@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-class_table.py — data/egitim/siniflar.csv -> firmware/src/ai/classes.h
+class_table.py — data/dataset/classes.csv -> firmware/src/ai/classes.h
 
 The model produces 179 class indices; the device needs to turn them into
 names. The table lives in flash (`const char *const`), not RAM.
