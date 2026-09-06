@@ -197,7 +197,7 @@ static void test_gate(void) {
     pb_fft_power(buf, power);
     pb_gate_result_t r = pb_gate_update(power);
     char msg[160];
-    snprintf(msg, sizeof(msg), "bant %.1f dB, taban %.1f dB, aki %.3f",
+    snprintf(msg, sizeof(msg), "bant %.1f dB, taban %.1f dB, flux %.3f",
              (double)r.band_db, (double)r.floor_db, (double)r.flux);
     check(r.active, "ani ton kapiyi aciyor", msg);
     printf("        %s\n", msg);

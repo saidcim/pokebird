@@ -873,7 +873,7 @@ static void cmd_mel_pipeline(void) {
             /* kare/s kabul ölçütü: 62.5 (hop 384 @ 24 kHz). Eskiden 57'ydi —
              * bloklayan yakalama kare kaçırıyordu (lastsession.md §9c). */
             printf("  kare %5lu (%lu/s)  kapi %%%3lu  bant %6.1f dB  "
-                   "taban %6.1f dB  aki %.3f  pencere %lu  kayip %lu\n",
+                   "taban %6.1f dB  flux %.3f  pencere %lu  kayip %lu\n",
                    (unsigned long)total, (unsigned long)fps,
                    (unsigned long)(total ? open * 100 / total : 0),
                    (double)g.band_db, (double)g.floor_db, (double)g.flux,
@@ -2746,7 +2746,7 @@ static void cmd_result_ekrani(void) {
         pb_recognizer_read(&d);
         pb_decision_input_t gi = {
             .now_ms   = to_ms_since_boot(get_absolute_time()),
-            .gate_open  = d.gate_su_an,
+            .gate_open  = d.gate_now,
             .fresh_result = d.valid && d.version != seen,
             .cls      = d.valid ? d.top3[0] : (int16_t)-1,
             .probability   = d.valid ? d.top3_probability[0] : 0.0f,

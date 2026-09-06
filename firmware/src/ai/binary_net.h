@@ -1,23 +1,27 @@
 /**
- * ikili_agi.h — Aşama-1 ikili ağ: kuş sesi mi, değil mi (TFLM sarmalayıcısı)
+ * binary_net.h — stage-1 binary net: is this birdsong or not (TFLM wrapper)
  *
- * Model: models/binary_net_int8.h (tools/train_binary.py üretiyor, M7 §9o).
- * 7.217 parametre, 1,44 MMAC/pencere, TEK çıkış (sigmoid öncesi ham logit).
+ * Model: models/binary_net_int8.h (produced by tools/train_binary.py, M7).
+ * 7,217 parameters, 1.44 MMAC per window, a SINGLE output (the raw logit,
+ * before the sigmoid).
  *
- * Aynı cihaz sözleşmesi tür ağıyla birebir aynı (tools/train_species.py, §9k):
- * girdi tensörü int8, ölçek 1.0, sıfır noktası 0 — pb_mel_window() çıktısı
- * dönüşümsüz kopyalanabiliyor. pb_binary_net_init() bunu ölçüp doğruluyor.
+ * The device contract is identical to the species net's: the input tensor is
+ * int8 with scale 1.0 and zero point 0, so the output of pb_mel_window() can
+ * be copied in with no conversion at all. pb_binary_net_init() measures this
+ * and verifies it.
  *
- * Girdi düzeni tur_agi.h ile aynı: (1, 187, 64, 1), kare dışta, bant içte.
+ * The input layout matches species_net.h: (1, 187, 64, 1), frames on the
+ * outside, bands on the inside.
  *
- * NEDEN AYRI ARENA: tür ağıyla aynı anda çalışmıyorlar (kapı -> ikili ağ ->
- * "kuş" derse tür ağı), ama iki ayrı MicroInterpreter aynı statik arena'yı
- * paylaşmak TFLM'in AllocateTensors çağrısını iki kez, karışık sırayla
- * gerektirir — kırılgan. Ayrı arena çok daha küçük (ölçülecek, ~15-30 KB
- * bekleniyor, tür ağının 120 KB'ının yanında önemsiz).
+ * WHY A SEPARATE ARENA: the two nets never run at the same time (gate ->
+ * binary net -> species net if it says "bird"), but having two
+ * MicroInterpreters share one static arena would mean calling TFLM's
+ * AllocateTensors twice in an interleaved order, which is fragile. A separate
+ * arena is far smaller — on the order of 15-30 KB, negligible next to the
+ * species net's 120 KB.
  */
-#ifndef POKEBIRD_AI_BINARY_AGI_H
-#define POKEBIRD_AI_BINARY_AGI_H
+#ifndef POKEBIRD_AI_BINARY_NET_H
+#define POKEBIRD_AI_BINARY_NET_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -28,36 +32,36 @@ extern "C" {
 #endif
 
 /**
- * Yorumlayıcıyı kur ve tensörleri ayır. Bir kez, açılışta.
- * @return başarısızlıkta false; sebep seri porta yazılır.
+ * Build the interpreter and allocate tensors. Once, at startup.
+ * @return false on failure; the reason is printed to the serial console.
  */
 bool pb_binary_net_init(void);
 
-/** Ayrılan arena'nın GERÇEKTEN kullanılan kısmı (bayt). Ölçüm, tahmin değil. */
+/** How much of the arena is ACTUALLY used (bytes). Measured, not estimated. */
 size_t pb_binary_net_arena_used(void);
 
-/** Ayrılmış arena'nın toplam boyutu (bayt). */
+/** Total size of the allocated arena (bytes). */
 size_t pb_binary_net_arena_total(void);
 
-/** Girdi tensörünün ham int8 tamponu — PB_MEL_FRAMES*PB_MEL_BANDS bayt. */
+/** Raw int8 buffer of the input tensor — PB_MEL_FRAMES*PB_MEL_BANDS bytes. */
 int8_t *pb_binary_net_input(void);
 
-/** Bir çıkarım çalıştır. @return TfLiteStatus kOk ise true. */
+/** Run one inference. @return true when TfLiteStatus is kOk. */
 bool pb_binary_net_run(void);
 
-/** Son çıkarımın süresi (mikrosaniye). */
+/** Duration of the last inference (microseconds). */
 uint32_t pb_binary_net_last_time_us(void);
 
-/** Çıkış logit'i, ham int8 (sigmoid öncesi, TEK değer). */
+/** Output logit, raw int8 (pre-sigmoid, a SINGLE value). */
 int8_t pb_binary_net_output(void);
 
-/** Çıkış niceleştirme parametreleri (logit = (q - sifir) * olcek). */
+/** Output quantisation parameters (logit = (q - zero) * scale). */
 float pb_binary_net_output_scale(void);
 int   pb_binary_net_output_zero(void);
 
 /**
- * Son çıkarımın "kuş" olasılığı (sigmoid uygulanmış, 0..1).
- * pb_binary_net_run() sonrası çağrılmalı.
+ * P(bird) for the last inference, with the sigmoid applied (0..1).
+ * Call after pb_binary_net_run().
  */
 float pb_binary_net_probability(void);
 
@@ -65,4 +69,4 @@ float pb_binary_net_probability(void);
 }
 #endif
 
-#endif /* POKEBIRD_AI_IKILI_AGI_H */
+#endif /* POKEBIRD_AI_BINARY_NET_H */

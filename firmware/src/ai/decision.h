@@ -1,34 +1,38 @@
 /**
- * karar.h — Ekrana ne yazılacağına karar veren kural (M7 adım 2)
+ * decision.h — the rule that decides what goes on the screen (M7 step 2)
  *
- * NEDEN AYRI BİR MODÜL: birleştirme (tanima.c) her saniye yeni bir olasılık
- * dağılımı üretiyor. Onu doğrudan ekrana bağlarsak yazı her saniye zıplar ve
- * okunmaz. Arada bir karar kuralı gerekiyor: eşik + histerezis + tutma.
+ * WHY THIS IS A SEPARATE MODULE: the voting stage (recognizer.c) produces a
+ * fresh probability distribution every second. Wire that straight to the
+ * screen and the text jumps once a second and becomes unreadable. A decision
+ * rule belongs in between: threshold + hysteresis + hold.
  *
- * Bu dosya BİLEREK donanımsız: yalnızca stdint/stdbool. Böylece host tarafı
- * testlerde (test/dsp_test.c) zaman ilerletilerek sınanabiliyor — histerezisin
- * kartta hata ayıklanması pahalı olurdu.
+ * This file is DELIBERATELY hardware-free — stdint/stdbool only. That lets
+ * the host tests (firmware/test/dsp_test.c) exercise it by advancing time by
+ * hand; debugging hysteresis on the board would be expensive.
  *
- * ── EŞİKLER ÖLÇÜLDÜ, TAHMİN EDİLMEDİ ─────────────────────────────────────
+ * ── THE THRESHOLDS WERE MEASURED, NOT GUESSED ────────────────────────────
  *
- * `tools/measure_thresholds.py` test kümesinde (6.267 pencere / 1.288 kayıt, hiç
- * dokunulmamış bölüm) 8 pencerelik birleştirmenin p1 dağılımını taradı.
- * Çıktı: models/thresholds.txt. Ölçülen tablo (kapsam = kaç blokta tür adı yazarız,
- * isabet = yazdığımızda haklı olma oranı, yanlış alarm = negatif blokların
- * kaçında tür adı yazarız):
+ * `tools/measure_thresholds.py` swept the p1 distribution of the 8-window
+ * vote over the test set (6,267 windows / 1,288 recordings, a split never
+ * touched during training). Output: models/thresholds.txt. In that table,
+ * coverage = the share of blocks where we print a species name, precision =
+ * how often we are right when we do print one, and false alarm = the share of
+ * negative blocks where we print a name anyway:
  *
- *     eşik   kapsam   isabet   yanlış alarm
- *     0,35    %59,7    %71,7      %4,2
- *     0,45    %49,9    %79,0      %3,6
- *     0,50    %45,1    %81,8      %3,0
- *     0,60    %35,6    %85,4      %2,7      <- girme eşiği
- *     0,70    %28,6    %88,5      %2,4
- *     0,80    %20,3    %91,7      %1,5
+ *     threshold  coverage  precision  false alarm
+ *       0.35      59.7%      71.7%       4.2%
+ *       0.45      49.9%      79.0%       3.6%
+ *       0.50      45.1%      81.8%       3.0%
+ *       0.60      35.6%      85.4%       2.7%   <- enter threshold
+ *       0.70      28.6%      88.5%       2.4%
+ *       0.80      20.3%      91.7%       1.5%
  *
- * ⚠ Bu sayılar bir ÜST SINIR: bloklar örtüşmeyen dilimlerden ve dilimler
- * BirdNET'in kuş duyduğu yerler; cihazda pencereler 1 sn adımla örtüşüyor,
- * yani hatalar daha ilintili. Saha kalibrasyonu (M8) hâlâ gerekli — o zaman
- * `tools/measure_thresholds.py` yeniden çalıştırılıp bu üç sabit güncellenir.
+ * WARNING: these numbers are an UPPER BOUND. The blocks come from
+ * non-overlapping slices, and those slices are where BirdNET heard a bird. On
+ * the device the windows overlap at a one-second step, so the errors are more
+ * correlated than this. Field calibration (M8) is still needed; when it
+ * happens, re-run `tools/measure_thresholds.py` and update the three
+ * constants below.
  */
 #ifndef POKEBIRD_DECISION_H
 #define POKEBIRD_DECISION_H
@@ -36,84 +40,88 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/** Tür adını EKRANA YAZMA eşiği. Ölçüldü: isabet %85,4 · kapsam %35,6 ·
- *  yanlış alarm %2,7 (models/thresholds.txt, 8 pencere). */
+/** Threshold for PUTTING A SPECIES NAME ON SCREEN. Measured: precision 85.4%
+ *  · coverage 35.6% · false alarm 2.7% (models/thresholds.txt, 8 windows). */
 #define PB_DECISION_ENTER_THRESHOLD   0.60f
 
-/** Yazılanı SİLME eşiği — histerezisin alt ucu. Ölçüldü: isabet %71,7, yani
- *  birleştirilmiş top-1 doğruluğuyla (%70,40, §9k) aynı seviye. Buranın
- *  altındaki bir gösterim artık "en iyi tahmin"den daha iyi değil. */
+/** Threshold for CLEARING what is shown — the lower end of the hysteresis.
+ *  Measured: precision 71.7%, the same level as the voted top-1 accuracy
+ *  (70.40%). Below this a displayed name is no better than a plain best
+ *  guess, so it is not worth showing. */
 #define PB_DECISION_EXIT_THRESHOLD   0.35f
 
-/** Karar için gereken en az birleştirilmiş pencere sayısı. Ölçüldü: 0,60
- *  eşiğinde isabet 1 pencerede %70,1, 3 pencerede %84,9, 8 pencerede %85,4.
- *  Yani kazancın tamamı ilk üç pencerede; 3 hem hızlı hem yeterli. */
+/** Minimum number of voted windows before deciding anything. Measured: at the
+ *  0.60 threshold, precision is 70.1% with one window, 84.9% with three and
+ *  85.4% with eight. The whole gain lands in the first three windows, so
+ *  three is both fast and sufficient. */
 #define PB_DECISION_MIN_WINDOWS  3u
 
-/** Desteklenmeyen bir gösterimin ekranda kalma süresi. Ses kesilince kapı
- *  kapanır ve çıkarım durur; kullanıcının yazıyı okuyacak zamanı olmalı.
- *  5 s, tanima.c'deki BAYAT_MS'in (6 s, birleştirme belleğinin bayatlaması)
- *  altında seçildi: ekrandan silinen tür, birleştirme belleği temizlenmeden
- *  önce gider — yani "silindi ama hâlâ o türü destekleyen bellek var" hâli
- *  oluşmaz. */
+/** How long an unsupported display stays on screen. When the sound stops the
+ *  gate closes and inference halts, but the user still needs time to read the
+ *  name.
+ *
+ *  5 s was chosen to sit below STALE_MS in recognizer.c (6 s, when the voting
+ *  memory goes stale): a species cleared from the screen goes away BEFORE the
+ *  voting memory is flushed, so the confusing state of "cleared from the
+ *  screen but still supported by memory" never occurs. */
 #define PB_DECISION_HOLD_MS       5000u
 
-/** Kapı kapandıktan sonra "ses var" göstergesinin sönme süresi. 62 kare/s'de
- *  tek karelik açılıp kapanmalar gözle görülmez; `a` demosundaki ~0,5 s'lik
- *  tutmanın aynısı. */
+/** How long the "sound present" indicator lingers after the gate closes. At
+ *  62 fps a single-frame flicker is invisible, so it is held briefly — the
+ *  same ~0.5 s hold the `a` demo uses. */
 #define PB_DECISION_SOUND_HOLD_MS   700u
 
-/** Negatif / bilinmiyor sınıfının indeksi (siniflar.h'de son sınıf).
- *  main.c bunu PB_CLASS_COUNT'na karşı static_assert ile doğruluyor: sınıf
- *  tablosu yeniden üretilirse burası sessizce kaymasın. */
+/** Index of the negative / unknown class (the last class in classes.h).
+ *  main.c static_asserts this against PB_CLASS_COUNT so that regenerating the
+ *  class table cannot silently shift it. */
 #define PB_DECISION_NEGATIVE_CLASS 178
 
 typedef enum {
-    PB_DECISION_LISTENING = 0,  /* sessiz — kapı kapalı                        */
-    PB_DECISION_SOUND,           /* kapı açık, henüz gösterilecek bir tür yok   */
-    PB_DECISION_UNSURE,      /* eşikler arasında: "olabilir"                */
-    PB_DECISION_SPECIES            /* girme eşiğinin üstünde: tür adı             */
+    PB_DECISION_LISTENING = 0, /* quiet — the gate is closed                 */
+    PB_DECISION_SOUND,         /* gate open, no species to show yet          */
+    PB_DECISION_UNSURE,        /* between the thresholds: "maybe"            */
+    PB_DECISION_SPECIES        /* above the enter threshold: a species name  */
 } pb_decision_mode_t;
 
 typedef struct {
-    uint32_t now_ms;      /* şu an (to_ms_since_boot)                    */
-    bool     gate_open;     /* Aşama-0 kapısı bu an açık mı                */
-    bool     fresh_result;    /* bu çağrıda yeni bir birleştirme geldi mi    */
-    int16_t  cls;         /* birleştirilmiş top-1 sınıf indeksi          */
-    float    probability;      /* o sınıfın birleştirilmiş olasılığı (0..1)   */
-    uint32_t merged;      /* kaç pencere birleştirildi                   */
+    uint32_t now_ms;       /* current time (to_ms_since_boot)             */
+    bool     gate_open;    /* is the stage-0 gate open right now           */
+    bool     fresh_result; /* did a new vote arrive on this call            */
+    int16_t  cls;          /* voted top-1 class index                       */
+    float    probability;  /* that class's voted probability (0..1)         */
+    uint32_t merged;       /* how many windows were voted together          */
 } pb_decision_input_t;
 
 typedef struct {
     pb_decision_mode_t mode;
-    int16_t  cls;         /* gösterilen sınıf; kip < BELIRSIZ ise -1     */
-    float    confidence;         /* gösterilen sınıfın son desteklenen olasılığı*/
+    int16_t  cls;              /* class on show; -1 when mode < UNSURE      */
+    float    confidence;       /* its most recently supported probability   */
 
-    /* ── iç durum ── */
-    uint32_t last_gate_ms;   /* kapının en son açık görüldüğü an            */
-    uint32_t last_support_ms; /* gösterimin en son desteklendiği an          */
-    uint32_t enter_ms;      /* gösterime geçilen an (günlük/istatistik)    */
-    uint32_t version;         /* ekranda görünen şey her değiştiğinde artar  */
+    /* ── internal state ── */
+    uint32_t last_gate_ms;     /* when the gate was last seen open          */
+    uint32_t last_support_ms;  /* when the display was last supported       */
+    uint32_t enter_ms;         /* when we entered this display (for stats)  */
+    uint32_t version;          /* bumped whenever what is on screen changes */
 } pb_decision_t;
 
 /**
- * Durumu başlangıç hâline al.
+ * Reset the state.
  *
- * `simdi_ms` isteniyor çünkü zaman aşımları mutlak zaman damgalarıyla
- * çalışıyor: sıfırdan başlatılan bir "kapı en son şu an açıktı" damgası,
- * açılıştan 700 ms sonra başlatılan bir kip için "ses var" anlamına gelirdi.
+ * `now_ms` is required because the timeouts work on absolute timestamps: a
+ * "the gate was last open at..." stamp initialised to zero would read as
+ * "sound present" for any mode started more than 700 ms after boot.
  */
-void pb_decision_reset(pb_decision_t *k, uint32_t now_ms);
+void pb_decision_reset(pb_decision_t *d, uint32_t now_ms);
 
 /**
- * Kuralı bir adım ilerlet. Her arayüz turunda çağrılır; yeni bir birleştirme
- * olmasa bile çağrılmalı, çünkü zaman aşımları (tutma, ses sönmesi) burada
- * işliyor.
+ * Advance the rule by one step. Called on every UI turn, and it must be
+ * called even when no new vote arrived, because the timeouts (hold, sound
+ * decay) are driven from here.
  */
-void pb_decision_update(pb_decision_t *k, const pb_decision_input_t *g);
+void pb_decision_update(pb_decision_t *d, const pb_decision_input_t *in);
 
-/** Kip için sabit durum yazısı — arayüz ve seri port aynı sözcükleri
- *  kullansın diye tek yerde. */
+/** Fixed status text for a mode — kept in one place so the UI and the serial
+ *  console use the same words. */
 const char *pb_decision_mode_name(pb_decision_mode_t mode);
 
 #endif /* POKEBIRD_DECISION_H */

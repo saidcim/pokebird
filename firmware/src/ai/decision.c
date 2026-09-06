@@ -1,106 +1,111 @@
 /**
- * karar.c — Eşik + histerezis + tutma. Gerekçeler ve ölçülen sayılar karar.h'de.
+ * decision.c — threshold + hysteresis + hold. The reasoning and the measured
+ * numbers live in decision.h.
  *
- * KURALIN TAMAMI (bilerek küçük — okunabilir olması, doğru olmasının yarısı):
+ * THE WHOLE RULE (deliberately small — being readable is half of being right):
  *
- *   yeni bir birleştirme geldiğinde
- *     aday geçerli mi?  sınıf negatif değil ve en az MIN_PENCERE pencere
- *       p >= GIRIS                         -> TÜR göster (sınıfı değiştirebilir)
- *       p >= CIKIS ve aynı sınıf zaten ekranda -> kip korunur, destek tazelenir
- *       p >= CIKIS ve ekranda bir şey yok  -> BELİRSİZ göster
- *       aksi hâlde                          -> destek yok
+ *   when a new vote arrives
+ *     is the candidate valid?  class is not the negative one, and at least
+ *                              MIN_WINDOWS windows were voted
+ *       p >= ENTER                             -> show SPECIES (may switch class)
+ *       p >= EXIT and the same class is up     -> keep the mode, refresh support
+ *       p >= EXIT and nothing is on screen     -> show UNSURE
+ *       otherwise                              -> no support
  *
- *   her turda
- *     gösterim TUT_MS boyunca desteklenmediyse silinir
- *     gösterim yoksa kip = kapı yakın zamanda açıldıysa SES, değilse DİNLİYOR
+ *   every turn
+ *     a display unsupported for HOLD_MS is cleared
+ *     with nothing on show, the mode is SOUND if the gate opened recently,
+ *     otherwise LISTENING
  *
- * DİKKAT — "aynı sınıf zaten ekranda" dalı histerezisin kendisi: ekrandaki
- * türün yerini almak GIRIS eşiği ister, kalması ise yalnızca CIKIS eşiği.
- * Böylece güven eşiğin etrafında salınırken yazı zıplamıyor. Farklı bir tür
- * CIKIS ile GIRIS arasında bir güvenle gelirse gösterimi DEĞİŞTİRMİYOR;
- * eskisi tutma süresi dolana kadar kalıyor. Bilinçli: ekranı ikinci en iyi
- * tahminle titretmektense biraz eski bilgi göstermek yeğ.
+ * NOTE — the "same class is already up" branch IS the hysteresis: replacing
+ * the species on screen costs the ENTER threshold, while merely staying costs
+ * only EXIT. That stops the text from flickering while confidence wanders
+ * around the threshold. A DIFFERENT species arriving with a confidence
+ * between EXIT and ENTER does NOT take over; the old one stays until its hold
+ * expires. That is deliberate: showing slightly stale information beats
+ * flickering the screen with the second-best guess.
  */
 #include "ai/decision.h"
 
-static void show(pb_decision_t *k, pb_decision_mode_t mode, int16_t cls,
-                   float confidence, uint32_t now_ms) {
-    if (k->mode != mode || k->cls != cls) {
-        k->enter_ms = now_ms;
-        k->version++;
+static void show(pb_decision_t *d, pb_decision_mode_t mode, int16_t cls,
+                 float confidence, uint32_t now_ms) {
+    if (d->mode != mode || d->cls != cls) {
+        d->enter_ms = now_ms;
+        d->version++;
     }
-    k->mode = mode;
-    k->cls = cls;
-    k->confidence = confidence;
-    k->last_support_ms = now_ms;
+    d->mode = mode;
+    d->cls = cls;
+    d->confidence = confidence;
+    d->last_support_ms = now_ms;
 }
 
-void pb_decision_reset(pb_decision_t *k, uint32_t now_ms) {
-    if (!k) return;
-    k->mode = PB_DECISION_LISTENING;
-    k->cls = -1;
-    k->confidence = 0.0f;
-    /* "Çoktan geçmişte": açılışta ne ses göstergesi ne de bir gösterim
-     * tutması yanlışlıkla canlı görünsün. Fark hesapları işaretsiz olduğu
-     * için taşma da doğru çalışıyor. */
-    k->last_gate_ms = now_ms - (PB_DECISION_SOUND_HOLD_MS + 1u);
-    k->last_support_ms = now_ms - (PB_DECISION_HOLD_MS + 1u);
-    k->enter_ms = now_ms;
-    k->version = 0;
+void pb_decision_reset(pb_decision_t *d, uint32_t now_ms) {
+    if (!d) return;
+    d->mode = PB_DECISION_LISTENING;
+    d->cls = -1;
+    d->confidence = 0.0f;
+    /* "Already well in the past": at boot neither the sound indicator nor a
+     * display hold should look live by accident. The differences are computed
+     * unsigned, so this stays correct across wraparound too. */
+    d->last_gate_ms = now_ms - (PB_DECISION_SOUND_HOLD_MS + 1u);
+    d->last_support_ms = now_ms - (PB_DECISION_HOLD_MS + 1u);
+    d->enter_ms = now_ms;
+    d->version = 0;
 }
 
-void pb_decision_update(pb_decision_t *k, const pb_decision_input_t *g) {
-    if (!k || !g) return;
+void pb_decision_update(pb_decision_t *d, const pb_decision_input_t *in) {
+    if (!d || !in) return;
 
-    if (g->gate_open) k->last_gate_ms = g->now_ms;
+    if (in->gate_open) d->last_gate_ms = in->now_ms;
 
-    if (g->fresh_result) {
+    if (in->fresh_result) {
         const bool candidate =
-            g->cls >= 0 &&
-            g->cls != PB_DECISION_NEGATIVE_CLASS &&
-            g->merged >= PB_DECISION_MIN_WINDOWS;
-        const bool gosteriliyor =
-            (k->mode == PB_DECISION_SPECIES || k->mode == PB_DECISION_UNSURE);
+            in->cls >= 0 &&
+            in->cls != PB_DECISION_NEGATIVE_CLASS &&
+            in->merged >= PB_DECISION_MIN_WINDOWS;
+        const bool showing =
+            (d->mode == PB_DECISION_SPECIES || d->mode == PB_DECISION_UNSURE);
 
-        if (candidate && g->probability >= PB_DECISION_ENTER_THRESHOLD) {
-            show(k, PB_DECISION_SPECIES, g->cls, g->probability, g->now_ms);
-        } else if (candidate && g->probability >= PB_DECISION_EXIT_THRESHOLD &&
-                   gosteriliyor && g->cls == k->cls) {
-            /* Histerezis: ekrandaki tür, çıkma eşiğinin üstünde kaldığı
-             * sürece kipini korur — TÜR ise TÜR kalır. */
-            show(k, k->mode, k->cls, g->probability, g->now_ms);
-        } else if (candidate && g->probability >= PB_DECISION_EXIT_THRESHOLD && !gosteriliyor) {
-            show(k, PB_DECISION_UNSURE, g->cls, g->probability, g->now_ms);
+        if (candidate && in->probability >= PB_DECISION_ENTER_THRESHOLD) {
+            show(d, PB_DECISION_SPECIES, in->cls, in->probability, in->now_ms);
+        } else if (candidate && in->probability >= PB_DECISION_EXIT_THRESHOLD &&
+                   showing && in->cls == d->cls) {
+            /* Hysteresis: the species on screen keeps its mode for as long as
+             * it stays above the exit threshold — SPECIES stays SPECIES. */
+            show(d, d->mode, d->cls, in->probability, in->now_ms);
+        } else if (candidate && in->probability >= PB_DECISION_EXIT_THRESHOLD &&
+                   !showing) {
+            show(d, PB_DECISION_UNSURE, in->cls, in->probability, in->now_ms);
         }
-        /* aksi hâlde: destek yok, aşağıdaki tutma süresi karar versin */
+        /* otherwise: no support, let the hold below decide */
     }
 
-    if (k->mode == PB_DECISION_SPECIES || k->mode == PB_DECISION_UNSURE) {
-        if (g->now_ms - k->last_support_ms > PB_DECISION_HOLD_MS) {
-            k->cls = -1;
-            k->confidence = 0.0f;
-            k->mode = PB_DECISION_LISTENING;   /* aşağıdaki satır SES'e yükseltebilir */
-            k->version++;
+    if (d->mode == PB_DECISION_SPECIES || d->mode == PB_DECISION_UNSURE) {
+        if (in->now_ms - d->last_support_ms > PB_DECISION_HOLD_MS) {
+            d->cls = -1;
+            d->confidence = 0.0f;
+            d->mode = PB_DECISION_LISTENING;  /* the block below may raise this to SOUND */
+            d->version++;
         }
     }
 
-    if (k->mode != PB_DECISION_SPECIES && k->mode != PB_DECISION_UNSURE) {
+    if (d->mode != PB_DECISION_SPECIES && d->mode != PB_DECISION_UNSURE) {
         const pb_decision_mode_t fresh =
-            (g->now_ms - k->last_gate_ms <= PB_DECISION_SOUND_HOLD_MS)
+            (in->now_ms - d->last_gate_ms <= PB_DECISION_SOUND_HOLD_MS)
                 ? PB_DECISION_SOUND : PB_DECISION_LISTENING;
-        if (fresh != k->mode) {
-            k->mode = fresh;
-            k->version++;
+        if (fresh != d->mode) {
+            d->mode = fresh;
+            d->version++;
         }
     }
 }
 
 const char *pb_decision_mode_name(pb_decision_mode_t mode) {
     switch (mode) {
-        case PB_DECISION_LISTENING:  return "dinliyor";
-        case PB_DECISION_SOUND:       return "SES ALGILANDI";
-        case PB_DECISION_UNSURE:  return "olabilir";
-        case PB_DECISION_SPECIES:       return "TUR";
+        case PB_DECISION_LISTENING: return "listening";
+        case PB_DECISION_SOUND:     return "SOUND DETECTED";
+        case PB_DECISION_UNSURE:    return "maybe";
+        case PB_DECISION_SPECIES:   return "SPECIES";
     }
     return "?";
 }

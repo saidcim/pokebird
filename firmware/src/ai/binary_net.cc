@@ -1,8 +1,9 @@
 /**
- * ikili_agi.cc — Aşama-1 ikili ağ, TFLM ile çıkarım
+ * binary_net.cc — stage-1 binary net, inference through TFLM
  *
- * tur_agi.cc ile aynı desen (M6): statik BSS arena'sı, malloc yok, ölçülebilir
- * bütçe. Fark: çıkış tek skaler (sigmoid öncesi ham logit), 179 sınıf değil.
+ * Same pattern as species_net.cc (M6): a static arena in BSS, no malloc, a
+ * budget you can measure. The difference is that the output is a single
+ * scalar (the raw pre-sigmoid logit) rather than 179 classes.
  */
 #include "ai/binary_net.h"
 
@@ -18,24 +19,26 @@
 
 #include "../../../models/binary_net_int8.h"
 
-/* Arena boyutu — ÖLÇÜLDÜ, tahmin değil (tur_agi.cc'deki gerekçenin aynısı).
+/* Arena size — MEASURED, not guessed (same reasoning as species_net.cc).
  *
- * İlk tahmin (32 KB) yetmedi: TFLM "60.160 bayt istiyorum" dedi. 96 KB'a
- * geçici büyütülüp `X` komutuyla ölçüldü: arena_used_bytes() = 63.876 bayt.
- * 72 KB ayrılıyor: ölçülenin üstünde 9.852 bayt (%15) pay — tur_agi.cc'deki
- * gibi TFLM'in hizalama davranışı yerleşime göre birkaç yüz bayt oynayabilir.
+ * The first guess (32 KB) was not enough: TFLM asked for 60,160 bytes. Grown
+ * temporarily to 96 KB and measured with the `X` command:
+ * arena_used_bytes() = 63,876 bytes. We allocate 72 KB, leaving 9,852 bytes
+ * (15%) of headroom above the measurement — as in species_net.cc, TFLM's
+ * alignment behaviour can shift by a few hundred bytes with the layout.
  *
- * ⚠ MODEL DEĞİŞİRSE BU SAYI DA DEĞİŞİR. `X` komutu her koşuda kullanılan
- * baytı basıyor. CMake'ten -DPB_IKILI_ARENA_BAYT=... ile ezilebilir. */
+ * WARNING: IF THE MODEL CHANGES, SO DOES THIS NUMBER. The `X` command prints
+ * the bytes actually used on every run. It can be overridden from CMake with
+ * -DPB_BINARY_ARENA_BYTES=... */
 #ifndef PB_BINARY_ARENA_BYTES
 #define PB_BINARY_ARENA_BYTES (72 * 1024)
 #endif
 
 alignas(16) static uint8_t s_arena[PB_BINARY_ARENA_BYTES];
 
-/* Aynı dört op türü tür ağıyla ölçüldü (CONV_2D 4, DEPTHWISE_CONV_2D 3,
- * FULLY_CONNECTED 1, MEAN 1) — küçük model ama aynı katman türlerinden
- * kurulu (bkz. tools/train_binary.py model_kur). */
+/* The same four op types as the species net (CONV_2D 4,
+ * DEPTHWISE_CONV_2D 3, FULLY_CONNECTED 1, MEAN 1) — a small model, but built
+ * from the same kinds of layer (see build_model in tools/train_binary.py). */
 static tflite::MicroMutableOpResolver<4> s_resolver;
 
 alignas(alignof(tflite::MicroInterpreter))
@@ -51,7 +54,7 @@ extern "C" bool pb_binary_net_init(void) {
 
     const tflite::Model *model = tflite::GetModel(pb_binary_net);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
-        printf("[!] IKILI AGI: sema surumu %lu, beklenen %d\n",
+        printf("[!] BINARY NET: schema version %lu, expected %d\n",
                (unsigned long)model->version(), TFLITE_SCHEMA_VERSION);
         return false;
     }
@@ -60,7 +63,7 @@ extern "C" bool pb_binary_net_init(void) {
         s_resolver.AddDepthwiseConv2D() != kTfLiteOk ||
         s_resolver.AddFullyConnected()  != kTfLiteOk ||
         s_resolver.AddMean()            != kTfLiteOk) {
-        printf("[!] IKILI AGI: op kaydi basarisiz\n");
+        printf("[!] BINARY NET: op registration failed\n");
         return false;
     }
 
@@ -68,8 +71,8 @@ extern "C" bool pb_binary_net_init(void) {
         model, s_resolver, s_arena, sizeof(s_arena));
 
     if (s_interp->AllocateTensors() != kTfLiteOk) {
-        printf("[!] IKILI AGI: AllocateTensors BASARISIZ — arena %u bayt yetmedi.\n"
-               "    PB_BINARY_ARENA_BYTES'i buyutup tekrar deneyin.\n",
+        printf("[!] BINARY NET: AllocateTensors FAILED - an arena of %u bytes was not enough.\n"
+               "    Increase PB_BINARY_ARENA_BYTES and try again.\n",
                (unsigned)sizeof(s_arena));
         s_interp = nullptr;
         return false;
@@ -78,26 +81,26 @@ extern "C" bool pb_binary_net_init(void) {
     s_input = s_interp->input(0);
     s_output = s_interp->output(0);
 
-    /* Cihaz sözleşmesinin cihaz tarafındaki sağlaması (tur_agi.cc'deki
-     * gerekçenin aynısı, §9k): model değişip ölçek 1.0'dan kayarsa memcpy
-     * sessizce yanlış girdi verir. */
-    const size_t waiting = (size_t)PB_MEL_FRAMES * PB_MEL_BANDS;
-    if (s_input->type != kTfLiteInt8 || s_input->bytes != waiting) {
-        printf("[!] IKILI AGI: girdi tensoru uyumsuz (tip %d, %u bayt; "
-               "beklenen int8 %u bayt)\n",
+    /* The device-side check of the device contract (same reasoning as
+     * species_net.cc): if the model changes and the scale drifts away from
+     * 1.0, the memcpy would silently feed the net the wrong input. */
+    const size_t expected = (size_t)PB_MEL_FRAMES * PB_MEL_BANDS;
+    if (s_input->type != kTfLiteInt8 || s_input->bytes != expected) {
+        printf("[!] BINARY NET: input tensor mismatch (type %d, %u bytes; "
+               "expected int8 %u bytes)\n",
                (int)s_input->type, (unsigned)s_input->bytes,
-               (unsigned)waiting);
+               (unsigned)expected);
         s_interp = nullptr;
         return false;
     }
     if (s_input->params.scale != 1.0f || s_input->params.zero_point != 0) {
-        printf("[!] IKILI AGI: girdi olcegi %.6f / sifir %d — 1.0 / 0 bekleniyordu.\n",
+        printf("[!] BINARY NET: input scale %.6f / zero %d - expected 1.0 / 0.\n",
                (double)s_input->params.scale, (int)s_input->params.zero_point);
         s_interp = nullptr;
         return false;
     }
     if (s_output->type != kTfLiteInt8 || s_output->bytes != 1) {
-        printf("[!] IKILI AGI: cikti tensoru uyumsuz (%u bayt, beklenen 1)\n",
+        printf("[!] BINARY NET: output tensor mismatch (%u bytes, expected 1)\n",
                (unsigned)s_output->bytes);
         s_interp = nullptr;
         return false;
