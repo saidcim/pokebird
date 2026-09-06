@@ -206,26 +206,26 @@ def main():
 
         code, tr_name, max_name = taksonomi.get(sci, ("", "", ""))
 
-        status, gerekce = "dahil", ""
+        status, gerekce = "included", ""
         if sci in EGZOTIK:
-            status, gerekce = "elendi", EGZOTIK[sci]
+            status, gerekce = "excluded", EGZOTIK[sci]
         elif sci in SESLE_AYIRT_EDILEMEZ:
-            status, gerekce = "elendi", SESLE_AYIRT_EDILEMEZ[sci]
+            status, gerekce = "excluded", SESLE_AYIRT_EDILEMEZ[sci]
         elif count < args.threshold:
-            status, gerekce = "elendi", f"Istanbul'da yalnizca {count} kayit (esik {args.threshold})"
+            status, gerekce = "excluded", f"Istanbul'da yalnizca {count} kayit (esik {args.threshold})"
         elif not code:
             # eBird taksonomisinde yoksa ya alt tür ya da eskimiş bir ad.
             # Sessizce dahil etmek yanlış: Xeno-canto sorgusu da tutmaz.
-            status, gerekce = "elendi", "eBird taksonomisinde eslesmedi"
+            status, gerekce = "excluded", "eBird taksonomisinde eslesmedi"
 
         rows.append({
-            "ebird_kodu": code, "bilimsel_ad": sci, "turkce_ad": tr_name,
-            "ingilizce_ad": max_name, "gbif_kayit": count, "gbif_species_key": key,
-            "durum": status, "gerekce": gerekce,
+            "ebird_code": code, "scientific_name": sci, "turkish_name": tr_name,
+            "english_name": max_name, "gbif_records": count, "gbif_species_key": key,
+            "status": status, "reason": gerekce,
         })
 
     if args.monthly:
-        include = [s for s in rows if s["durum"] == "dahil"]
+        include = [s for s in rows if s["status"] == "included"]
         print(f"Aylik dagilim cekiliyor ({len(include)} tur)...")
         for i, s in enumerate(include, 1):
             key = s["gbif_species_key"]
@@ -235,8 +235,8 @@ def main():
             if i % 25 == 0 or i == len(include):
                 print(f"  {i}/{len(include)}")
 
-    sutunlar = ["ebird_kodu", "bilimsel_ad", "turkce_ad", "ingilizce_ad",
-                "gbif_kayit", "gbif_species_key", "durum", "gerekce"]
+    sutunlar = ["ebird_code", "scientific_name", "turkish_name", "english_name",
+                "gbif_records", "gbif_species_key", "status", "reason"]
     if args.monthly:
         sutunlar += [f"ay_{a:02d}" for a in range(1, 13)]
 
@@ -246,7 +246,7 @@ def main():
         for s in rows:
             w.writerow(s)
 
-    include = sum(1 for s in rows if s["durum"] == "dahil")
+    include = sum(1 for s in rows if s["status"] == "included")
     elendi = len(rows) - include
     print(f"\n{args.out}")
     print(f"  dahil  {include} tur")
@@ -254,7 +254,7 @@ def main():
 
     if include:
         print("\nEn cok kaydi olan 10 tur:")
-        for s in [x for x in rows if x["durum"] == "dahil"][:10]:
+        for s in [x for x in rows if x["status"] == "included"][:10]:
             print(f"  {s['gbif_kayit']:7,}  {s['turkce_ad'] or s['bilimsel_ad']}")
 
     # Plan ~110 tür öngörüyor. Buradaki liste HAVUZ; nihai daraltmayı

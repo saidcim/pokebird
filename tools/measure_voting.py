@@ -68,7 +68,7 @@ def main():
     y = np.load(os.path.join(TRAIN, "etiket.npy"))
     with open(os.path.join(TRAIN, "ornekler.csv"), encoding="utf-8") as f:
         r = list(csv.DictReader(f))
-    name = {int(s["sinif"]): s["turkce_ad"] for s in
+    name = {int(s["class_index"]): s["turkish_name"] for s in
           csv.DictReader(open(os.path.join(TRAIN, "siniflar.csv"),
                               encoding="utf-8"))}
 
@@ -79,7 +79,7 @@ def main():
     # Ayni kaydin dilimlerini zaman sirasina diz.
     record = defaultdict(list)
     for k, i in enumerate(idx):
-        record[(r[i]["ebird_kodu"], r[i]["dosya"])].append(
+        record[(r[i]["ebird_code"], r[i]["file"])].append(
             (float(r[i]["baslangic"]), k))
     for v in record.values():
         v.sort()

@@ -32,7 +32,7 @@ def calistir(args):
 
 def include_count():
     with open(CSV_PATH, encoding="utf-8") as f:
-        return sum(1 for r in csv.DictReader(f) if r["durum"] == "dahil")
+        return sum(1 for r in csv.DictReader(f) if r["status"] == "included")
 
 
 def main():

@@ -206,7 +206,7 @@ def checksum():
         with open(seg, encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 if float(r["hedef_guven"]) >= 0.9:
-                    y = os.path.join(DATA, "wav", r["ebird_kodu"], r["dosya"] + ".wav")
+                    y = os.path.join(DATA, "wav", r["ebird_code"], r["file"] + ".wav")
                     if os.path.exists(y):
                         s = wav_oku(y)
                         b = int(round(float(r["baslangic"]) * SR))
@@ -280,14 +280,14 @@ def checksum():
 # ══ 3b. Uretilen kumeyi dogrula ═════════════════════════════════════════
 def _row_audio(s):
     """ornekler.csv satiri -> kaynak WAV yolu ve pencere ornekleri."""
-    if s["ebird_kodu"] == NEGATIVE_NAME:
+    if s["ebird_code"] == NEGATIVE_NAME:
         record = os.path.join(DATA, "negatif", "esc50_kayitlar.csv")
         with open(record, encoding="utf-8") as f:
             for r in csv.DictReader(f):
-                if os.path.basename(r["dosya"]) == s["dosya"]:
-                    return os.path.join(ROOT, r["dosya"])
+                if os.path.basename(r["file"]) == s["file"]:
+                    return os.path.join(ROOT, r["file"])
         return None
-    return os.path.join(DATA, "wav", s["ebird_kodu"], s["dosya"] + ".wav")
+    return os.path.join(DATA, "wav", s["ebird_code"], s["file"] + ".wav")
 
 
 def output_verify(out, n):
@@ -317,11 +317,11 @@ def output_verify(out, n):
     record_split = defaultdict(set)
     kisi_split = defaultdict(set)
     for s in rows:
-        if s["ebird_kodu"] == NEGATIVE_NAME:
+        if s["ebird_code"] == NEGATIVE_NAME:
             continue
-        record_split[(s["ebird_kodu"], s["dosya"])].add(s["bolum"])
+        record_split[(s["ebird_code"], s["file"])].add(s["bolum"])
         if s["kaydeden"]:
-            kisi_split[(s["ebird_kodu"], s["kaydeden"])].add(s["bolum"])
+            kisi_split[(s["ebird_code"], s["kaydeden"])].add(s["bolum"])
     bol_record = [k for k, v in record_split.items() if len(v) > 1]
     bol_kisi = [k for k, v in kisi_split.items() if len(v) > 1]
     print(f"sizinti · birden fazla bolumde olan kayit : {len(bol_record)}  (0 olmali)")
@@ -424,9 +424,9 @@ def species_haritasi():
         sys.exit(f"ad haritasi yok: {path} — once tools/birdnet_slist.py (§5.16)")
     with open(path, encoding="utf-8") as f:
         r = list(csv.DictReader(f))
-    return ({x["ebird_kodu"]: x["birdnet_bilimsel_ad"] for x in r},
-            {x["ebird_kodu"]: x["turkce_ad"] for x in r},
-            {x["ebird_kodu"]: x["bizim_bilimsel_ad"] for x in r})
+    return ({x["ebird_code"]: x["birdnet_scientific_name"] for x in r},
+            {x["ebird_code"]: x["turkish_name"] for x in r},
+            {x["ebird_code"]: x["our_scientific_name"] for x in r})
 
 
 def kaydedenler():
@@ -437,7 +437,7 @@ def kaydedenler():
               f"(kisi bazinda degil)")
         return {}
     with open(path, encoding="utf-8") as f:
-        return {os.path.splitext(os.path.basename(r["dosya"]))[0]: r["kaydeden"]
+        return {os.path.splitext(os.path.basename(r["file"]))[0]: r["kaydeden"]
                 for r in csv.DictReader(f)}
 
 
@@ -557,7 +557,7 @@ def main():
     threshold_alti = loss_wav = kisa = 0
     with open(seg, encoding="utf-8") as f:
         for r in csv.DictReader(f):
-            code = r["ebird_kodu"]
+            code = r["ebird_code"]
             if a.species and code not in a.species:
                 continue
             if code not in cls_indeks:
@@ -565,7 +565,7 @@ def main():
             if float(r["hedef_guven"]) < a.threshold:
                 threshold_alti += 1
                 continue
-            path = os.path.join(DATA, "wav", code, r["dosya"] + ".wav")
+            path = os.path.join(DATA, "wav", code, r["file"] + ".wav")
             if path not in length:
                 length[path] = wav_length(path)
             n = length[path]
@@ -581,12 +581,12 @@ def main():
             # bir blok yapar ve pencere normalizasyonunu bozar.
             start = int(round(float(r["baslangic"]) * SR))
             start = max(0, min(start, n - WINDOW_SAMPLES))
-            contaminated = int(r["en_iyi_tur"] != birdnet_name[code])
+            contaminated = int(r["best_species"] != birdnet_name[code])
             if contaminated and a.contaminated == "at":
                 continue
-            candidate.append((code, r["dosya"], start, float(r["baslangic"]),
+            candidate.append((code, r["file"], start, float(r["baslangic"]),
                          float(r["hedef_guven"]), contaminated,
-                         r["en_iyi_tur"], float(r["en_iyi_guven"] or 0)))
+                         r["best_species"], float(r["en_iyi_guven"] or 0)))
             if a.limit and len(candidate) >= a.limit:
                 break
 
@@ -666,11 +666,11 @@ def main():
             for j, c in ogr.get((round(start_sn, 1), round(start_sn + 3.0, 1)), {}).items():
                 T[write, j] = c
             rows.append({
-                "indeks": write, "sinif": cls_indeks[code], "ebird_kodu": code,
-                "turkce_ad": turkce[code], "dosya": file,
+                "indeks": write, "class_index": cls_indeks[code], "ebird_code": code,
+                "turkish_name": turkce[code], "file": file,
                 "baslangic": f"{start_sn:.1f}", "pencere_ornek": start,
                 "bolum": split_of[i], "bulasik": contaminated,
-                "hedef_guven": f"{guven:.4f}", "en_iyi_tur": best,
+                "hedef_guven": f"{guven:.4f}", "best_species": best,
                 "en_iyi_guven": f"{max_iyi_g:.4f}",
                 "kaydeden": kisi.get(file, ""),
             })
@@ -694,11 +694,11 @@ def main():
         X[write] = p
         y[write] = negative_indeks
         rows.append({
-            "indeks": write, "sinif": negative_indeks, "ebird_kodu": NEGATIVE_NAME,
-            "turkce_ad": kategori, "dosya": os.path.basename(path),
+            "indeks": write, "class_index": negative_indeks, "ebird_code": NEGATIVE_NAME,
+            "turkish_name": kategori, "file": os.path.basename(path),
             "baslangic": f"{ofset / SR:.1f}", "pencere_ornek": ofset,
             "bolum": split, "bulasik": 0, "hedef_guven": "",
-            "en_iyi_tur": "", "en_iyi_guven": "", "kaydeden": "ESC-50",
+            "best_species": "", "en_iyi_guven": "", "kaydeden": "ESC-50",
         })
         write += 1
 
@@ -729,7 +729,7 @@ def main():
     with open(os.path.join(a.out, "siniflar.csv"), "w", encoding="utf-8",
               newline="") as f:
         w = csv.writer(f)
-        w.writerow(["sinif", "ebird_kodu", "turkce_ad", "birdnet_bilimsel_ad"])
+        w.writerow(["class_index", "ebird_code", "turkish_name", "birdnet_scientific_name"])
         for k in kodlar:
             w.writerow([cls_indeks[k], k, turkce[k], birdnet_name[k]])
         w.writerow([negative_indeks, NEGATIVE_NAME, "negatif / bilinmiyor", ""])
@@ -777,20 +777,20 @@ def negative_listesi(a, name_cls):
     out, elenen = [], 0
     with open(record, encoding="utf-8") as f:
         for r in csv.DictReader(f):
-            name = os.path.basename(r["dosya"])
+            name = os.path.basename(r["file"])
             if dirty.get(name, 0.0) >= a.negative_bird_threshold:
                 elenen += 1
                 continue
             fold = r.get("fold", "")
             split = {"5": "test", "4": "dogrulama"}.get(fold, "egitim")
-            path = os.path.join(ROOT, r["dosya"])
+            path = os.path.join(ROOT, r["file"])
             klip = wav_length(path) or 0
             if klip < WINDOW_SAMPLES:
                 continue
             n = max(1, a.negative_window)
             for k in range(n):
                 ofset = 0 if n == 1 else int(round(k * (klip - WINDOW_SAMPLES) / (n - 1)))
-                out.append((path, ofset, split, r["kategori"]))
+                out.append((path, ofset, split, r["category"]))
     if elenen:
         print(f"negatif: kus duyulan {elenen} klip elendi "
               f"(esik {a.negative_bird_threshold})")
@@ -804,9 +804,9 @@ def rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, total,
     contaminated_count = defaultdict(int)
     for s in rows:
         split_count[s["bolum"]] += 1
-        species_split[s["ebird_kodu"]][s["bolum"]] += 1
+        species_split[s["ebird_code"]][s["bolum"]] += 1
         if s["bulasik"]:
-            contaminated_count[s["ebird_kodu"]] += 1
+            contaminated_count[s["ebird_code"]] += 1
 
     var = [k for k in kodlar if species_split[k]]        # bu kosuda yer alan turler
     yok = [k for k in kodlar if not species_split[k]]

@@ -194,8 +194,8 @@ def main():
                 print(f"!! cevrilemedi {name}: {err}")
                 continue
         record.append({
-            "dosya": os.path.relpath(target, ROOT),
-            "kategori": r["category"],
+            "file": os.path.relpath(target, ROOT),
+            "category": r["category"],
             "esc50_dosya": name,
             # fold ve kaynak dosya SIZINTIYI ONLEMEK icin lazim: ayni Freesound
             # kaydindan kesilmis birden fazla klip var. ESC-50'nin kendi 5
@@ -219,7 +219,7 @@ def main():
     sample = random.Random(0).sample(record, min(20, len(record)))
     dogru = 0
     for k in sample:
-        with wave.open(os.path.join(ROOT, k["dosya"]), "rb") as w:
+        with wave.open(os.path.join(ROOT, k["file"]), "rb") as w:
             if (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (TARGET_SR, 1, 2):
                 dogru += 1
 

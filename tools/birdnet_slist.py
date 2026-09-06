@@ -86,24 +86,24 @@ def main():
         scientific.setdefault(et.split("_", 1)[0], et)
 
     with open(a.csv, encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if r["durum"] == "dahil"]
+        rows = [r for r in csv.DictReader(f) if r["status"] == "included"]
 
     label_subset = set(labels)
     secilen, missing, farkli = [], [], []
     for r in rows:
-        code, name = r["ebird_kodu"], r["bilimsel_ad"]
+        code, name = r["ebird_code"], r["scientific_name"]
         et = kodlar.get(code)
         source = "kod"
         if et not in label_subset:
             et = scientific.get(name)
             source = "bilimsel ad"
         if et is None:
-            missing.append((code, name, r["turkce_ad"]))
+            missing.append((code, name, r["turkish_name"]))
             continue
         bn_name = et.split("_", 1)[0]
         if bn_name != name:
-            farkli.append((code, name, bn_name, r["turkce_ad"]))
-        secilen.append((et, code, source, name, bn_name, r["turkce_ad"]))
+            farkli.append((code, name, bn_name, r["turkish_name"]))
+        secilen.append((et, code, source, name, bn_name, r["turkish_name"]))
 
     with open(a.out, "w", encoding="utf-8") as f:
         for s in secilen:
@@ -111,7 +111,7 @@ def main():
 
     with open(a.name_map, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["ebird_kodu", "bizim_bilimsel_ad", "birdnet_bilimsel_ad", "turkce_ad"])
+        w.writerow(["ebird_code", "our_scientific_name", "birdnet_scientific_name", "turkish_name"])
         for _, code, _, name, bn_name, tr in secilen:
             w.writerow([code, name, bn_name, tr])
 

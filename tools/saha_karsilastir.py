@@ -67,8 +67,8 @@ def map_yukle():
     d = {}
     with open(MAP, encoding="utf-8") as f:
         for s in csv.DictReader(f):
-            d[s["birdnet_bilimsel_ad"].strip()] = (s["ebird_kodu"].strip(),
-                                                   s["turkce_ad"].strip())
+            d[s["birdnet_scientific_name"].strip()] = (s["ebird_code"].strip(),
+                                                   s["turkish_name"].strip())
     return d
 
 
@@ -80,8 +80,8 @@ def cihaz_yukle(path):
             t = dt.datetime.fromisoformat(s["duvar_saati"])
             if s["kip"] == "ISARET":
                 isaretler.append(t)
-            elif s["kip"] == "TUR" and s["ebird_kodu"]:
-                olaylar.append((t, s["ebird_kodu"], s["turkce_ad"],
+            elif s["kip"] == "TUR" and s["ebird_code"]:
+                olaylar.append((t, s["ebird_code"], s["turkish_name"],
                                 float(s["guven_yuzde"])))
     return isaretler, olaylar
 
@@ -219,7 +219,7 @@ def main():
     output = os.path.join(args.session, "uyum.csv")
     with open(output, "w", encoding="utf-8", newline="") as f:
         y = csv.writer(f)
-        y.writerow(["sinif", "ses_saniyesi", "ebird_kodu", "ad",
+        y.writerow(["class_index", "ses_saniyesi", "ebird_code", "ad",
                     "cihaz_guven_yuzde", "birdnet_skor"])
         for ts, code, name, g, b in ortak:
             y.writerow(["ortak", "{:.1f}".format(ts), code, name, g, b])

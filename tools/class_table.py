@@ -34,8 +34,8 @@ def main() -> None:
     rows = []
     with open(INP, encoding="utf-8") as f:
         for s in csv.DictReader(f):
-            rows.append((int(s["sinif"]), s["ebird_kodu"], s["turkce_ad"],
-                             s.get("birdnet_bilimsel_ad", "")))
+            rows.append((int(s["class_index"]), s["ebird_code"], s["turkish_name"],
+                             s.get("birdnet_scientific_name", "")))
     rows.sort()
 
     beklenen = list(range(len(rows)))

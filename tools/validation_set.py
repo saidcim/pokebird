@@ -111,7 +111,7 @@ def main() -> None:
     name = {}
     with open(TRAIN / "siniflar.csv", encoding="utf-8") as f:
         for s in csv.DictReader(f):
-            name[int(s["sinif"])] = (s["ebird_kodu"], s["turkce_ad"])
+            name[int(s["class_index"])] = (s["ebird_code"], s["turkish_name"])
 
     # ⚠ BUILTIN_REF — varsayılanı KULLANMAYIN.
     #

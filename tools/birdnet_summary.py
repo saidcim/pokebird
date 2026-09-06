@@ -72,7 +72,7 @@ def species_haritasi(map_yolu):
         )
     with open(map_yolu, encoding="utf-8") as f:
         return {
-            r["ebird_kodu"]: (r["birdnet_bilimsel_ad"], r["turkce_ad"])
+            r["ebird_code"]: (r["birdnet_scientific_name"], r["turkish_name"])
             for r in csv.DictReader(f)
         }
 
@@ -127,8 +127,8 @@ def main():
     with open(a.out, "w", encoding="utf-8", newline="") as f:
         y = csv.writer(f)
         y.writerow([
-            "ebird_kodu", "dosya", "baslangic", "bitis", "hedef_guven",
-            "en_iyi_tur", "en_iyi_guven", "kus_disi_tur", "kus_disi_guven",
+            "ebird_code", "file", "baslangic", "bitis", "hedef_guven",
+            "best_species", "en_iyi_guven", "kus_disi_tur", "kus_disi_guven",
         ])
 
         for code in species:

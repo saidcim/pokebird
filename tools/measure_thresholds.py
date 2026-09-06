@@ -105,7 +105,7 @@ def main():
 
     records = defaultdict(list)
     for k, i in enumerate(idx):
-        records[(r[i]["ebird_kodu"], r[i]["dosya"])].append(
+        records[(r[i]["ebird_code"], r[i]["file"])].append(
             (float(r[i]["baslangic"]), k))
     for v in records.values():
         v.sort()

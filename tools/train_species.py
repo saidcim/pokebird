@@ -562,7 +562,7 @@ def pano_write(path, history, total_epochs, bilgi, gecen, bitti=False):
 
 def rapor_write(a, model, classes, mac, tepe, history, d1, d3, q1, q3, kar,
               gs, gz, tflite_path):
-    name = {int(s["sinif"]): s["turkce_ad"] for s in classes}
+    name = {int(s["class_index"]): s["turkish_name"] for s in classes}
     n = kar.sum(axis=1)
     duyarlilik = np.divide(np.diag(kar), np.maximum(n, 1))
 

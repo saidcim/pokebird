@@ -159,14 +159,14 @@ def csv_write(rows, sutunlar):
 
 def komut_count(key, threshold, rare_threshold=RARE_THRESHOLD, common_gbif=COMMON_GBIF):
     rows, sutunlar = csv_oku()
-    havuz = [s for s in rows if s["durum"] == "dahil"]
+    havuz = [s for s in rows if s["status"] == "included"]
     print(f"Havuzda {len(havuz)} tur. Xeno-canto kayit sayilari cekiliyor...")
     print(f"(Avrupa, kalite A/B. Yaygin tur [GBIF>={COMMON_GBIF}] icin >={threshold} kayit,\n"
           f" nadir tur icin >={RARE_THRESHOLD} kayit gerekiyor)\n")
 
     os.makedirs(CACHE, exist_ok=True)
     for i, s in enumerate(havuz, 1):
-        sci = s["bilimsel_ad"]
+        sci = s["scientific_name"]
         onbellek = os.path.join(CACHE, f"xc_{sci.replace(' ', '_')}.json")
 
         if os.path.exists(onbellek):
@@ -189,9 +189,9 @@ def komut_count(key, threshold, rare_threshold=RARE_THRESHOLD, common_gbif=COMMO
                 json.dump(d, f)
             time.sleep(0.34)      # API'ye nazik davran
 
-        s["xc_ab"] = int(d["ab"])
-        s["xc_ab_eu"] = int(d["ab_eu"])
-        s["xc_ab_sa"] = int(d["ab_sa"])
+        s["xc_count"] = int(d["ab"])
+        s["xc_count_eu"] = int(d["ab_eu"])
+        s["xc_count_world"] = int(d["ab_sa"])
 
         if i % 20 == 0 or i == len(havuz):
             print(f"  {i}/{len(havuz)}")
@@ -200,36 +200,36 @@ def komut_count(key, threshold, rare_threshold=RARE_THRESHOLD, common_gbif=COMMO
     # Ses verisi ölçütü Avrupa A/B sayısı; Avrupa'da hiç kayıt yoksa
     # (İstanbul'da görülen Asya/Afrika türleri) dünya geneline düşülüyor.
     for s in rows:
-        if s["durum"] != "dahil":
-            for k in ("xc_ab", "xc_ab_eu", "xc_ab_sa"):
+        if s["status"] != "included":
+            for k in ("xc_count", "xc_count_eu", "xc_count_world"):
                 s.setdefault(k, "")
             continue
-        eu = int(s.get("xc_ab_eu") or 0)
-        dunya = int(s.get("xc_ab") or 0)
+        eu = int(s.get("xc_count_eu") or 0)
+        dunya = int(s.get("xc_count") or 0)
         etkin = eu if eu > 0 else dunya
-        common = int(s.get("gbif_kayit") or 0) >= common_gbif
+        common = int(s.get("gbif_records") or 0) >= common_gbif
         gereken = threshold if common else rare_threshold
 
         if etkin < gereken:
-            s["durum"] = "elendi"
-            s["gerekce"] = (
+            s["status"] = "excluded"
+            s["reason"] = (
                 f"{'yaygin' if common else 'nadir'} tur, XC'de {etkin} A/B kayit "
                 f"(gereken {gereken}; Avrupa {eu}, dunya {dunya})")
 
-    for k in ("xc_ab", "xc_ab_eu", "xc_ab_sa"):
+    for k in ("xc_count", "xc_count_eu", "xc_count_world"):
         if k not in sutunlar:
             sutunlar.append(k)
     csv_write(rows, sutunlar)
 
-    nihai = [s for s in rows if s["durum"] == "dahil"]
+    nihai = [s for s in rows if s["status"] == "included"]
     print(f"\n{CSV_PATH}")
     print(f"  NIHAI LISTE: {len(nihai)} tur")
     if nihai:
-        total_record = sum(int(s["xc_ab_eu"] or 0) or int(s["xc_ab"] or 0) for s in nihai)
+        total_record = sum(int(s["xc_count_eu"] or 0) or int(s["xc_count"] or 0) for s in nihai)
         print(f"  Toplam kullanilabilir A/B kayit: {total_record:,}")
         print("\n  En az ses kaydi olan 10 tur (veri riski burada):")
-        for s in sorted(nihai, key=lambda x: int(x["xc_ab_eu"] or 0) or int(x["xc_ab"] or 0))[:10]:
-            eu, dw = int(s["xc_ab_eu"] or 0), int(s["xc_ab"] or 0)
+        for s in sorted(nihai, key=lambda x: int(x["xc_count_eu"] or 0) or int(x["xc_count"] or 0))[:10]:
+            eu, dw = int(s["xc_count_eu"] or 0), int(s["xc_count"] or 0)
             print(f"    {eu or dw:5} A/B  {s['turkce_ad'] or s['bilimsel_ad']}"
                   f"{'  (dunya geneli)' if not eu else ''}")
     if len(nihai) > 130:
@@ -242,7 +242,7 @@ def komut_count(key, threshold, rare_threshold=RARE_THRESHOLD, common_gbif=COMMO
 
 def komut_download(key, species_basina, only_ab, nd_include):
     rows, _ = csv_oku()
-    nihai = [s for s in rows if s["durum"] == "dahil"]
+    nihai = [s for s in rows if s["status"] == "included"]
     if not nihai:
         sys.exit("[!] Nihai listede tur yok. Once: python tools/xc_fetch.py --say")
 
@@ -256,14 +256,14 @@ def komut_download(key, species_basina, only_ab, nd_include):
     with open(record_csv, "a", newline="", encoding="utf-8") as kf:
         w = csv.writer(kf)
         if fresh_file:
-            w.writerow(["dosya", "bilimsel_ad", "ebird_kodu", "xc_id",
+            w.writerow(["file", "scientific_name", "ebird_code", "xc_id",
                         "kalite", "lisans", "kaydeden", "ulke", "sure_sn"])
 
         total_nd_atlandi = 0
 
         for s in nihai:
-            sci = s["bilimsel_ad"]
-            species_code = s["ebird_kodu"] or sci.replace(" ", "_")
+            sci = s["scientific_name"]
+            species_code = s["ebird_code"] or sci.replace(" ", "_")
             target_directory = os.path.join(XC_DIR, species_code)
 
             # Kotası zaten dolu olan türü hiç sorgulama. Eskiden her tür için
@@ -352,7 +352,7 @@ def komut_download(key, species_basina, only_ab, nd_include):
                 except Exception as e:
                     print(f"    [!] XC{xc_id} indirilemedi: {type(e).__name__}")
                     continue
-                w.writerow([os.path.relpath(path, ROOT), sci, s["ebird_kodu"], xc_id,
+                w.writerow([os.path.relpath(path, ROOT), sci, s["ebird_code"], xc_id,
                             k.get("q", ""), k.get("lic", ""), k.get("rec", ""),
                             k.get("cnt", ""), k.get("length", "")])
                 indi += 1

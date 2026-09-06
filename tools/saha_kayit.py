@@ -157,8 +157,8 @@ def main():
          serial.Serial(args.port, 115200, timeout=0.1) as ser:
 
         yazar = csv.writer(fcsv)
-        yazar.writerow(["duvar_saati", "cihaz_ms", "kip", "ebird_kodu",
-                        "turkce_ad", "guven_yuzde"])
+        yazar.writerow(["duvar_saati", "cihaz_ms", "kip", "ebird_code",
+                        "turkish_name", "guven_yuzde"])
 
         def log_write(text):
             flog.write(text)
