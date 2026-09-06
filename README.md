@@ -1,101 +1,108 @@
-# PokeBird
+# Pokebird
 
-A handheld, **fully offline** bird-song species identifier running on a
-Waveshare **RP2350-Touch-LCD-3.49**. It listens through the board's onboard
-microphone and names the bird on its own screen — no phone, no internet, no
-cloud. Scoped to the ~178 bird species of Istanbul.
+A portable device that listens bird sounds and identifies their species. It runs on
+a rp2350 microcontroller with no internet connection. and it knows the 178 bird 
+species that live and can be heard in Istanbul
 
-Full architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (Turkish) · Turkish README: [`README.tr.md`](README.tr.md)
+I used AI for multiple parts of the project, but the ideas, architectural design, and choices that influenced the project's progress were all my own.
 
-## Why it is interesting
+## What it does
+You press the button, hold it up, and it listens. If it is a bird sound, the possible
+species name appears. Here is a [demo](https://youtu.be/FgNcmsRgFls)
 
-BirdNET, the reference model for this task, has ~6000 classes and weighs tens of
-megabytes. This board has **520 KB of SRAM, no PSRAM**, and two Cortex-M33 cores
-at 150 MHz. Running BirdNET here is physically impossible. Narrowing the problem
-to one city cuts the output space 34× *and* increases the training data per
-class, so the small model ends up both smaller and more accurate than a shrunken
-global one would be.
+## Main problem
+I could not run BirdNET which serves the same purpose on this device, so I used it
+only as a reference; I narrowed the scope from approximately 6,000 species down to
+the 178 species found in my city(Istanbul/Turkey). By reducing the number of species,
+I was able to increase the training data used for each one, resulting in a system 
+that is both smaller and more accurate.
 
-## Measured results
+## Results
 
-Stage-1 binary network (bird / not-bird), INT8, held-out test set:
+Measured on a held-out test set. The raw output files are in `models/`.
 
-```
-accuracy 96.65%   bird recall 97.90%   negative specificity 86.58%
-7,217 parameters · 1.44 MMAC/window · 20.9 KB
-```
+The first network decides whether a sound is a bird at all:
 
-Stage-2 species network (178 species + "unknown"), INT8, held-out test set:
+    accuracy 96.65%    bird recall 97.90%    20.9 KB
 
-```
-per 3 s window       top-1 58.07%   top-3 74.82%
-8-window aggregate   top-1 70.40%   top-3 82.20%
-209,107 parameters · 6.6 MMAC/window · 270 KB
-```
+The second one decides which bird:
 
-INT8 quantisation cost: +0.02 points for the species net, +0.05 for the binary
-net — i.e. none.
+    top-1 58.07% per 3-second window
+    top-1 70.40%, top-3 82.20% when 8 windows vote together
+    270 KB
 
-The on-screen confidence threshold was **measured separately from accuracy**,
-because they are different questions:
+Listening for 8 seconds instead of 3 seconds raises top-1 from 58% to 70% and costs no extra memory, so I use 8 seconds of listening duration.
 
-```
-threshold   coverage   precision
-   0.60       35.6%      85.4%     <- write a species name
-   0.35       59.7%      71.7%     <- erase it
-```
-
-Measured TFLM tensor arena on device: **110,436 bytes**.
 
 ## Hardware
-
-| | |
-|---|---|
-| MCU | RP2350**B** — 2× Cortex-M33 @ 150 MHz, FPU + DSP |
-| Memory | 520 KB SRAM (**no PSRAM**), 16 MB flash |
-| Display | 172×640 IPS, AXS15231B, QSPI + touch |
-| Audio | ES8311 codec, onboard analog MEMS mic, NS4150B speaker amp |
-| Storage | microSD |
-
-The pin map lives in [`src/board_config.h`](src/board_config.h) and was verified
-net-by-net against Waveshare's official schematic. **Every hardware number comes
-from there.**
+I used Waveshare [RP2350-Touch-LCD-3.49](https://www.waveshare.com/rp2350-touch-lcd-3.49.htm) 
+module for this project since it has a Built-in LCD, Onboard ES8311 audio codec, Microphone and TF card slot.
 
 ## How it works
 
-```
-┌─ Core 1 (audio + AI, real time) ─────────────────────────────┐
-│  I2S/PIO+DMA → ring buffer → incremental mel features        │
-│      → gate (VAD) → stage-1 binary net → stage-2 species net │
-│      → temporal aggregation + hysteresis                     │
-└──────────────────── FIFO (detection events) ─────────────────┘
-┌─ Core 0 (UI + storage, not real time) ───────────────────────┐
-│  LVGL → AXS15231B QSPI+DMA │ touch │ SD card │ battery        │
-└──────────────────────────────────────────────────────────────┘
-```
+I achieved a division of labor by assigning different tasks to two processor cores. 
+It was necessary to handle screen and audio capture on separate cores because the 
+screen was generating noise.
 
-Audio capture cannot drop a single sample; LVGL redraws and SD writes can block
-for tens of milliseconds. Splitting the cores guarantees the UI never disturbs
-the audio path.
+### Core 1 - Real time
 
-**Signal path:** 24 kHz / 16-bit mono · 3.0 s window, 1.0 s hop · 512-point FFT,
-Hann, 384-sample hop → 187 frames · 64 mel bands, 150 Hz – 11.5 kHz · log-mel,
-per-window normalisation, INT8.
+    microphone - I2S/DMA -> ring buffer -> mel features
+               -> gate -> binary net -> species net -> voting
 
-**The memory trick:** three seconds of raw audio would be 144 KB, so it is never
-stored. Mel frames are computed incrementally into a 64×187 INT8 ring buffer
-(12 KB); only ~0.5 s of raw audio (24 KB) is kept for optional WAV capture and
-noise-floor estimation. That saves ~130 KB of SRAM.
 
-**No full framebuffer** — 172×640 in RGB565 is 220 KB, 42% of SRAM. LVGL runs in
-partial-render mode over two small buffers and a hand-written QSPI PIO driver.
+### Core 2 - Not real time
 
-## Build
+    LVGL screen · touch · SD card · battery
 
-Requirements: CMake ≥ 3.13, Ninja, ARM GCC (PlatformIO's
-`toolchain-rp2040-earlephilhower`, GCC 14.3, is found automatically), and the
-Pico SDK.
+### freeing up memory
 
+Audio comes every 3 seconds of it becomes one analysis window, Three seconds of
+raw audio is 144 KB. On a chip with 520 KB and no PSRAM, that is most of the memory
+budget spent before identification starts.
+
+So the device never keeps it. Each mel frame is computed the moment the audio
+arrives and written into a small ring buffer, 64x187 in INT8, 12 KB in total.
+Raw audio is kept for only half a second, 24 KB, enough for the noise floor
+estimate and 130 KB cheaper.
+
+### No framebuffer
+
+The screen is 172x640. A full RGB565 framebuffer would be 220 KB, over 40% of
+SRAM. LVGL is cheaper it runs in partial render mode over two small
+buffers, pushed out through a QSPI PIO driver I wrote by hand.
+
+### The recognition
+
+Asking "is that a bird" is much cheaper than asking "which bird," so the algorithm
+asks the cheap question first.
+
+| Stage | What it asks | Cost |
+|---|---|---|---|
+| 0. Gate | Is anything happening? | free, plain DSP |
+| 1. Binary net | Is it a bird? | 1.44 MMAC, 20.9 KB |
+| 2. Species net | Which bird? | 6.6 MMAC, 270 KB |
+| 3. Voting | Am I sure enough to say it? | free |
+
+Each stage exists to ensure the next one doesn't work in vain.
+
+## How the model was trained
+
+All of this happens on my PC, in `tools/`. None of it ships to the device.
+
+The species list comes from eBird's Istanbul records, filtered down to species
+that have enough recordings to learn from. The recordings come from Xeno-canto.
+Xeno-canto files are mostly silence and background birds, so BirdNet is used to
+find which three second slices actually contain the target species, I used BirdNet's own
+output and used as a teacher
+
+## Field test
+
+I took it to Belgrad Forest, north of Istanbul, on 31 August 2026. I kept it on for the
+whole walk and it succesfully named Common Chaffinch, Hooded Crow, European Robin and
+woodpeckers correctly
+
+## Setup
+dependencies: CMake, Ninja, an ARM GCC toolchain and the Pico SDK.
 ```bash
 git clone -b 2.3.0 --depth 1 https://github.com/raspberrypi/pico-sdk.git third_party/pico-sdk
 git -C third_party/pico-sdk submodule update --init --depth 1 lib/tinyusb
@@ -103,87 +110,15 @@ git -C third_party/pico-sdk submodule update --init --depth 1 lib/tinyusb
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
+1. After That "pokebird.uf2" file in /build folder will be created
+2. To flash it, hold "boot" and "reset" button and release "reset" first,
+3.  a drive will show up copy the file onto the drive and thats it
 
-Output: `build/pokebird.uf2`. Paths are resolved by
-[`cmake/toolchain.cmake`](cmake/toolchain.cmake) — no environment variables
-needed. Override with `-DPICO_SDK_PATH=...` / `-DPICO_TOOLCHAIN_PATH=...` if your
-setup differs.
+## Licence
 
-## Flashing
+BirdNET is CC BY-NC-SA 4.0, and a model distilled from it may count as a
+derivative work, so commercial use is restricted. Personal and research use is
+fine.
 
-1. Hold **BOOT** and **RESET** together
-2. Release **RESET** first, then **BOOT**
-3. Copy `build/pokebird.uf2` to the drive that appears
 
-## Training pipeline (PC side, `tools/`)
 
-1. Species list: eBird Istanbul (TR-34) ∩ Avibase, filtered by Xeno-canto coverage
-2. Recordings from the Xeno-canto API (CC-licensed, quality A/B first)
-3. **BirdNET as segmenter and teacher** — finds which 3 s slices actually contain
-   the target species, and its output probabilities are kept as soft labels
-4. **Istanbul-specific negative mining** — traffic, horns, the call to prayer,
-   ferry horns, speech, dogs, wind, rain, construction. Skip this and the device
-   is unusable in a real city.
-5. Augmentation: time shift, pitch/tempo, noise mixing at varied SNR, SpecAugment
-6. Distillation training against hard labels + BirdNET soft outputs, focal loss
-7. INT8 post-training quantisation, accuracy reported before and after
-8. Conversion to C arrays under `models/`
-9. **On-device verification set** — labelled windows and the PC's reference logits
-   are compiled into the firmware, so the device proves its inference matches the
-   PC. This catches every "works on my laptop, not on the board" bug.
-
-## Status
-
-| Milestone | |
-|---|---|
-| M0 — project skeleton, build chain | ✅ |
-| M1 — microphone bring-up + SNR measurement | ✅ |
-| M2 — display + LVGL + live spectrogram | ✅ |
-| M3 — DSP pipeline (mel + gate), verified against a Python reference | ✅ |
-| M4 — data pipeline, species list | ✅ |
-| M5 — model training + distillation + INT8 | ✅ |
-| M6 — TFLM integration, real-time inference on core 1 | ✅ |
-| M7 — post-processing, full UI, logging | in progress |
-| M8 — field calibration in Istanbul | |
-
-The device currently listens, recognises, and writes the species name on screen
-in real time.
-
-## Honest limitations
-
-- Test-set accuracy is not field accuracy. Real city noise will lower it; M8 is
-  the field-calibration milestone.
-- Some species are near-indistinguishable (certain warblers, certain gulls). The
-  plan is to merge these into species *groups* rather than give false precision.
-- The UI shows top-3 with confidence and says "not sure" below threshold. That is
-  a design decision: a device that confidently says one wrong name is worse than
-  one that offers three candidates.
-
-## Repository layout
-
-```
-boards/     Pico SDK board definition (no RP2350B header ships with the SDK)
-cmake/      Toolchain helpers
-src/        Device code — board_config.h, hal/, dsp/, ai/, ui/
-models/     Quantised INT8 models as C arrays + accuracy records
-tools/      PC side: data collection, training, conversion (Python)
-test/       Host-side DSP unit tests
-```
-
-Source identifiers and comments are in Turkish. The Turkish README is kept at
-[`README.tr.md`](README.tr.md).
-
-## Licence note
-
-BirdNET is used as the teacher during training and is distributed under
-**CC BY-NC-SA 4.0**. A distilled model may count as a derivative work, which
-restricts commercial use. Personal and research use is fine. See §6 of the
-architecture document for detail and for the commercial-use path (segmentation
-only, no distillation). Xeno-canto recordings carry per-recording CC licences;
-an `ATTRIBUTION.md` is generated automatically.
-
-## References
-
-- [RP2350-Touch-LCD-3.49 — Waveshare Wiki](https://www.waveshare.com/wiki/RP2350-Touch-LCD-3.49)
-- [BirdNET-Analyzer](https://github.com/birdnet-team/BirdNET-Analyzer) — teacher model
-- [eBird — Istanbul (TR-34)](https://ebird.org/region/TR-34) — species list and monthly frequencies
