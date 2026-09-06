@@ -524,25 +524,25 @@ static void cmd_gain(void) {
  *    unnoticed.
  */
 static void cmd_record(void) {
-    printf("\nKayit basliyor (%d s)...\n", CAPTURE_SECONDS);
+    printf("\nRecording (%d s)...\n", CAPTURE_SECONDS);
 
     pb_capture_result_t cap = { 0 };
     stats_acc_t acc = { 0 };
 
-    /* Saat var mı? İlk parçayı başlıktan ÖNCE oku (yukarıdaki 2. madde). */
-    pb_audio_stream_flush();        /* bir KEZ; sonrasında sadece stream_read */
+    /* Is there a clock? Read the first chunk BEFORE the header (point 2). */
+    pb_audio_stream_flush();     /* ONCE; only stream_read from here on */
     uint32_t first = CAPTURE_SAMPLES < CHUNK_SAMPLES ? CAPTURE_SAMPLES : CHUNK_SAMPLES;
     pb_capture_result_t part = pb_audio_stream_read(s_chunk, first, 1000);
     if (part.samples == 0) {
-        printf("Kayit alinamadi (ES8311 saat uretmiyor).\n\n");
+        printf("Could not record (the ES8311 is not producing a clock).\n\n");
         return;
     }
 
     printf("#WAV-BEGIN rate=%d channels=1 bits=16 samples=%lu\n",
            PB_SAMPLE_RATE, (unsigned long)CAPTURE_SAMPLES);
 
-    /* Satir basina 32 ornek, isaretli ondalik — bicim degismedi, PC tarafi
-     * oldugu gibi calisiyor. */
+    /* 32 samples per line, signed decimal — the format is unchanged, so the
+     * PC side works as it is. */
     uint32_t emitted = 0;
     for (;;) {
         cap.samples      += part.samples;
@@ -564,23 +564,25 @@ static void cmd_record(void) {
     printf("#WAV-END\n");
 
     audio_stats_t st = stats_finish(&acc);
-    print_stats("kayit", &st, &cap);
+    print_stats("recording", &st, &cap);
     if (cap.samples != CAPTURE_SAMPLES) {
-        printf("  [!] %lu / %lu ornek gonderildi — PC tarafi EKSIK diyecek.\n",
+        printf("  [!] sent %lu / %lu samples - the PC side will report a SHORTFALL.\n",
                (unsigned long)cap.samples, (unsigned long)CAPTURE_SAMPLES);
     }
     if (cap.fifo_overrun) {
-        printf("  [!] ORNEK DUSTU: aktarim gercek zamana yetisemedi, kayitta\n");
-        printf("      kopukluk var. WAV'i olcum icin KULLANMAYIN.\n");
+        printf("  [!] SAMPLES DROPPED: the transfer could not keep up with real\n");
+        printf("      time, so there is a gap in the recording. Do NOT use this\n");
+        printf("      WAV for measurement.\n");
     }
     printf("\n");
 }
 
 
-/* M2 doğrulaması: mikrofondan gelen ses ekranda akıyor mu.
- * Ekran QSPI'ye tek sütun yazarak güncelleniyor (bkz. ui/spectrogram.c). */
+/* Does audio from the microphone actually scroll across the screen? The
+ * display updates by writing a single column to QSPI (see
+ * ui/spectrogram.c). */
 static void cmd_spectrogram(void) {
-    printf("\nCanli spektrogram. Cikmak icin bir tusa basin.\n");
+    printf("\nLive spectrogram. Press any key to exit.\n");
     backlight_set(true);
     pb_spec_init();
 
@@ -588,70 +590,70 @@ static void cmd_spectrogram(void) {
     while (getchar_timeout_us(0) < 0) {
         pb_capture_result_t cap = pb_audio_capture(s_chunk, PB_FFT_SIZE);
         if (cap.samples < PB_FFT_SIZE) break;
-        /* -75 dBFS taban: M1'de olculen ~-36 dBFS oda gurultusunun altinda,
-         * boylece sessizlik siyah kaliyor ama zayif sesler hala goruluyor. */
+        /* A -75 dBFS floor: below the ~-36 dBFS of measured room noise, so
+         * silence stays black while faint sounds are still visible. */
         pb_fft_spectrum(s_chunk, bins, PB_SPEC_HEIGHT, -75.0f);
         pb_spec_push_column(bins, PB_SPEC_HEIGHT);
     }
-    printf("cikildi\n\n");
+    printf("exited\n\n");
 }
 
-/* Bit-bang yolu asagida tanimli; ekran testi PIO yolunun yanina onu da
- * koyabilsin diye burada bildiriliyor. */
+/* The bit-bang path is defined below; it is declared here so the display
+ * test can offer it alongside the PIO path. */
 static void bb_pins_setup(void);
 static void bb_panel_init(void);
 static void bb_fill_screen(uint16_t color);
 
-#define PB_INIT_BITBANG 99   /* cmd_display_test icin sanal varyant */
+#define PB_INIT_BITBANG 99   /* a virtual variant for cmd_display_test */
 
-/** Bekleyen seri girisi temizle — onceki adimdan kalan tuslar yanlis
- *  varyanti "kazanan" gostermesin. */
+/** Drain pending serial input, so keys left over from the previous step do
+ *  not make the wrong variant look like the winner. */
 static void drain_stdin(void) {
     while (getchar_timeout_us(0) >= 0) { }
 }
 
 /**
- * Ekran testi — hangi panel başlatma dizisi doğru görüntü veriyor?
+ * Display test — which panel init sequence produces a correct image?
  *
- * Belirti: ekran yanıyor ama her pikselin farklı renk olduğu, hiç gitmeyen
- * bir karıncalanma var. Bu, GRAM'a kayık veri yazıldığının klasik işareti:
- * en olası sebep piksel biçiminin (COLMOD, 0x3A) hiç ayarlanmamış olması —
- * biz piksel başına 2 bayt yolluyoruz, panel reset varsayılanında başka bir
- * genişlik bekliyor.
+ * The symptom: the screen lights up but shows permanent snow, every pixel a
+ * different colour. That is the classic sign of data written to GRAM at the
+ * wrong width. The likeliest cause is the pixel format (COLMOD, 0x3A) never
+ * being set — we send two bytes per pixel while the panel, at its reset
+ * default, expects something else.
  *
- * Seri porttan ekranı göremediğimiz için (bkz. lastsession.md §5.9) üç
- * hipotezi tek firmware'e koyup sırayla deniyoruz; düz renk gördüğünüzde
- * tuşa basıyorsunuz ve cihaz hangi varyantta olduğunu kendisi yazıyor.
+ * Since the screen cannot be seen over the serial console, the hypotheses are
+ * all compiled into one firmware and tried in turn: when you see a flat
+ * colour you press a key, and the device reports which variant it was on.
  */
 static void cmd_display_test(void) {
-    printf("\nEkran testi — panel baslatma varyantlari (etkilesimli).\n");
-    printf("EKRANA BAKIN. Ekran DUZ RENK doldugunda bir tusa basin.\n");
-    printf("Karincalanma devam ediyorsa hicbir sey yapmayin, sonraki varyanta gecer.\n\n");
+    printf("\nDisplay test - panel init variants (interactive).\n");
+    printf("WATCH THE SCREEN. Press a key when it fills with a FLAT COLOUR.\n");
+    printf("If the snow continues, do nothing and it moves to the next variant.\n\n");
     backlight_set(true);
 
-    const struct { int varyant; const char *name; } attempts[] = {
-        { LCD_3IN49_INIT_FULL,      "satici tablosu + SLPOUT/MADCTL/COLMOD(RGB565)/DISPON" },
-        { LCD_3IN49_INIT_MINIMAL,   "sadece DCS kuyrugu (rsvpnano ile ayni)" },
-        { LCD_3IN49_INIT_NO_COLMOD, "satici tablosu + SLPOUT/DISPON, COLMOD YOK (kontrol)" },
-        { PB_INIT_BITBANG,          "BIT-BANG: PIO/DMA/satici surucusu tamamen devre disi" },
+    const struct { int variant; const char *name; } attempts[] = {
+        { LCD_3IN49_INIT_FULL,      "vendor table + SLPOUT/MADCTL/COLMOD(RGB565)/DISPON" },
+        { LCD_3IN49_INIT_MINIMAL,   "DCS queue only (same as the reference driver)" },
+        { LCD_3IN49_INIT_NO_COLMOD, "vendor table + SLPOUT/DISPON, NO COLMOD (control)" },
+        { PB_INIT_BITBANG,          "BIT-BANG: PIO/DMA/vendor driver fully bypassed" },
     };
 
     const struct { const char *name; uint16_t color; } colors[] = {
-        { "kirmizi", 0xF800 },
-        { "yesil",   0x07E0 },
-        { "mavi",    0x001F },
-        { "beyaz",   0xFFFF },
+        { "red",   0xF800 },
+        { "green", 0x07E0 },
+        { "blue",  0x001F },
+        { "white", 0xFFFF },
     };
 
     for (size_t v = 0; v < sizeof(attempts) / sizeof(attempts[0]); v++) {
         printf("  [%u] %s\n", (unsigned)(v + 1), attempts[v].name);
-        const bool bitbang = (attempts[v].varyant == PB_INIT_BITBANG);
+        const bool bitbang = (attempts[v].variant == PB_INIT_BITBANG);
         if (bitbang) {
             pio_sm_set_enabled(qspi.pio, qspi.sm, false);
             bb_pins_setup();
             bb_panel_init();
         } else {
-            LCD_3IN49_InitVariant(attempts[v].varyant);
+            LCD_3IN49_InitVariant(attempts[v].variant);
         }
         backlight_set(true);
         drain_stdin();
@@ -661,59 +663,64 @@ static void cmd_display_test(void) {
             if (bitbang) bb_fill_screen(colors[r].color);
             else         pb_lcd_fill(colors[r].color);
 
-            /* Renk basildiktan sonra 1.5 s bakma suresi */
+            /* 1.5 s to look at the screen after the colour is pushed */
             for (int t = 0; t < 15; t++) {
                 if (getchar_timeout_us(0) >= 0) {
-                    printf("\n  >>> DUZGUN CALISAN VARYANT: [%u] %s <<<\n",
+                    printf("\n  >>> THE VARIANT THAT WORKS: [%u] %s <<<\n",
                            (unsigned)(v + 1), attempts[v].name);
-                    printf("  (o anda ekranda: %s)\n\n", colors[r].name);
+                    printf("  (on screen at the time: %s)\n\n", colors[r].name);
                     if (bitbang) {
-                        printf("  Bit-bang yolu calisiyor, PIO yolu calismiyor:\n");
-                        printf("  hata PIO/DMA tarafinda. Yon karesi atlandi.\n\n");
-                        QSPI_PIO_Restore(qspi);   /* pinleri/SM'i PIO'ya geri ver */
+                        printf("  The bit-bang path works and the PIO path does not:\n");
+                        printf("  the fault is on the PIO/DMA side. Orientation square\n");
+                        printf("  skipped.\n\n");
+                        QSPI_PIO_Restore(qspi);   /* hand the pins/SM back to PIO */
                         return;
                     }
-                    /* Yon kontrolu: panelin (0,0) kosesine 20x20 beyaz kare.
-                     * Cihazi yatay tuttugunuzda karenin nerede goruldugu,
-                     * ui/spectrogram.c'deki yon cevirimini dogrular. */
+                    /* Orientation check: a 20x20 white square at the panel's
+                     * (0,0). Where that square appears when the device is held
+                     * in landscape confirms the mapping in
+                     * ui/spectrogram.c. */
                     pb_lcd_fill(0x0000);
                     static uint16_t frame[20 * 20];
                     for (int i = 0; i < 20 * 20; i++) frame[i] = 0xFFFF;
                     pb_lcd_blit(0, 0, 20, 20, frame);
-                    printf("  panel (0,0) konumuna 20x20 beyaz kare cizildi —\n");
-                    printf("  cihazi USB soketi ASAGI bakacak sekilde tutun ve\n");
-                    printf("  karenin hangi kosede oldugunu soyleyin.\n\n");
+                    printf("  drew a 20x20 white square at panel (0,0) -\n");
+                    printf("  hold the device with the USB socket pointing DOWN\n");
+                    printf("  and note which corner the square is in.\n\n");
                     return;
                 }
                 sleep_ms(100);
             }
         }
-        /* Bit-bang varyanti pinleri SIO'ya alip SM'i kapatiyor. Geri
-         * vermezsek BUNDAN SONRAKI her ekran testi sahte bicimde "bozuk"
-         * gorunur — bu tuzak bir oturumu yanilti (§9n). */
+        /* The bit-bang variant takes the pins to SIO and disables the SM. If
+         * we do not hand them back, EVERY subsequent display test looks
+         * spuriously "broken" — this trap cost a whole debugging session. */
         if (bitbang) QSPI_PIO_Restore(qspi);
         printf("\n");
     }
 
-    printf("  Hicbir varyantta tus basilmadi — uc dizinin ucu de duzgun\n");
-    printf("  goruntu vermedi. Sorun baslatma dizisinde degil, veri yolunda.\n\n");
+    printf("  No key was pressed on any variant - none of the sequences gave\n");
+    printf("  a correct image. The problem is not the init sequence, it is the\n");
+    printf("  data path.\n\n");
 }
 
-/* ── Bit-bang QSPI — PIO'yu denklemden çıkarmak için ──────────────────────
- * Hattı doğrudan CPU ile, yavaşça sürüyoruz. Amaç PIO programını şüpheli
- * listesinden silmek: bit-bang panele ulaşıyor ama PIO ulaşmıyorsa hata
- * PIO'dadır; ikisi de ulaşmıyorsa hata kabloda/pinde/panelde.
- * Ayrıca bit-bang okuma yapabiliyor — panelin kimliğini sorabiliyoruz,
- * ki bu "panel bizi duyuyor mu" sorusunun tek doğrudan yanıtı. */
-#define BB_DELAY() sleep_us(1)      /* ~500 kHz — panel icin fazlasiyla yavas */
+/* ── Bit-bang QSPI — for taking PIO out of the equation ───────────────────
+ * The bus is driven slowly, directly by the CPU. The point is to strike the
+ * PIO program off the suspect list: if bit-bang reaches the panel and PIO
+ * does not, the fault is in PIO; if neither reaches it, the fault is in the
+ * wiring, the pins or the panel.
+ * Bit-bang can also READ, which lets us ask the panel for its identity — the
+ * only direct answer to "does the panel hear us at all". */
+#define BB_DELAY() sleep_us(1)      /* ~500 kHz — far slower than the panel needs */
 
 static void bb_pins_setup(void) {
-    const uint cikislar[] = { PIN_CS, PIN_SCLK, PIN_DIO0 };
+    const uint outputs[] = { PIN_CS, PIN_SCLK, PIN_DIO0 };
     for (size_t i = 0; i < 3; i++) {
-        gpio_set_function(cikislar[i], GPIO_FUNC_SIO);
-        gpio_set_dir(cikislar[i], GPIO_OUT);
+        gpio_set_function(outputs[i], GPIO_FUNC_SIO);
+        gpio_set_dir(outputs[i], GPIO_OUT);
     }
-    /* D1..D3 tek hatli fazda kullanilmiyor; panel surerse cakismasin diye giris */
+    /* D1..D3 are unused in the single-lane phase; left as inputs so they do
+     * not clash if the panel drives them */
     for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) {
         gpio_set_function(p, GPIO_FUNC_SIO);
         gpio_set_dir(p, GPIO_IN);
@@ -727,7 +734,7 @@ static void bb_byte(uint8_t v) {
         gpio_put(PIN_SCLK, 0);
         gpio_put(PIN_DIO0, (v >> i) & 1);
         BB_DELAY();
-        gpio_put(PIN_SCLK, 1);          /* panel yukselen kenarda ornekler */
+        gpio_put(PIN_SCLK, 1);          /* the panel samples on the rising edge */
         BB_DELAY();
     }
     gpio_put(PIN_SCLK, 0);
@@ -764,7 +771,7 @@ static void bb_read(uint8_t cmd, uint8_t *output, size_t n) {
     gpio_put(PIN_CS, 1);
 }
 
-/** Dort hat uzerinden bir bayt (gercek QSPI veri fazi). */
+/** One byte across all four lanes (the real QSPI data phase). */
 static void bb_byte_quad(uint8_t v) {
     for (int half = 0; half < 2; half++) {
         uint8_t nib = half ? (uint8_t)(v & 0x0F) : (uint8_t)(v >> 4);
@@ -779,11 +786,12 @@ static void bb_byte_quad(uint8_t v) {
 }
 
 /**
- * Tum ekrani bit-bang ile tek renge boya.
+ * Fill the whole screen with one colour by bit-bang.
  *
- * PIO'yu, DMA'yi ve satici surucusunu tamamen devre disi birakan bagimsiz
- * bir yol. Yavas ama her adimi burada gorunur. PIO yolu calismayip bu
- * calisirsa hata PIO tarafindadir; ikisi de calismazsa hata daha asagida.
+ * An independent path that bypasses PIO, DMA and the vendor driver entirely.
+ * It is slow, but every step of it is visible here. If this works while the
+ * PIO path does not, the fault is on the PIO side; if neither works, the
+ * fault is further down.
  */
 static void bb_fill_screen(uint16_t color) {
     for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) gpio_set_dir(p, GPIO_OUT);
@@ -793,7 +801,8 @@ static void bb_fill_screen(uint16_t color) {
     bb_cmd(0x2A, caset, 4);
     bb_cmd(0x2B, raset, 4);
 
-    /* Piksel yazimi: komut+adres tek hatta (0x32 / 0x002C00), veri dort hatta */
+    /* Pixel write: command+address on one lane (0x32 / 0x002C00), data on
+     * all four */
     gpio_put(PIN_CS, 0);
     bb_byte(0x32); bb_byte(0x00); bb_byte(0x2C); bb_byte(0x00);
     uint8_t high = (uint8_t)(color >> 8), low = (uint8_t)(color & 0xFF);
@@ -806,7 +815,7 @@ static void bb_fill_screen(uint16_t color) {
     for (uint p = PIN_DIO1; p <= PIN_DIO3; p++) gpio_set_dir(p, GPIO_IN);
 }
 
-/** rsvpnano'nun kanitladigi asgari baslatma — tamami bit-bang. */
+/** The minimal init proven by the reference driver — all of it bit-banged. */
 static void bb_panel_init(void) {
     uint8_t p0 = 0x00, p55 = 0x55;
     bb_cmd(0x11, NULL, 0);  sleep_ms(120);   /* SLPOUT */
@@ -815,8 +824,9 @@ static void bb_panel_init(void) {
     bb_cmd(0x29, NULL, 0);  sleep_ms(120);   /* DISPON */
 }
 
-/** TE hattinda 200 ms'de gecis say — panel tariyor mu / emre uydu mu. */
-static uint32_t te_transition_say(void) {
+/** Count transitions on the TE line over 200 ms — is the panel scanning,
+ *  and did it obey the command? */
+static uint32_t te_transition_count(void) {
     uint32_t s = 0;
     int previous = gpio_get(PB_PIN_LCD_TE);
     absolute_time_t end = make_timeout_time_ms(200);
@@ -828,27 +838,27 @@ static uint32_t te_transition_say(void) {
 }
 
 /**
- * M3 — mel + kapı hattını CANLI mikrofonla çalıştır.
+ * Run the mel + gate pipeline on the LIVE microphone.
  *
- * DSP'nin doğruluğu host testleriyle kanıtlandı (`test/dsp_test` 13/13, ve
- * `tools/mel_reference.py` bağımsız Python referansıyla 64 bandın tamamında
- * sıfır sapma). Burada sınanan başka bir şey: hat gerçek zamanlı olarak,
- * gerçek mikrofonla, kartın üzerinde ayakta kalıyor mu ve kapı gerçek odada
- * mantıklı davranıyor mu.
+ * The DSP's correctness is proven by the host tests, and by
+ * `tools/mel_reference.py` matching an independent Python reference with zero
+ * deviation across all 64 bands. What is tested here is something else: does
+ * the pipeline keep up in real time, with a real microphone, on the board —
+ * and does the gate behave sensibly in a real room?
  *
- * Çıktı tamamen sayısal — ekrana bakmak gerekmiyor.
+ * The output is entirely numeric; there is no need to look at the screen.
  */
 static void cmd_mel_pipeline(void) {
-    printf("\nM3: mel + kapi hatti (canli mikrofon)\n");
-    printf("Cikmak icin bir tusa basin.\n\n");
+    printf("\nmel + gate pipeline (live microphone)\n");
+    printf("Press any key to exit.\n\n");
 
     pb_mel_init();
     pb_mel_reset();
     pb_gate_reset();
 
-    /* Doğru hop için örtüşmeli kare: her turda PB_MEL_HOP yeni örnek alınıp
-     * kare sola kaydırılıyor. Örtüşmesiz okumak 16 ms'lik adımı bozar ve
-     * 3 saniye 187 kare tutmaz. */
+    /* An overlapping frame, for the correct hop: each turn takes PB_MEL_HOP
+     * new samples and shifts the frame left. Reading without overlap would
+     * break the 16 ms step, and three seconds would not come to 187 frames. */
     static int16_t frame[PB_FFT_SIZE];
     const uint32_t remaining = PB_FFT_SIZE - PB_MEL_HOP;
 
@@ -856,15 +866,16 @@ static void cmd_mel_pipeline(void) {
     uint32_t lost_frame = 0, fps = 0;
     absolute_time_t next_report = make_timeout_time_ms(1000);
 
-    /* Bayat veriyle değil şimdiyle başla; döngü İÇİNDE flush YOK — hattın
-     * kesintisiz akması sürekli yakalamanın bütün amacı. */
+    /* Start from now rather than from stale data; there is NO flush INSIDE
+     * the loop — an uninterrupted pipeline is the entire point of continuous
+     * capture. */
     pb_audio_stream_flush();
 
     while (getchar_timeout_us(0) < 0) {
         memmove(frame, frame + PB_MEL_HOP, remaining * sizeof(int16_t));
         pb_capture_result_t cap = pb_audio_stream_read(frame + remaining, PB_MEL_HOP, 1000);
-        if (cap.samples < PB_MEL_HOP) { printf("  yakalama eksik, cikiliyor\n"); break; }
-        if (cap.fifo_overrun) lost_frame++;   /* halka sarıldı: süreklilik koptu */
+        if (cap.samples < PB_MEL_HOP) { printf("  capture came up short, exiting\n"); break; }
+        if (cap.fifo_overrun) lost_frame++;   /* the ring wrapped: continuity broke */
 
         float power[PB_FFT_POWER_BINS];
         pb_fft_power(frame, power);
@@ -882,10 +893,11 @@ static void cmd_mel_pipeline(void) {
         }
 
         if (time_reached(next_report)) {
-            /* kare/s kabul ölçütü: 62.5 (hop 384 @ 24 kHz). Eskiden 57'ydi —
-             * bloklayan yakalama kare kaçırıyordu (lastsession.md §9c). */
-            printf("  kare %5lu (%lu/s)  kapi %%%3lu  bant %6.1f dB  "
-                   "taban %6.1f dB  flux %.3f  pencere %lu  kayip %lu\n",
+            /* The fps acceptance criterion is 62.5 (hop 384 @ 24 kHz). It
+             * used to be 57 — the old blocking capture was dropping
+             * frames. */
+            printf("  frame %5lu (%lu/s)  gate %%%3lu  band %6.1f dB  "
+                   "floor %6.1f dB  flux %.3f  windows %lu  lost %lu\n",
                    (unsigned long)total, (unsigned long)fps,
                    (unsigned long)(total ? open * 100 / total : 0),
                    (double)g.band_db, (double)g.floor_db, (double)g.flux,
@@ -895,51 +907,50 @@ static void cmd_mel_pipeline(void) {
         }
     }
 
-    printf("\n  toplam kare %lu, kapi acik %lu (%%%lu), tam pencere %lu, "
-           "kayip %lu\n\n",
+    printf("\n  total frames %lu, gate open %lu (%%%lu), full windows %lu, "
+           "lost %lu\n\n",
            (unsigned long)total, (unsigned long)open,
            (unsigned long)(total ? open * 100 / total : 0),
            (unsigned long)window_count, (unsigned long)lost_frame);
 }
 
 /**
- * DEMO — şimdiye kadar yapılan her şey tek ekranda, aynı anda.
+ * DEMO — everything built so far, on one screen at once.
  *
- *   Sol şerit (0..199)   LVGL durum kartı (M2b): başlık, kapı durumu,
- *                        canlı sayılar. Yalnızca kirlenen alan yeniden
- *                        çizildiği için sağ şeride dokunmuyor.
- *   Sağ şerit (200..639) Canlı MEL spektrogramı (M3): ekranda akan şey
- *                        FFT değil, modelin göreceği 64 bant. Doğrudan
- *                        blit ile çiziliyor — LVGL ile bir arada yaşama
- *                        M2b'nin açık kalan 6. maddesiydi, bu demo onu
- *                        kapatıyor.
- *   Ses                  Sürekli yakalama halkasından (M3'ün son işi):
- *                        62.5 kare/s örtüşmeli hop, kare kaçırmadan.
- *   Kapı                 Ses algılayınca durum yazısı yeşillenir; 3 s'lik
- *                        pencere sayacı modelin girdi penceresinin
- *                        birikişini gösterir.
+ *   Left strip    An LVGL status card: title, gate state, live counters.
+ *                 Only the dirty area is redrawn, so it never touches the
+ *                 right strip.
+ *   Right strip   The live MEL spectrogram. What scrolls across the screen is
+ *                 not an FFT but the 64 bands the model will see. It is drawn
+ *                 by direct blit — coexisting with LVGL was the last open
+ *                 question of the UI work, and this demo closes it.
+ *   Audio         From the continuous capture ring: a 62.5 fps overlapping
+ *                 hop, with no dropped frames.
+ *   Gate          The status text turns green when sound is detected, and the
+ *                 3 s window counter shows the model's input window filling
+ *                 up.
  *
- * Çıkışta sayısal özet de basılıyor: kare/s ölçümü göz gerektirmeden
- * doğrulanabilsin (kabul ölçütü 62/s, eski bloklayan yakalama 57'de
- * kalıyordu).
+ * A numeric summary is printed on exit, so the fps measurement can be
+ * verified without looking at the screen (the acceptance criterion is 62/s;
+ * the old blocking capture stalled at 57).
  */
 static void cmd_full_demo(void) {
-    printf("\nDEMO: LVGL kart + canli mel spektrogrami + kapi.\n");
-    printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
-    printf("Cikmak icin bir tusa basin.\n\n");
+    printf("\nDEMO: LVGL card + live mel spectrogram + gate.\n");
+    printf("Hold the device in landscape with the USB socket on the RIGHT.\n");
+    printf("Press any key to exit.\n\n");
     backlight_set(true);
 
-    /* Ekranı temizlemek yalnızca kozmetik değil: `pb_lcd_fill` atlama
-     * şeridini (lcd_blit.c) bilinen bir hâle getiriyor. Şerit geçersizken
-     * konumlandırma 0/1. sütunlara siyah yazar ve iz bırakır — teşhis
-     * komutlarından (`z`, `j`, `v`) sonra tam olarak bu olur. */
+    /* Clearing the screen is not merely cosmetic: `pb_lcd_fill` puts the
+     * skip strip (lcd_blit.c) into a known state. While the strip is invalid,
+     * positioning writes black into columns 0 and 1 and leaves a trail —
+     * which is exactly what happens after the diagnostic commands. */
     pb_lcd_fill(0x0000);
     pb_lv_flush_counters_reset();
 
     bool touch = pb_lv_init();
-    printf("  dokunmatik: %s\n", touch ? "hazir" : "yok (demoya engel degil)");
+    printf("  touch: %s\n", touch ? "ready" : "absent (does not block the demo)");
 
-    /* ── Sol kart ── */
+    /* ── Left card ── */
     lv_obj_t *scr = lv_screen_active();
     lv_obj_clean(scr);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x101820), LV_PART_MAIN);
@@ -951,7 +962,7 @@ static void cmd_full_demo(void) {
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 8);
 
     lv_obj_t *state = lv_label_create(scr);
-    lv_label_set_text(state, "dinliyor...");
+    lv_label_set_text(state, "listening...");
     lv_obj_set_style_text_color(state, lv_color_hex(0xB0B8C0), LV_PART_MAIN);
     lv_obj_align(state, LV_ALIGN_TOP_LEFT, 12, 44);
 
@@ -960,17 +971,18 @@ static void cmd_full_demo(void) {
     lv_obj_set_style_text_color(numbers, lv_color_hex(0x8090A0), LV_PART_MAIN);
     lv_obj_align(numbers, LV_ALIGN_TOP_LEFT, 12, 76);
 
-    /* Spektrogramın dilimlerini LVGL'e ÇİZDİRME: arayüz artık tam genişlik
-     * (640) ve LVGL varsayılan olarak beş dilimin de sahibi — bildirilmezse
-     * kart ile şerit aynı bölgeye yazıp birbirini siler (lv_port.c). */
+    /* Do NOT let LVGL draw the spectrogram's slices: the UI is full width
+     * (640) and LVGL owns all five slices by default, so without this the
+     * card and the strip would write to the same region and erase each other
+     * (lv_port.c). */
     pb_lv_set_slice_owner(PB_LVGL_SLICE_MASK_LISTEN);
 
-    /* Kartı çiz, SONRA sağ şeridi spektrograma ver: LVGL'in ilk çizimi kendi
-     * dilimlerinin tamamını boyuyor. */
+    /* Draw the card FIRST, then hand the right strip to the spectrogram:
+     * LVGL's first draw paints all of its own slices. */
     for (int i = 0; i < 4; i++) { pb_lv_tick(); sleep_ms(5); }
     pb_spec_init();
 
-    /* ── Ses hattı ── */
+    /* ── Audio pipeline ── */
     pb_mel_init();
     pb_mel_reset();
     pb_gate_reset();
@@ -981,10 +993,10 @@ static void cmd_full_demo(void) {
 
     uint32_t total = 0, open = 0, window_count = 0, lost = 0;
     uint32_t fps = 0, last_rate = 0;
-    /* Kapı kapanınca yazıyı hemen soldurmak yerine kısa bir süre tut:
-     * 62 kare/s'de tek karelik açılmalar gözle görülmez. */
+    /* Rather than fading the text the moment the gate closes, hold it
+     * briefly: at 62 fps a single-frame opening is invisible. */
     uint32_t gate_hold = 0;
-    bool gate_gorunur = false;
+    bool gate_visible = false;
     absolute_time_t next_report = make_timeout_time_ms(1000);
     absolute_time_t next_card  = make_timeout_time_ms(250);
 
@@ -994,13 +1006,13 @@ static void cmd_full_demo(void) {
     while (getchar_timeout_us(0) < 0) {
         memmove(frame, frame + PB_MEL_HOP, remaining * sizeof(int16_t));
         pb_capture_result_t cap = pb_audio_stream_read(frame + remaining, PB_MEL_HOP, 1000);
-        if (cap.samples < PB_MEL_HOP) { printf("  yakalama eksik, cikiliyor\n"); break; }
+        if (cap.samples < PB_MEL_HOP) { printf("  capture came up short, exiting\n"); break; }
         if (cap.fifo_overrun) lost++;
 
         float power[PB_FFT_POWER_BINS];
         pb_fft_power(frame, power);
         pb_gate_result_t g = pb_gate_update(power);
-        if (g.active) { open++; gate_hold = 31; }      /* ~0.5 s görünür kal */
+        if (g.active) { open++; gate_hold = 31; }   /* stay visible ~0.5 s */
         else if (gate_hold) gate_hold--;
 
         pb_mel_push(frame);
@@ -1013,8 +1025,9 @@ static void cmd_full_demo(void) {
             if (pb_mel_window(window)) window_count++;
         }
 
-        /* Mel karesini spektrogram sütununa çevir. Gösterim penceresi
-         * -75..-15 dB: oda tabanı (~-47 dB) koyu, kuş sesi parlak düşer. */
+        /* Turn the mel frame into a spectrogram column. The display window
+         * is -75..-15 dB, so the room floor (about -47 dB) lands dark and
+         * birdsong lands bright. */
         int8_t mel_q[PB_MEL_BANDS];
         if (pb_mel_last_frame(mel_q)) {
             uint8_t bins[PB_MEL_BANDS];
@@ -1034,18 +1047,18 @@ static void cmd_full_demo(void) {
             next_report = make_timeout_time_ms(1000);
         }
 
-        /* Kartı 4 Hz güncelle: her karede güncellemek LVGL'e boş yere
-         * çizim çıkarır ve hop bütçesini yer. */
+        /* Update the card at 4 Hz: updating every frame would give LVGL
+         * pointless drawing to do and eat into the hop budget. */
         if (time_reached(next_card)) {
             bool show = g.active || gate_hold > 0;
-            if (show != gate_gorunur) {
-                gate_gorunur = show;
-                lv_label_set_text(state, show ? "SES ALGILANDI" : "dinliyor...");
+            if (show != gate_visible) {
+                gate_visible = show;
+                lv_label_set_text(state, show ? "SOUND DETECTED" : "listening...");
                 lv_obj_set_style_text_color(state,
                     lv_color_hex(show ? 0x40E060 : 0xB0B8C0), LV_PART_MAIN);
             }
             lv_label_set_text_fmt(numbers,
-                "%lu kare/s\nkapi %%%lu\nbant %d dB\npencere %lu\nkayip %lu",
+                "%lu fps\ngate %%%lu\nband %d dB\nwindows %lu\nlost %lu",
                 (unsigned long)last_rate,
                 (unsigned long)(total ? open * 100 / total : 0),
                 (int)g.band_db,
@@ -1056,19 +1069,19 @@ static void cmd_full_demo(void) {
         pb_lv_tick();
     }
 
-    printf("\n  toplam kare %lu, son hiz %lu kare/s, kapi acik %%%lu,\n"
-           "  tam pencere %lu, kayip %lu\n",
+    printf("\n  total frames %lu, last rate %lu fps, gate open %%%lu,\n"
+           "  full windows %lu, lost %lu\n",
            (unsigned long)total, (unsigned long)last_rate,
            (unsigned long)(total ? open * 100 / total : 0),
            (unsigned long)window_count, (unsigned long)lost);
 
-    /* LVGL flush hizalamasi (§9n) — goz gerektirmeyen olcum.
-     * Panel sutun araligini 2 piksele yuvarliyor; sutun sayisi TEK olursa
-     * panel satir basina bizim gonderdigimizden bir piksel FAZLA kullanir ve
-     * veri her satirda kayar — yazinin yatay suruklenmis gorunmesinin imzasi. */
-    printf("  LVGL flush %lu, HIZASIZ %lu, satir adimi != alan_w: %lu\n"
-           "  panel_w %lu..%lu, son alan ui x(%ld..%ld) y(%ld..%ld), "
-           "adim %ld px / alan_w %ld px\n\n",
+    /* LVGL flush alignment — a measurement that needs no eyes.
+     * The panel rounds a column range to 2 pixels, so with an ODD column
+     * count it uses one pixel MORE per row than we send, and the data shifts
+     * on every row — the signature of horizontally smeared text. */
+    printf("  LVGL flush %lu, UNALIGNED %lu, row stride != area_w: %lu\n"
+           "  panel_w %lu..%lu, last area ui x(%ld..%ld) y(%ld..%ld), "
+           "stride %ld px / area_w %ld px\n\n",
            (unsigned long)pb_lv_flush_count, (unsigned long)pb_lv_flush_unaligned,
            (unsigned long)pb_lv_flush_stride_differs,
            (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max,
@@ -1078,20 +1091,20 @@ static void cmd_full_demo(void) {
 }
 
 /**
- * LVGL demo — M2b'nin kabul ölçütü.
+ * LVGL demo — the UI acceptance test.
  *
- * Tek ekranda dört şeyi birden sınıyor: LVGL'in ayağa kalkması, 90° yön
- * çevriminin kısmi render ile doğru çalışması, yazı tipi/tema, ve dokunmatik
- * girişi. Dokunulan nokta ekrana yazıldığı için koordinat eşlemesinin doğru
- * olup olmadığı da doğrudan görülüyor.
+ * It exercises four things on one screen: LVGL coming up, the 90-degree
+ * rotation working correctly with partial rendering, the fonts and theme, and
+ * touch input. The touched point is printed on screen, so whether the
+ * coordinate mapping is right can be seen directly.
  */
 static void cmd_ui_demo(void) {
-    printf("\nLVGL demo. Cikmak icin bir tusa basin.\n");
+    printf("\nLVGL demo. Press any key to exit.\n");
     backlight_set(true);
-    pb_lcd_fill(0x0000);   /* atlama seridini bilinen hale getirir (lcd_blit.c) */
+    pb_lcd_fill(0x0000);   /* puts the skip strip into a known state (lcd_blit.c) */
 
     bool touch = pb_lv_init();
-    printf("  dokunmatik: %s\n", touch ? "hazir" : "YOK (sadece ekran)");
+    printf("  touch: %s\n", touch ? "ready" : "ABSENT (display only)");
 
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x101820), LV_PART_MAIN);
@@ -1103,12 +1116,13 @@ static void cmd_ui_demo(void) {
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 10);
 
     lv_obj_t *info = lv_label_create(scr);
-    lv_label_set_text(info, "ekrana dokunun");
+    lv_label_set_text(info, "touch the screen");
     lv_obj_set_style_text_color(info, lv_color_hex(0xB0B8C0), LV_PART_MAIN);
     lv_obj_align(info, LV_ALIGN_TOP_LEFT, 12, 44);
 
-    /* Sağ kenara bir çubuk: kısmi render'ın ekranın uzak ucunda da doğru
-     * yere düştüğünü gösterir (yön hatası en çok orada belli olur). */
+    /* A bar at the right edge: it shows that partial rendering lands
+     * correctly at the far end of the screen too, which is where an
+     * orientation error shows up most clearly. */
     lv_obj_t *bar = lv_bar_create(scr);
     lv_obj_set_size(bar, 200, 16);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_RIGHT, -16, -16);
@@ -1121,7 +1135,7 @@ static void cmd_ui_demo(void) {
 
         pb_touch_state_t st = pb_touch_read();
         if (st.ok && st.fingers > 0) {
-            lv_label_set_text_fmt(info, "dokunus: x=%u  y=%u",
+            lv_label_set_text_fmt(info, "touch: x=%u  y=%u",
                                   st.p.raw_x, st.p.raw_y);
         }
 
@@ -1129,40 +1143,43 @@ static void cmd_ui_demo(void) {
         lv_bar_set_value(bar, value, LV_ANIM_OFF);
         sleep_ms(20);
     }
-    printf("cikildi\n\n");
+    printf("exited\n\n");
 }
 
 /**
- * Yön testi — panelin doğal koordinatları fiziksel olarak nereye düşüyor?
+ * Orientation test — where do the panel's native coordinates land
+ * physically?
  *
- * Panel 172x640 dikey, arayüz 640x172 yatay. `ui/spectrogram.c` bu çevrimi
- * yapıyor ama hangi köşenin (0,0) olduğu ve aynalama olup olmadığı ancak
- * ekrana bakılarak bilinir.
+ * The panel is 172x640 portrait and the UI is 640x172 landscape.
+ * `ui/spectrogram.c` performs that conversion, but which corner is (0,0), and
+ * whether there is any mirroring, can only be known by looking at the screen.
  *
- * Dört köşeye dört farklı renk basıyoruz. Tek bir bakış hem dönüşü hem
- * aynalamayı belirsizliğe yer bırakmadan söylüyor — tuşa basmak gerekmiyor.
+ * Four different colours are pushed to the four corners. A single glance
+ * settles both the rotation and the mirroring unambiguously — no key press
+ * needed.
  */
 static void cmd_orientation(void) {
     enum { FRAME = 40 };
     static uint16_t row[PB_PANEL_W];
 
     const struct { uint32_t x, y; uint16_t color; const char *name; } corner[] = {
-        { 0,               0,               0xF800, "KIRMIZI = panel (0,0)"         },
-        { PB_PANEL_W-FRAME, 0,               0x07E0, "YESIL   = panel (X sonu, 0)"   },
-        { 0,               PB_PANEL_H-FRAME, 0x001F, "MAVI    = panel (0, Y sonu)"   },
-        { PB_PANEL_W-FRAME, PB_PANEL_H-FRAME, 0xFFE0, "SARI    = panel (X sonu, Y sonu)" },
+        { 0,               0,               0xF800, "RED    = panel (0,0)"          },
+        { PB_PANEL_W-FRAME, 0,               0x07E0, "GREEN  = panel (X end, 0)"     },
+        { 0,               PB_PANEL_H-FRAME, 0x001F, "BLUE   = panel (0, Y end)"     },
+        { PB_PANEL_W-FRAME, PB_PANEL_H-FRAME, 0xFFE0, "YELLOW = panel (X end, Y end)" },
     };
 
-    printf("\nYon testi — ekranda dort renkli kare var.\n");
+    printf("\nOrientation test - four coloured squares on screen.\n");
     backlight_set(true);
 
-    /* TEK GEÇİŞ — panelin sözleşmesi bu (§9n).
+    /* A SINGLE PASS — this is the panel's contract.
      *
-     * Eski hâli önce ekranı doldurup sonra dört kareyi ayrı ayrı blit
-     * ediyordu; bu panelde her RAMWR satır 0'a döndüğü için dördü de üst
-     * üste biniyor ve yalnızca sonuncusu görünüyordu — ekran hatasının en
-     * çok görülen belirtisi buydu. Şimdi 640 satırın her biri yerinde
-     * üretilip tek RAMWR akışında yollanıyor: dört köşe de doğru yerde. */
+     * The old version filled the screen and then blitted the four squares
+     * separately. On this panel every RAMWR returns to row 0, so all four
+     * landed on top of each other and only the last was visible — the most
+     * frequently seen symptom of the display bug. Now each of the 640 rows is
+     * generated in place and sent in one RAMWR stream, and all four corners
+     * land correctly. */
     pb_lcd_column_window(0, PB_PANEL_W - 1);
     pb_lcd_stream_begin(0x2C);
     for (uint32_t y = 0; y < PB_PANEL_H; y++) {
@@ -2227,14 +2244,14 @@ static void cmd_datapath_probe(void) {
         gpio_set_dir(PB_PIN_LCD_TE, GPIO_IN);
         gpio_disable_pulls(PB_PIN_LCD_TE);
 
-        uint32_t base = te_transition_say();
+        uint32_t base = te_transition_count();
         bb_cmd(0x34, NULL, 0);                 /* TEOFF */
         sleep_ms(20);
-        uint32_t off = te_transition_say();
+        uint32_t off = te_transition_count();
         uint8_t param = 0x00;
         bb_cmd(0x35, &param, 1);               /* TEON */
         sleep_ms(20);
-        uint32_t open = te_transition_say();
+        uint32_t open = te_transition_count();
 
         printf("   TE: taban %lu -> TEOFF %lu -> TEON %lu\n",
                (unsigned long)base, (unsigned long)off, (unsigned long)open);
