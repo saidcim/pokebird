@@ -1,279 +1,426 @@
-# PokeBird — İstanbul Kuş Sesi Tanıma Cihazı: Mimari Temel
+# PokeBird — Istanbul Bird Song Recognition Device: Architectural Groundwork
+
+> This is the design document written before any code existed. It records the
+> reasoning the project was built on, and the numbers in it are the budgets
+> and expectations of that moment, not measurements. Where the built device
+> differs — 178 species rather than ~110, the firmware under `firmware/` —
+> the measured figures live in `models/*.txt` and the repository README.
 
 ## Context
 
-**Amaç:** Waveshare RP2350-Touch-LCD-3.49 üzerinde, internet bağlantısı olmadan çalışan, kuş sesinden tür tanıyan cep cihazı. BirdNET'in yaptığı işin, tek bir şehre (İstanbul) daraltılmış ve 150 MHz'lik bir mikrodenetleyiciye sığdırılmış hâli.
+**Goal:** a pocket device on the Waveshare RP2350-Touch-LCD-3.49 that works
+with no internet connection and recognises a bird species from its song. What
+BirdNET does, narrowed to a single city (Istanbul) and squeezed into a 150 MHz
+microcontroller.
 
-**Neden daraltma gerekiyor:** BirdNET GLOBAL 6K modeli ~6000 sınıf, 48 kHz girdi ve onlarca MB'lik bir ağ. Bu cihazda 520 KB SRAM ve 150 MHz iki çekirdek var — BirdNET'i olduğu gibi çalıştırmak fiziksel olarak mümkün değil. İstanbul'a özgü ~110 türlük bir liste, hem sınıf sayısını 50 kat düşürüyor hem de sınıf başına düşen eğitim verisini artırdığı için küçük modelin doğruluğunu yükseltiyor.
+**Why the narrowing is necessary:** BirdNET's GLOBAL 6K model has ~6000
+classes, a 48 kHz input and a network tens of megabytes in size. This device
+has 520 KB of SRAM and two cores at 150 MHz — running BirdNET as it is is
+physically impossible. A list of ~110 species specific to Istanbul both cuts
+the class count by a factor of 50 and, by increasing the training data per
+class, raises the accuracy of a small model.
 
-**Bu doküman ne:** Üzerine inşa edeceğimiz temel. Donanım gerçekleri (şematikten doğrulanmış), bellek/hesap bütçesi, sinyal işleme ve model mimarisi, veri boru hattı, arayüz ve aşamalı teslim planı.
+**What this document is:** the foundation to build on. The hardware facts
+(verified from the schematic), the memory and compute budget, the signal
+processing and model architecture, the data pipeline, the interface and the
+staged delivery plan.
 
-**Proje durumu:** `C:\Users\hp\Downloads\pokebird` boş bir git deposu. Sıfırdan başlıyoruz.
+**Project state:** `C:\Users\hp\Downloads\pokebird` is an empty git repository.
+We are starting from scratch.
 
-**Kilitlenen kararlar (kullanıcı onayı ile):**
-| Karar | Seçim |
+**Decisions locked in (with the user's approval):**
+| Decision | Choice |
 |---|---|
-| Tür kapsamı | ~110 tür (yerleşik + düzenli üreyen + yaygın göçmen) |
-| Kullanım | Elde taşınan, anlık tanıma; ekran sürekli açık |
-| Yazılım yığını | Pico SDK + CMake (C/C++) |
-| Model eğitimi | BirdNET öğretmen → küçük modele damıtma (distillation) |
+| Species scope | ~110 species (resident + regular breeders + common migrants) |
+| Use | Handheld, instant recognition; the screen stays on |
+| Software stack | Pico SDK + CMake (C/C++) |
+| Model training | BirdNET as teacher -> distilled into a small model |
 
 ---
 
-## 1. Donanım Temeli (şematikten doğrulandı)
+## 1. The Hardware Foundation (verified from the schematic)
 
-Waveshare şeması (`RP2350-Touch-LCD-3.49.pdf`) çözümlenerek çıkarıldı. **Bu tablo projenin `board_config.h` dosyasının kaynağıdır.**
+Extracted by working through the Waveshare schematic
+(`RP2350-Touch-LCD-3.49.pdf`). **This table is the source of the project's
+`board_config.h`.**
 
-| GPIO | Sinyal | Not |
+| GPIO | Signal | Note |
 |---|---|---|
-| 0 | `NS_MODE` | NS4150B hoparlör amfi mod/enable |
-| 1 | `I2S_DSDIN` | MCU → codec (DAC, ses çalma) |
-| 2 | `I2S_DSOUT` | codec → MCU (**ADC, mikrofon verisi**) |
-| 3 | `I2S_MCLK` | PIO ile üretilecek |
+| 0 | `NS_MODE` | NS4150B speaker amplifier mode/enable |
+| 1 | `I2S_DSDIN` | MCU -> codec (DAC, playback) |
+| 2 | `I2S_DSOUT` | codec -> MCU (**ADC, microphone data**) |
+| 3 | `I2S_MCLK` | to be generated with PIO |
 | 4 | `I2S_SCLK` | BCLK |
 | 5 | `I2S_LRCK` | WS |
-| 6 / 7 | `SDA` / `SCL` | **Paylaşımlı I2C**: ES8311 codec + QMI8658 IMU + PCF85063 RTC |
-| 8 / 9 | `IMU_INT1` / `IMU_INT2` | *kullanılmayacak* |
-| 10 | `RTC_INT` | *kullanılmayacak* |
-| 11 | `TP_INT` | Dokunmatik kesme |
-| **12–19** | **boş** | P3 başlığına çıkmış (8 pin) |
+| 6 / 7 | `SDA` / `SCL` | **Shared I2C**: ES8311 codec + QMI8658 IMU + PCF85063 RTC |
+| 8 / 9 | `IMU_INT1` / `IMU_INT2` | *will not be used* |
+| 10 | `RTC_INT` | *will not be used* |
+| 11 | `TP_INT` | touch interrupt |
+| **12–19** | **free** | brought out to header P3 (8 pins) |
 | 20–25 | `LCD_SCL`, `LCD_D0..D3`, `LCD_CS` | AXS15231B QSPI |
-| 26–31 | `SD_SCLK`, `SD_MOSI`, `SD_MISO`, `SD_D1`, `SD_D2`, `SD_CS` | 4-bit SDIO da mümkün |
-| 32 / 33 | `TP_SDA` / `TP_SCL` | Dokunmatik **ayrı** I2C hattı |
+| 26–31 | `SD_SCLK`, `SD_MOSI`, `SD_MISO`, `SD_D1`, `SD_D2`, `SD_CS` | 4-bit SDIO is also possible |
+| 32 / 33 | `TP_SDA` / `TP_SCL` | the touchscreen's **separate** I2C bus |
 | 34 / 35 / 36 / 37 | `LCD_RST`, `LCD_TE`, `LCD_BL`, `BL_EN` | |
-| 38 / 39 | `SYS_OUT` / `SYS_EN` | Güç mandalı (latch) |
-| 40 | `BAT_ADC` | Pil voltajı |
-| **41–47** | **boş** | J3/J6 başlığı (7 pin) |
+| 38 / 39 | `SYS_OUT` / `SYS_EN` | power latch |
+| 40 | `BAT_ADC` | battery voltage |
+| **41–47** | **free** | header J3/J6 (7 pins) |
 
-**Kritik donanım gerçekleri:**
-- **RP2350B**: 2× Cortex-M33 @ 150 MHz, FPU + DSP eklentisi (CMSIS-DSP/NN kullanılabilir).
-- **520 KB SRAM, 16 MB flash (PY25Q128HA). PSRAM YOK.** — En sert kısıt bu.
-- **Mikrofon kart üzerinde var**: analog MEMS mikrofon (`MIC1`) → ES8311 `MIC1P/MIC1N` girişi. Harici mikrofon eklemeye gerek yok.
-- **Hoparlör çıkışı var**: NS4150B D-sınıfı amfi + MX1.25 konnektör (H1). Referans kuş sesi çalma özelliği mümkün.
-- **Kasıtlı olarak kullanılmayan çevre birimleri:** IMU (QMI8658) ve RTC (PCF85063). IMU'nun bu projeye katkısı yok, sadece karmaşıklık ekler. RTC'nin pil yedeklemesi yok — cihaz kapanınca saati kaybediyor, dolayısıyla güvenilir bir tarih kaynağı değil (tarih yönetimi için bkz. §4). Ekranı uyandırma/uyutma işi kartın kendi güç tuşuyla yapılacak.
-- **Ekran 172×640** — dar ve uzun. Yatay çevrildiğinde 640×172'lik bir "şerit". Tam çerçeve arabelleği RGB565'te **220 KB** eder; SRAM'in %42'si. **Tam framebuffer kullanmayacağız** (bkz. §5).
+**Critical hardware facts:**
+- **RP2350B**: 2x Cortex-M33 @ 150 MHz, FPU + the DSP extension (so CMSIS-DSP/NN
+  are available).
+- **520 KB SRAM, 16 MB flash (PY25Q128HA). NO PSRAM.** — this is the hardest
+  constraint.
+- **The microphone is on the board**: an analogue MEMS microphone (`MIC1`) into
+  the ES8311's `MIC1P/MIC1N` input. No external microphone is needed.
+- **There is a speaker output**: an NS4150B class-D amplifier plus an MX1.25
+  connector (H1). Playing a reference bird call is possible.
+- **Peripherals deliberately left unused:** the IMU (QMI8658) and the RTC
+  (PCF85063). The IMU contributes nothing to this project and only adds
+  complexity. The RTC has no battery backup — the device loses the time when
+  it is switched off, so it is not a reliable date source (for date handling
+  see §4). Waking and sleeping the screen will be done with the board's own
+  power button.
+- **The screen is 172x640** — narrow and long. Turned landscape it is a
+  640x172 "strip". A full frame buffer in RGB565 is **220 KB**, 42% of the
+  SRAM. **We will not use a full framebuffer** (see §5).
 
-**Yeniden kullanılacak hazır kod (sıfırdan yazmayacağız):**
-`github.com/waveshareteam/RP2350-Touch-LCD-3.5` → `examples/C/03_ES8311/` altında çalışan bir **ES8311 sürücüsü + PIO tabanlı I2S** var; içinde `read_pio` (mikrofon yakalama), `mclk_pio` (MCLK üretimi), mikrofon kazanç ayarı ve 16-bit/24 kHz yapılandırma bulunuyor. Kardeş karta ait olduğu için **sadece pin tanımları değişecek** (`PICO_AUDIO_*` makroları → yukarıdaki GPIO 1–5). Bu, projenin en riskli parçasını hazır çözüyor.
+**Existing code to reuse (we will not write it from scratch):**
+`github.com/waveshareteam/RP2350-Touch-LCD-3.5` has, under
+`examples/C/03_ES8311/`, a working **ES8311 driver plus PIO-based I2S**;
+inside it are `read_pio` (microphone capture), `mclk_pio` (MCLK generation),
+the microphone gain setting and the 16-bit / 24 kHz configuration. Because it
+belongs to a sibling board **only the pin definitions change** (the
+`PICO_AUDIO_*` macros -> GPIO 1–5 above). That solves the riskiest part of the
+project off the shelf.
 
 ---
 
-## 2. Sistem Mimarisi
+## 2. System Architecture
 
 ```
-┌─ Core 1 (ses + yapay zeka, gerçek zamanlı) ──────────────────┐
-│  I2S/PIO+DMA → halka tampon → mel öznitelik çıkarımı         │
-│      → Kapı (VAD)  → Aşama-1 ikili ağ  → Aşama-2 tür ağı     │
-│      → zamansal birleştirme + mevsim önceliği                │
-└──────────────────── FIFO (tespit olayları) ──────────────────┘
-┌─ Core 0 (arayüz + depolama, gerçek zamanlı değil) ───────────┐
-│  LVGL → AXS15231B QSPI+DMA │ dokunmatik │ SD kart │ pil │ güç │
-└──────────────────────────────────────────────────────────────┘
++- Core 1 (audio + AI, real time) ------------------------------+
+|  I2S/PIO+DMA -> ring buffer -> mel feature extraction         |
+|      -> gate (VAD) -> stage-1 binary net -> stage-2 species   |
+|      -> temporal voting + seasonal prior                      |
++--------------------- FIFO (detection events) -----------------+
++- Core 0 (interface + storage, not real time) -----------------+
+|  LVGL -> AXS15231B QSPI+DMA | touch | SD card | battery | pwr |
++---------------------------------------------------------------+
 ```
 
-**Neden bu ayrım:** Ses yakalama bir örnek bile kaçıramaz. LVGL'in çizim döngüsü ve SD kart yazma işlemleri onlarca milisaniye bloklayabilir. İki çekirdeği ayırmak, arayüzün ses hattını asla aksatmamasını garantiler. Çekirdekler arası tek yön: Core 1 → Core 0, sadece tespit olayları (küçük struct'lar) `pico_multicore` FIFO + kilitsiz halka tampon ile.
+**Why this division:** audio capture cannot miss a single sample. LVGL's draw
+loop and SD card writes can block for tens of milliseconds. Separating the two
+cores guarantees that the interface never disturbs the audio path. There is
+only one direction between the cores: Core 1 -> Core 0, and only detection
+events (small structs), over the `pico_multicore` FIFO plus a lock-free ring
+buffer.
 
-**Katmanlar:**
-| Katman | Sorumluluk |
+**Layers:**
+| Layer | Responsibility |
 |---|---|
-| `hal/` | Pico SDK sarmalayıcıları: i2s, i2c, qspi_lcd, touch, sd, power |
-| `dsp/` | Halka tampon, pencereleme, RFFT, mel filtre bankası, log + normalizasyon |
-| `ml/` | TFLM çalıştırıcı, kapı mantığı, iki aşamalı çıkarım, sonradan işleme |
-| `data/` | Tür tablosu, mevsim öncelikleri, tespit günlüğü, yaşam listesi |
-| `ui/` | LVGL ekranları, tema, Türkçe yazı tipi |
-| `app/` | Görev döngüleri, durum makinesi, ayarların kalıcılığı |
+| `hal/` | Pico SDK wrappers: i2s, i2c, qspi_lcd, touch, sd, power |
+| `dsp/` | ring buffer, windowing, RFFT, mel filter bank, log + normalisation |
+| `ml/` | the TFLM runner, the gate logic, two-stage inference, post-processing |
+| `data/` | species table, seasonal priors, detection log, life list |
+| `ui/` | LVGL screens, theme, fonts |
+| `app/` | task loops, the state machine, persisting the settings |
 
 ---
 
-## 3. Ses ve Sinyal İşleme Hattı
+## 3. The Audio and Signal Processing Path
 
-**Örnekleme hızı: 24 kHz** (16 kHz değil). Gerekçe: 16 kHz → 8 kHz Nyquist, İstanbul'da bulunan Çalıkuşu (*Regulus regulus*), Ağaç Tırmaşıkkuşu (*Certhia*) ve bazı ötleğenlerin sesi 7–9 kHz bandında; 8 kHz tavan bunları kırpar. 24 kHz → 12 kHz Nyquist tümünü kapsar. Ayrıca Waveshare sürücüsünün varsayılanı da 24 kHz — ekstra iş yok.
+**Sample rate: 24 kHz** (not 16 kHz). The reason: 16 kHz means an 8 kHz
+Nyquist, and the Goldcrest (*Regulus regulus*), the treecreepers (*Certhia*)
+and some warblers found in Istanbul sing in the 7–9 kHz band; an 8 kHz ceiling
+clips them. 24 kHz gives a 12 kHz Nyquist and covers all of them. On top of
+that the Waveshare driver's default is 24 kHz — no extra work.
 
-| Parametre | Değer |
+| Parameter | Value |
 |---|---|
-| Örnekleme | 24 kHz, 16-bit, mono |
-| Analiz penceresi | 3.0 s, 1.0 s adımla (%66 örtüşme) |
-| FFT | 512 nokta, Hann |
-| Adım (hop) | 384 örnek (16 ms) → 3 s'de 187 kare |
-| Mel bantları | 64, aralık 150 Hz – 11.5 kHz |
-| Çıktı | log-mel, pencere içi ortalama/varyans normalizasyonu, int8 |
+| Sampling | 24 kHz, 16-bit, mono |
+| Analysis window | 3.0 s, with a 1.0 s step (66% overlap) |
+| FFT | 512 points, Hann |
+| Hop | 384 samples (16 ms) -> 187 frames in 3 s |
+| Mel bands | 64, over 150 Hz – 11.5 kHz |
+| Output | log-mel, mean/variance normalised within the window, int8 |
 
-**Kritik bellek hilesi:** 3 saniyelik ham sesi tutmayacağız (144 KB olurdu). Mel kareleri **artımlı** hesaplanıp 64×187'lik bir halka tamponda tutulacak (int8 → 12 KB). Ham ses için sadece ~0.5 s'lik kısa bir halka (24 KB) tutulur — bu da isteğe bağlı WAV kaydı ve gürültü tahmini içindir. Bu tek karar SRAM'de ~130 KB kazandırıyor.
+**The critical memory trick:** we will not hold 3 seconds of raw audio (that
+would be 144 KB). The mel frames are computed **incrementally** and kept in a
+64x187 ring buffer (int8 -> 12 KB). For raw audio only a short ~0.5 s ring
+(24 KB) is kept — for optional WAV recording and noise estimation. That single
+decision saves about 130 KB of SRAM.
 
-**Kapı (gate) — sürekli çalışan ucuz filtre:** 2–10 kHz bandındaki enerji + spektral akı (flux), uyarlamalı gürültü tabanına göre. Şehirde cihazın çoğu zaman "hiçbir şey yok" durumunda olacağı için bu kapı, ağır işlemin %90+ oranında hiç çalışmamasını sağlar → pil ömrü.
+**The gate — a cheap filter that runs continuously:** the energy in the
+2–10 kHz band plus spectral flux, relative to an adaptive noise floor. Since
+the device will be in a "there is nothing here" state most of the time in a
+city, this gate means the heavy work does not run at all more than 90% of the
+time -> battery life.
 
 ---
 
-## 4. Model Mimarisi: Üç Aşamalı Piramit
+## 4. Model Architecture: a Three-Stage Pyramid
 
-Tek büyük 110-sınıflı ağ yerine kademeli yapı. Gerekçe: DrongoNet çalışmasının ([arXiv 2607.19721](https://arxiv.org/html/2607.19721)) temel bulgusu, "ses var mı" ile "hangi tür" sorularının maliyetlerinin çok farklı olduğu — ucuz olanı önce sormak, hem doğruluğu hem pil ömrünü artırıyor.
+A graded structure rather than one large 110-class network. The reason: the
+core finding of the DrongoNet work
+([arXiv 2607.19721](https://arxiv.org/html/2607.19721)) is that "is there a
+sound" and "which species" cost wildly different amounts — asking the cheap
+question first raises both accuracy and battery life.
 
-| Aşama | Görev | Boyut | Ne zaman çalışır |
+| Stage | Job | Size | When it runs |
 |---|---|---|---|
-| **0. Kapı** | Enerji + spektral akı | ~0 KB (DSP) | Sürekli |
-| **1. İkili ağ** | Kuş sesi mi, değil mi | ~15 KB int8 | Kapı tetiklenince |
-| **2. Tür ağı** | 110 tür + "bilinmiyor" | ~300–400 KB int8 | Aşama 1 "kuş" derse |
-| **3. Birleştirme** | Zamansal oylama + mevsim önceliği | ~2 KB tablo | Her tespitte |
+| **0. Gate** | energy + spectral flux | ~0 KB (DSP) | continuously |
+| **1. Binary net** | bird song or not | ~15 KB int8 | when the gate fires |
+| **2. Species net** | 110 species + "unknown" | ~300–400 KB int8 | if stage 1 says "bird" |
+| **3. Voting** | temporal voting + seasonal prior | ~2 KB table | on every detection |
 
-**Aşama 2 ağı:** derinlemesine ayrılabilir (depthwise-separable) evrişimli CNN — daraltılmış MobileNet mantığı. Girdi 64×187 int8. Hedef bütçe: **≤30 MMAC/pencere**. CMSIS-NN ile M33 @150 MHz'de bu ~0.3–0.5 s eder; 1 s'lik pencere adımına rahat sığar.
+**The stage-2 network:** a depthwise-separable convolutional CNN — the
+narrowed-MobileNet idea. The input is 64x187 int8. The target budget is
+**<=30 MMAC per window**. With CMSIS-NN on the M33 at 150 MHz that comes to
+~0.3–0.5 s, which fits comfortably inside a 1 s window step.
 
-**Aşama 3 — mevsim önceliği (küçük iş, büyük kazanç):** eBird'den İstanbul'un aylık tür görülme oranları çıkarılıp 110×12'lik bir tabloya (1.3 KB) niceleştirilir. Logit'lere ay bazlı bir log-öncelik eklenir; böylece Ocak ayında Arı Kuşu tahmini otomatik olarak bastırılır. **Önemli koruma:** öncelik etkisi bir tavanla sınırlanır (ör. ±2.0 logit) ve ayarlardan kapatılabilir — yoksa cihaz gerçek bir nadir gözlemi asla raporlayamaz.
+**Stage 3 — the seasonal prior (small work, large gain):** Istanbul's monthly
+species frequencies are taken from eBird and quantised into a 110x12 table
+(1.3 KB). A month-based log prior is added to the logits, so a bee-eater
+prediction in January is suppressed automatically. **An important safeguard:**
+the prior's effect is capped (say +-2.0 logits) and can be turned off in the
+settings — otherwise the device could never report a genuine rare sighting.
 
-**Tarih nereden geliyor — RTC kullanmıyoruz.** Karttaki PCF85063 RTC'nin pil yedeklemesi olmadığı için cihaz kapanınca saati kaybediyor; güvenilmez bir kaynak. Bunun yerine:
-- Açılışta tek ekranlık bir **tarih onay** adımı: LittleFS'te saklanan son bilinen tarih varsayılan olarak gelir, kullanıcı ya "Onayla"ya basar ya da tekerlekten değiştirir. Günlük kullanımda tek dokunuş.
-- Öncelik için **sadece ay** gerekiyor — gün/saat hassasiyeti önemsiz, dolayısıyla bir-iki gün kayma hiçbir şeyi bozmaz.
-- Oturum içi saat, açılıştan itibaren MCU zamanlayıcısıyla sayılır (günlük kayıtlarındaki saat damgaları için yeterli). Kapanışta güncel tarih LittleFS'e yazılır.
-- Kullanıcı isterse tarihi hiç girmeden geçebilir → mevsim önceliği o oturum için devre dışı kalır, cihaz yine çalışır.
+**Where the date comes from — we do not use the RTC.** The board's PCF85063
+RTC has no battery backup, so the device loses the time when it is switched
+off; it is an unreliable source. Instead:
+- a single-screen **date confirmation** step at startup: the last known date,
+  stored in LittleFS, comes up as the default, and the user either presses
+  "Confirm" or changes it on a wheel. One touch in daily use.
+- **only the month** is needed for the prior — day and hour precision does not
+  matter, so being a day or two out breaks nothing.
+- the within-session clock counts from startup on the MCU timer (enough for
+  the timestamps in the log). The current date is written to LittleFS on
+  shutdown.
+- the user can skip entering a date entirely -> the seasonal prior is disabled
+  for that session and the device still works.
 
-**Zamansal birleştirme:** softmax'ın üstel hareketli ortalaması + "son n pencereden k tanesi eşiğin üstünde" kuralı. Tek pencerelik gürültü kaynaklı yanlış pozitifleri büyük ölçüde eler.
+**Temporal voting:** an exponential moving average of the softmax plus a
+"k of the last n windows above the threshold" rule. It removes most of the
+false positives caused by noise in a single window.
 
-**Gerçekçi doğruluk beklentisi (baştan söylemek önemli):** Temiz tek-tür kayıtlarında top-1 %65–75, top-3 %85–90 bandı hedeflenebilir. Gerçek şehir ortamında (trafik, ezan, martı gürültüsü, insan sesi) bu belirgin düşer. Bu yüzden arayüz **tek bir cevap değil, ilk 3 tahmini güven yüzdeleriyle** gösterecek ve düşük güvende açıkça "emin değil" diyecek. Bunu bir kusur değil, tasarım kararı olarak ele alıyoruz.
+**A realistic accuracy expectation (worth saying up front):** on clean
+single-species recordings, a top-1 of 65–75% and a top-3 of 85–90% is a
+reasonable target. In a real urban environment (traffic, the call to prayer,
+gulls, human voices) that drops noticeably. That is why the interface will
+show **not a single answer but the top 3 predictions with confidence
+percentages**, and will say plainly "not sure" at low confidence. We treat
+this as a design decision, not a defect.
 
 ---
 
-## 5. Bellek Bütçesi (520 KB SRAM)
+## 5. The Memory Budget (520 KB SRAM)
 
-| Bileşen | Tahmini |
+| Component | Estimate |
 |---|---|
-| TFLM tensor arena (Aşama 2) | 180 KB |
-| LVGL çizim tamponları (2 × 640×20 px RGB565) | 26 KB |
-| Mel halka tamponu | 12 KB |
-| Ham ses halka tamponu (0.5 s) | 24 KB |
-| I2S DMA tamponları | 8 KB |
-| FatFS + SD tamponları | 10 KB |
-| Tür tablosu + günlük + ayarlar | 20 KB |
-| Yığınlar (2 çekirdek) + heap + LVGL nesneleri | 80 KB |
-| **Toplam** | **~360 KB** — ~160 KB pay kalıyor |
+| TFLM tensor arena (stage 2) | 180 KB |
+| LVGL draw buffers (2 x 640x20 px RGB565) | 26 KB |
+| mel ring buffer | 12 KB |
+| raw audio ring buffer (0.5 s) | 24 KB |
+| I2S DMA buffers | 8 KB |
+| FatFS + SD buffers | 10 KB |
+| species table + log + settings | 20 KB |
+| stacks (2 cores) + heap + LVGL objects | 80 KB |
+| **Total** | **~360 KB** — about 160 KB of headroom |
 
-**Ekran stratejisi (tam framebuffer YOK):** LVGL, kısmi (partial) render modunda iki küçük tamponla çalışacak; çizim biterken QSPI'ye DMA ile aktarılırken diğer tampon doldurulacak. `LCD_TE` (tearing effect) sinyali yırtılmayı önlemek için kullanılacak. Kaydırmalı spektrogram, LVGL canvas yerine doğrudan bir sütun-itme (column-push) rutiniyle çizilecek — her karede sadece 1 piksellik yeni sütun QSPI'ye gider, bu çok ucuz.
+**The display strategy (NO full framebuffer):** LVGL runs in partial render
+mode with two small buffers; as one finishes drawing it is pushed to the QSPI
+by DMA while the other is filled. The `LCD_TE` (tearing effect) signal is used
+to avoid tearing. The scrolling spectrogram is drawn not with an LVGL canvas
+but by a direct column-push routine — only one pixel of new column goes to the
+QSPI per frame, which is very cheap.
 
-**Flash yerleşimi (16 MB):**
-| Bölge | Boyut |
+**The flash layout (16 MB):**
+| Region | Size |
 |---|---|
-| Firmware | ~900 KB |
-| Modeller (Aşama 1 + 2) | ~450 KB |
-| Tür meta verisi (TR/EN/Latince ad, aylık öncelik) | ~60 KB |
-| Türkçe yazı tipi + ikonlar | ~400 KB |
-| LittleFS (ayarlar, son bilinen tarih, yaşam listesi, günlük) | 2 MB |
-| Boş / OTA payı | ~12 MB |
+| firmware | ~900 KB |
+| models (stages 1 + 2) | ~450 KB |
+| species metadata (names, monthly prior) | ~60 KB |
+| fonts + icons | ~400 KB |
+| LittleFS (settings, last known date, life list, log) | 2 MB |
+| free / OTA headroom | ~12 MB |
 
-**SD kart (opsiyonel ama önerilir):** kuş fotoğrafları, referans ses kayıtları (hoparlörden çalmak için), ham WAV kayıt arşivi, CSV tespit günlüğü. Cihaz SD olmadan da tam çalışır — sadece fotoğraf/ses çalma devre dışı kalır.
-
----
-
-## 6. Veri ve Eğitim Boru Hattı (PC tarafı)
-
-`tools/` altında Python; cihaz koduna hiç karışmaz.
-
-1. **Tür listesi kesinleştirme** — eBird İstanbul (TR-34) taksonu + Avibase kontrol listesi kesiştirilir; ses çıkarmayan/ayırt edilemeyen ve Xeno-canto'da <30 kaydı olan türler elenir → nihai ~110 tür. Çıktı: `data/species_istanbul.csv` (bilimsel ad, Türkçe ad, İngilizce ad, eBird kodu).
-2. **Kayıt toplama** — Xeno-canto API'sinden CC lisanslı kayıtlar indirilir; kalite A/B önceliklendirilir.
-3. **BirdNET ile otomatik segmentasyon + yumuşak etiketleme** — BirdNET-Analyzer her kayıt üzerinde çalıştırılır; hangi 3 saniyelik dilimde gerçekten hedef tür var, bu tespit edilir (Xeno-canto kayıtlarının büyük kısmı sessizlik ve arka plan türü içerir — bu adım veri kalitesini dramatik biçimde artırır). BirdNET'in çıkış olasılıkları öğretmen sinyali olarak saklanır.
-4. **Negatif madenciliği (İstanbul'a özgü, kritik)** — trafik, korna, ezan, vapur düdüğü, insan konuşması, köpek/kedi, rüzgâr, yağmur, inşaat. Bunlar hem Aşama 1'in negatif sınıfı hem de Aşama 2'nin "bilinmiyor" sınıfı olur. **Bu adım atlanırsa cihaz sahada kullanılamaz** — şehir gürültüsünü sürekli kuş sanar.
-5. **Veri artırma** — zaman kaydırma, pitch/tempo, gürültü karıştırma (yukarıdaki negatiflerle, çeşitli SNR'lerde), SpecAugment, oda/mesafe simülasyonu.
-6. **Damıtma ile eğitim** — küçük CNN, hem gerçek etiketlerle hem BirdNET'in yumuşak çıktılarıyla eğitilir. Sınıf dengesizliği için focal loss.
-7. **Niceleştirme (INT8) + doğrulama** — TFLite post-training quantization, temsilî veri kümesiyle. Niceleştirme öncesi/sonrası doğruluk farkı raporlanır.
-8. **C dizisine dönüştürme** — `xxd -i` benzeri; `models/` altına.
-9. **Cihaz-içi doğrulama seti** — SD karttan WAV çalıp cihazın kendi çıktısını PC'deki referansla karşılaştıran bir test modu. Bu, "PC'de çalışıyor ama cihazda çalışmıyor" sınıfı hataları yakalar.
-
-**Lisans uyarısı (şimdiden bilinmeli):** BirdNET modelleri **CC BY-NC-SA 4.0** ile dağıtılıyor. BirdNET'i öğretmen olarak kullanıp damıtılan model, türev eser sayılabilir — bu da **ticari kullanımı kısıtlar** ve aynı lisansla paylaşım (share-alike) yükümlülüğü doğurabilir. Kişisel/hobi/araştırma kullanımı için sorun yok. İleride ticarileştirme düşünülüyorsa, adım 3'ün yalnızca segmentasyon için kullanılıp yumuşak etiketlerin (damıtmanın) atlandığı bir varyant gerekir. Xeno-canto kayıtları da kayıt bazında farklı CC lisanslarına sahip; atıf dosyası (`ATTRIBUTION.md`) otomatik üretilecek.
+**The SD card (optional but recommended):** bird photographs, reference
+recordings (to play through the speaker), an archive of raw WAV recordings, a
+CSV detection log. The device works fully without an SD card — only the
+photographs and playback are disabled.
 
 ---
 
-## 7. Arayüz Tasarımı (640×172 yatay)
+## 6. The Data and Training Pipeline (the PC side)
 
-Ekran alışılmadık bir şerit — bunu kusur değil, avantaj olarak kullanacağız: solda sabit "kimlik kartı", sağda akan spektrogram.
+Python under `tools/`; it never touches the device code.
 
-**Ekran 1 — Dinleme (ana ekran)**
+1. **Finalising the species list** — the eBird Istanbul (TR-34) taxonomy is
+   intersected with the Avibase checklist; species that make no sound, cannot
+   be told apart, or have fewer than 30 recordings on Xeno-canto are dropped
+   -> a final ~110 species. Output: `data/species_istanbul.csv` (scientific
+   name, Turkish name, English name, eBird code).
+2. **Collecting recordings** — CC-licensed recordings are downloaded from the
+   Xeno-canto API, with quality A/B prioritised.
+3. **Automatic segmentation and soft labelling with BirdNET** —
+   BirdNET-Analyzer is run over every recording to find which 3-second slices
+   really contain the target species (most of a Xeno-canto recording is
+   silence and background species, so this step improves data quality
+   dramatically). BirdNET's output probabilities are kept as the teacher
+   signal.
+4. **Negative mining (specific to Istanbul, critical)** — traffic, car horns,
+   the call to prayer, ferry horns, human speech, dogs and cats, wind, rain,
+   construction. These become both stage 1's negative class and stage 2's
+   "unknown" class. **Skip this step and the device is unusable in the field**
+   — it will take city noise for a bird continuously.
+5. **Augmentation** — time shifting, pitch/tempo, mixing in noise (with the
+   negatives above, at various SNRs), SpecAugment, room/distance simulation.
+6. **Training with distillation** — the small CNN is trained on both the true
+   labels and BirdNET's soft outputs. Focal loss for the class imbalance.
+7. **Quantisation (INT8) + verification** — TFLite post-training quantisation
+   with a representative data set. The accuracy difference before and after
+   quantisation is reported.
+8. **Conversion to a C array** — along the lines of `xxd -i`, into `models/`.
+9. **An on-device validation set** — a test mode that plays a WAV from the SD
+   card and compares the device's own output against the reference on the PC.
+   This catches the "works on the PC, does not work on the device" class of
+   bug.
+
+**A licence warning (worth knowing now):** the BirdNET models are distributed
+under **CC BY-NC-SA 4.0**. A model distilled using BirdNET as its teacher may
+count as a derivative work — which **restricts commercial use** and can create
+a share-alike obligation. For personal, hobby or research use there is no
+problem. If commercialisation is ever considered, a variant is needed in which
+step 3 is used only for segmentation and the soft labels (the distillation)
+are skipped. Xeno-canto recordings also carry different CC licences per
+recording; an attribution file (`ATTRIBUTION.md`) will be generated
+automatically.
+
+---
+
+## 7. Interface Design (640x172 landscape)
+
+The screen is an unusual strip — we will treat that as an advantage rather
+than a defect: a fixed "identity card" on the left, a scrolling spectrogram on
+the right.
+
+**Screen 1 — Listening (the main screen)**
 ```
-┌────────────────────┬───────────────────────────────────────┐
-│  KIZILGERDAN       │  ▁▂▅█▇▄▂▁  (kaydırmalı spektrogram)   │
-│  Erithacus rub.    │                                        │
-│  ● %87   14:32     │  ▬▬▬▬▬▬▬░░░  seviye                   │
-│  2. Serçe %6       │                                        │
-└────────────────────┴───────────────────────────────────────┘
++--------------------+---------------------------------------+
+|  EUROPEAN ROBIN    |  ..:::##|##::.  (scrolling spectrogram)|
+|  Erithacus rub.    |                                       |
+|  * 87%   14:32     |  =======...  level                    |
+|  2. Sparrow 6%     |                                       |
++--------------------+---------------------------------------+
 ```
-Güven düşükse kart "Dinliyor…" veya "Emin değil — 3 aday" durumuna geçer.
+At low confidence the card switches to "Listening…" or "Not sure — 3
+candidates".
 
-**Ekran 2 — Tespit detayı:** SD'den kuş fotoğrafı, TR/EN/Latince ad, güven, saat, "▶ Referans sesi çal" düğmesi (hoparlör). *Not: çalma sırasında dinleme duraklatılır — yoksa cihaz kendi sesini duyar.*
+**Screen 2 — Detection detail:** a bird photograph from the SD card, the
+names, the confidence, the time, and a "> Play the reference call" button (the
+speaker). *Note: listening is paused during playback — otherwise the device
+hears itself.*
 
-**Ekran 3 — Günlük:** bugünün tespitleri (saat + tür + güven), gün listesi / yaşam listesi sekmeleri, SD'ye CSV dışa aktarma.
+**Screen 3 — Log:** today's detections (time + species + confidence), day-list
+and life-list tabs, CSV export to the SD card.
 
-**Ekran 4 — Ayarlar:** hassasiyet eşiği, mevsim önceliği aç/kapa, mikrofon kazancı, ekran parlaklığı, dil (TR/EN), ham WAV kaydı aç/kapa, tarih.
+**Screen 4 — Settings:** the sensitivity threshold, the seasonal prior on/off,
+microphone gain, screen brightness, language, raw WAV recording on/off, the
+date.
 
-**Ekran 0 — Tarih onayı (açılışta):** Tek satır: `Bugün: 31 Temmuz 2026` + [Onayla] [Değiştir] [Atla]. Varsayılan, LittleFS'teki son bilinen tarih. Amaç mevsim önceliği (§4); "Atla" denirse öncelik o oturumda devre dışı. Günlük kullanımda tek dokunuşluk bir adım.
+**Screen 0 — Date confirmation (at startup):** a single line: `Today: 31 July
+2026` + [Confirm] [Change] [Skip]. The default is the last known date from
+LittleFS. Its purpose is the seasonal prior (§4); "Skip" disables the prior for
+that session. One touch in daily use.
 
-Ekranlar arası geçiş dokunmatik yatay kaydırma ile. Ekranı açma/kapama kartın kendi güç tuşuyla — ek bir uyandırma mekanizması yok.
+Moving between screens is by a horizontal swipe. Turning the screen on and off
+is done with the board's own power button — there is no extra wake mechanism.
 
 ---
 
-## 8. Depo Yapısı
+## 8. Repository Layout
 
 ```
 pokebird/
 ├─ CMakeLists.txt              # PICO_BOARD=pico2, PICO_PLATFORM=rp2350
-├─ src/
-│  ├─ main.c                   # core0 giriş; core1'i başlatır
-│  ├─ board_config.h           # §1'deki pin tablosu — TEK doğruluk kaynağı
-│  ├─ hal/                     # i2s_mic, es8311, axs15231b, touch, sdcard, rtc, power
-│  ├─ dsp/                     # ringbuf, window, mel, gate
-│  ├─ ml/                      # tflm_runner, pipeline, prior, aggregate
-│  ├─ data/                    # species_table, detection_log, settings
-│  └─ ui/                      # screen_date, screen_listen, screen_detail, screen_log, screen_settings, theme
-├─ models/                     # gate_int8.c/h, species_int8.c/h
-├─ assets/                     # fonts (TR karakter setli), icons
+├─ firmware/
+│  ├─ src/
+│  │  ├─ main.c                # the core0 entry point; it starts core1
+│  │  ├─ board_config.h        # the pin table from §1 - the ONE source of truth
+│  │  ├─ hal/                  # i2s_mic, es8311, axs15231b, touch, sdcard, power
+│  │  ├─ dsp/                  # ringbuf, window, mel, gate
+│  │  ├─ ai/                   # the TFLM runner, the two-stage pipeline, the
+│  │  │                        # generated class table and validation sets
+│  │  └─ ui/                   # the screens, the theme, the generated fonts
+│  ├─ boards/                  # the board definition
+│  └─ test/                    # host-side DSP unit tests (dsp_test)
+├─ models/                     # species_net_int8.h, binary_net_int8.h, the reports
 ├─ third_party/                # pico-tflmicro, CMSIS-DSP/NN, lvgl, FatFS
-├─ tools/                      # Python: veri toplama, eğitim, niceleştirme, dönüştürme
-└─ test/                       # host tarafı DSP birim testleri + cihaz-içi WAV testi
+├─ tools/                      # Python: data collection, training, quantisation
+└─ docs/                       # this document, the field-test protocol and reports
 ```
 
 ---
 
-## 9. Aşamalı Teslim
+## 9. Staged Delivery
 
-Her aşama kendi başına doğrulanabilir. **Sıralama kasıtlı: en riskli parça (mikrofon) en başta.**
+Every stage can be verified on its own. **The order is deliberate: the
+riskiest part (the microphone) comes first.**
 
-| # | Aşama | Çıktı / Doğrulama |
+| # | Stage | Output / verification |
 |---|---|---|
-| **M0** | İskelet: CMake + Pico SDK, LED yanıp söner, USB seri log | Kart programlanabiliyor |
-| **M1** | **Mikrofon bring-up** (Waveshare ES8311 örneği uyarlanır) | 5 s ses kaydedip SD'ye WAV yazar; PC'de dinlenip SNR ölçülür. **Kart içi EMI/ekran gürültüsü burada ölçülür.** |
-| **M2** | Ekran + dokunmatik + LVGL, kısmi render, canlı spektrogram | Mikrofondan gelen ses ekranda akıyor |
-| **M3** | DSP hattı: mel + kapı, host tarafı testlerle bit-uyumluluk | Cihazdaki mel, Python'daki mel ile ≈aynı |
-| **M4** | Veri boru hattı + tür listesi kesinleştirme (PC) | `species_istanbul.csv` + indirilmiş/segmentlenmiş veri kümesi |
-| **M5** | Model eğitimi + damıtma + INT8 + PC'de doğruluk raporu | Karışıklık matrisi, top-1/top-3 metrikleri |
-| **M6** | TFLM entegrasyonu, iki aşamalı çıkarım, core1'de | Cihaz gerçek zamanlı tür söylüyor; gecikme ölçülüyor |
-| **M7** | Sonradan işleme (öncelik + oylama), tarih onay ekranı, tam arayüz, günlük, pil | Sahada kullanılabilir cihaz |
-| **M8** | Saha kalibrasyonu: gerçek İstanbul kayıtlarıyla eşik ayarı | Yanlış pozitif oranı kabul edilebilir |
+| **M0** | Skeleton: CMake + Pico SDK, a blinking LED, a USB serial log | the board can be programmed |
+| **M1** | **Microphone bring-up** (the Waveshare ES8311 example, adapted) | records 5 s of audio and writes a WAV to the SD card; listened to on the PC and its SNR measured. **On-board EMI / display noise is measured here.** |
+| **M2** | Display + touch + LVGL, partial render, a live spectrogram | the microphone's audio scrolls across the screen |
+| **M3** | The DSP path: mel + gate, bit-compatibility against host-side tests | the mel on the device is ~the same as the mel in Python |
+| **M4** | The data pipeline + finalising the species list (PC) | `species_istanbul.csv` plus a downloaded and segmented data set |
+| **M5** | Model training + distillation + INT8 + an accuracy report on the PC | a confusion matrix, top-1/top-3 metrics |
+| **M6** | TFLM integration, two-stage inference, on core1 | the device names a species in real time; latency is measured |
+| **M7** | Post-processing (prior + voting), the date screen, the full interface, the log, the battery | a device usable in the field |
+| **M8** | Field calibration: setting the thresholds against real Istanbul recordings | an acceptable false-positive rate |
 
 ---
 
-## 10. Riskler ve Karşı Önlemler
+## 10. Risks and Countermeasures
 
-| Risk | Etki | Önlem |
+| Risk | Impact | Countermeasure |
 |---|---|---|
-| **Kart içi mikrofon SNR'ı kötü** (ekran/QSPI/anahtarlamalı güç kaynağı gürültüsü) | Projeyi bitirebilir | **M1'de ölç.** Kötüyse: LCD parlaklık PWM frekansını kaydır, dinleme sırasında ekran yenilemeyi azalt, son çare olarak boş GPIO'lardan (12–19) harici I2S MEMS mikrofon (INMP441/ICS-43434) ekle — kart bunu destekliyor |
-| ES8311 pinleri 3.5 kartından farklı | Orta | `board_config.h`'de tek noktadan tanımlı; §1 tablosu şematikten doğrulandı |
-| MCLK/master-slave saat yapılandırması tutmaz | Orta | ES8311 SCLK'yi MCLK olarak kullanabilir (register seçeneği); PIO MCLK zaten Waveshare örneğinde çalışıyor |
-| 110 sınıfta doğruluk beklentinin altında | Yüksek olasılık | Arayüz baştan ilk-3 gösterecek; kademeli düşüş: listeyi 60'a indirip yeniden eğitmek sadece model + CSV değişikliği, kod değişmez |
-| Bazı türlerin sesi neredeyse ayırt edilemez (ör. bazı ötleğenler, martı türleri) | Orta | Bu türler "tür grubu" olarak birleştirilir (ör. "Gümüş/Karabaş martı grubu") — yanlış kesinlik vermekten iyidir |
-| Tensor arena SRAM'e sığmaz | Orta | Model mimarisi bütçeye göre tasarlanıyor (§4); erken stride-2 ile aktivasyonlar küçük tutulur; M5'te arena boyutu ölçülüp M6 öncesi doğrulanır |
-| BirdNET lisansı ticari kullanımı kısıtlar | Düşük (hobi için) | §6'da belgelendi; ticari yol için damıtmasız varyant tanımlı |
+| **The on-board microphone's SNR is bad** (display / QSPI / switching-supply noise) | could end the project | **Measure it in M1.** If it is bad: shift the LCD brightness PWM frequency, reduce screen refresh while listening, and as a last resort add an external I2S MEMS microphone (INMP441/ICS-43434) on the free GPIOs (12–19) — the board supports it |
+| The ES8311 pins differ from the 3.5 board | medium | defined in one place in `board_config.h`; the §1 table was verified against the schematic |
+| The MCLK / master-slave clock configuration does not hold | medium | the ES8311 can use SCLK as MCLK (a register option); the PIO MCLK already works in the Waveshare example |
+| Accuracy over 110 classes is below expectations | likely | the interface shows the top 3 from the start; a graceful fallback: cutting the list to 60 and retraining is only a model and CSV change, the code does not move |
+| Some species are nearly indistinguishable by sound (some warblers, some gulls) | medium | those species are merged into a "species group" (e.g. "Herring/Black-headed gull group") — better than false certainty |
+| The tensor arena does not fit in SRAM | medium | the model architecture is designed to the budget (§4); an early stride-2 keeps the activations small; the arena size is measured in M5 and verified before M6 |
+| The BirdNET licence restricts commercial use | low (for a hobby) | documented in §6; a distillation-free variant is defined for a commercial route |
 
 ---
 
-## 11. Doğrulama Yaklaşımı
+## 11. The Verification Approach
 
-- **Host tarafı birim testleri** (`test/`): DSP fonksiyonları (pencereleme, RFFT, mel filtre bankası) PC'de derlenip Python referansına karşı karşılaştırılır. Mikrodenetleyicide DSP hatası ayıklamak çok pahalı — bu testler zaman kazandırır.
-- **Cihaz-içi WAV testi:** SD karttaki etiketli doğrulama kliplerini mikrofon yerine hattın girişine besleyen bir test modu. Cihazın çıktısı PC'deki referansla karşılaştırılır → "PC'de çalışıyor, cihazda çalışmıyor" hatalarını yakalar.
-- **Gecikme ve bellek ölçümü:** her aşamanın süresi (mel, kapı, aşama 1, aşama 2) USB seri üzerinden raporlanır; TFLM arena kullanımı `arena_used_bytes()` ile loglanır.
-- **Saha testi (M8):** Belgrad Ormanı / Validebağ Korusu / Büyükçekmece gibi eBird sıcak noktalarında kayıt + cihaz çıktısı karşılaştırması. Aynı anda telefonla BirdNET çalıştırıp iki cihazın hemfikir olduğu oran ölçülür — pratik ve hızlı bir referans.
-- **Pil ömrü:** ekran açık sürekli dinleme senaryosunda ölçülür; hedef ≥4 saat.
+- **Host-side unit tests** (`firmware/test/`): the DSP functions (windowing,
+  RFFT, the mel filter bank) are compiled on the PC and compared against the
+  Python reference. Debugging a DSP bug on a microcontroller is very
+  expensive — these tests save time.
+- **The on-device WAV test:** a test mode that feeds labelled validation clips
+  from the SD card into the input of the path instead of the microphone. The
+  device's output is compared against the reference on the PC -> it catches
+  the "works on the PC, does not work on the device" bugs.
+- **Latency and memory measurement:** the time of each stage (mel, gate, stage
+  1, stage 2) is reported over USB serial; TFLM arena usage is logged with
+  `arena_used_bytes()`.
+- **The field test (M8):** recording plus a comparison against the device's
+  output at eBird hotspots such as Belgrad Forest, Validebağ Grove or
+  Büyükçekmece. Running BirdNET on a phone at the same time and measuring how
+  often the two agree is a practical, fast reference.
+- **Battery life:** measured in a continuous-listening scenario with the
+  screen on; the target is >=4 hours.
 
 ---
 
-## Kaynaklar
+## Sources
 
-- [RP2350-Touch-LCD-3.49 — Waveshare Wiki](https://www.waveshare.com/wiki/RP2350-Touch-LCD-3.49) (şematik PDF'i buradan çözümlendi)
-- [waveshareteam/RP2350-Touch-LCD-3.5](https://github.com/waveshareteam/RP2350-Touch-LCD-3.5) — yeniden kullanılacak ES8311 + PIO I2S sürücüsü
-- [DrongoNet: Ultra-Compact CNN Architectures for Bird Audio Detection on Microcontrollers](https://arxiv.org/html/2607.19721) — kademeli mimari ve bellek bütçesi gerekçesi
-- [eBird — İstanbul (TR-34)](https://ebird.org/region/TR-34) — tür listesi ve aylık görülme oranları
-- [BirdNET-Analyzer](https://github.com/birdnet-team/BirdNET-Analyzer) — öğretmen model
+- [RP2350-Touch-LCD-3.49 — Waveshare Wiki](https://www.waveshare.com/wiki/RP2350-Touch-LCD-3.49) (the schematic PDF was worked through from here)
+- [waveshareteam/RP2350-Touch-LCD-3.5](https://github.com/waveshareteam/RP2350-Touch-LCD-3.5) — the ES8311 + PIO I2S driver to reuse
+- [DrongoNet: Ultra-Compact CNN Architectures for Bird Audio Detection on Microcontrollers](https://arxiv.org/html/2607.19721) — the reasoning for the staged architecture and the memory budget
+- [eBird — Istanbul (TR-34)](https://ebird.org/region/TR-34) — the species list and monthly frequencies
+- [BirdNET-Analyzer](https://github.com/birdnet-team/BirdNET-Analyzer) — the teacher model

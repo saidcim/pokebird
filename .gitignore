@@ -80,6 +80,11 @@ models/test_olasilik.npy
 tools/training_dashboard.html
 tools/egitim_pano.html
 
+# Field-trip session logs. The reports that are worth keeping are committed
+# under docs/field-test/; these are the raw serial logs and the audio.
+field/
+saha/
+
 # UI preview (host) — build output and the images it renders
 tools/arayuz_onizle/build/
 
