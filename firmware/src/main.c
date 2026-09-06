@@ -2719,19 +2719,20 @@ static void cmd_result_screen(void) {
 
     pb_mel_init();   /* the filter bank must be ready before core 1 starts */
 
-    /* ⚠ HAT AÇILIŞTA ÇALIŞMIYOR — cihaz artık sürekli dinlemiyor
-     * (kullanıcının kararı). Dinlemeyi kayıt butonu başlatıyor; bu döngü her
-     * turda `pb_ui_recording()`ya bakıp core 1'i gerçekten başlatıp
-     * durduruyor. `pb_recognizer_start`/`durdur` bu kullanıma uygun:
-     * ikisi de `s_calis` ile korumalı ve başlatma core 1'i sıfırdan kuruyor.
-     * ⚠ `pb_recognizer_stop` core 1'in döngüden çıkmasını beklemek için
-     * 400 ms bloklanıyor — butona basınca arayüz o kadar takılır. */
+    /* THE PIPELINE DOES NOT RUN AT STARTUP — the device no longer listens
+     * continuously. The record button starts listening, and this loop checks
+     * `pb_ui_recording()` each turn and genuinely starts and stops core 1.
+     * `pb_recognizer_start`/`stop` suit that use: both are guarded by a run
+     * flag, and starting builds core 1 from scratch.
+     * Note that `pb_recognizer_stop` blocks for 400 ms waiting for core 1 to
+     * leave its loop, so the UI stalls for that long when the button is
+     * pressed. */
     bool line_running = false;
 
     pb_decision_t decision;
     pb_decision_reset(&decision, to_ms_since_boot(get_absolute_time()));
 
-    uint32_t seen = 0, kare0 = 0, last_rate = 0;
+    uint32_t seen = 0, frame0 = 0, last_rate = 0;
     uint32_t decision_version = decision.version;
     absolute_time_t next_rate  = make_timeout_time_ms(1000);
     absolute_time_t next_card = make_timeout_time_ms(250);
@@ -2740,9 +2741,9 @@ static void cmd_result_screen(void) {
 
     drain_stdin();
     for (;;) {
-        /* Boşluk / 'n' ekran değiştiriyor, başka her tuş çıkıyor. Kaydırmanın
-         * yedeği bu: dokunmatik bir kareyi düşürse bile ekran değiştirilebilir
-         * kalıyor (arayuz.h'deki gerekçe). */
+        /* Space and 'n' change screen; any other key exits. This is the
+         * fallback for swiping: even if touch drops a frame, the screen can
+         * still be changed (see the reasoning in interface.h). */
         const int key = getchar_timeout_us(0);
         if (key >= 0) {
             if (key == ' ' || key == 'n' || key == 'N') pb_ui_next();
@@ -2751,7 +2752,7 @@ static void cmd_result_screen(void) {
             else break;
         }
 
-        /* 0) Kayıt durumu değiştiyse hattı gerçekten başlat/durdur. */
+        /* 0) If the recording state changed, actually start/stop the pipeline. */
         if (pb_ui_recording() != line_running) {
             if (pb_ui_recording()) {
                 if (pb_recognizer_start(false)) {
@@ -2759,7 +2760,7 @@ static void cmd_result_screen(void) {
                     pb_decision_reset(&decision, to_ms_since_boot(get_absolute_time()));
                     decision_version = decision.version;
                     seen = 0;
-                    printf("  [kayit BASLADI]\n");
+                    printf("  [recording STARTED]\n");
                 } else {
                     printf("[!] the recognition pipeline could not be started.\n");
                     pb_ui_set_recording(false);
@@ -2770,13 +2771,13 @@ static void cmd_result_screen(void) {
                 memset(&d, 0, sizeof(d));
                 pb_decision_reset(&decision, to_ms_since_boot(get_absolute_time()));
                 decision_version = decision.version;
-                printf("  [kayit DURDU]\n");
+                printf("  [recording STOPPED]\n");
             }
         }
 
         if (!line_running) {
-            /* Boştayken ekran yalnızca "BOŞTA" gösteriyor; sonuç alanı
-             * boşaltılıyor ki durmuş bir tahmin canlıymış gibi durmasın. */
+            /* While idle the screen shows only "IDLE"; the result area is
+             * cleared so a stale guess does not look live. */
             pb_result_view_t empty;
             memset(&empty, 0, sizeof(empty));
             empty.mode = PB_DECISION_LISTENING;
@@ -2786,20 +2787,21 @@ static void cmd_result_screen(void) {
             continue;
         }
 
-        /* 1) Spektrogram: core 1'in bıraktığı mel sütunlarını boşalt.
-         *    Tur başına en fazla 8 sütun — çıkarım sonrası birikmiş kuyruk
-         *    tek turda boşaltılmaya çalışılırsa arayüz o turda takılır. */
+        /* 1) Spectrogram: drain the mel columns core 1 left behind.
+         *    At most 8 columns per turn — trying to drain the whole backlog
+         *    after an inference in one turn would stall the UI. */
         int8_t mel_q[PB_MEL_BANDS];
         for (int i = 0; i < 8 && pb_recognizer_get_mel(mel_q); i++) {
-            /* ⚠ Günlük ekranındayken spektrogram YAZMAMALI: o ekranda sağdaki
-             * iki dilim de LVGL'in (arayuz.c, dilim sahipliği) ve ikisi aynı
-             * bölgeye yazarsa birbirlerini siler. Kuyruk yine de boşaltılıyor,
-             * yoksa core 1 dolu kuyruğa kare atmaya başlar. */
+            /* The spectrogram must NOT write while the log screen is up: on
+             * that screen the two right-hand slices belong to LVGL
+             * (interface.c, slice ownership) and two writers in the same
+             * region would erase each other. The queue is still drained,
+             * otherwise core 1 starts discarding frames into a full one. */
             if (pb_ui_screen() != PB_SCREEN_LISTEN) continue;
 
             uint8_t bins[PB_MEL_BANDS];
             for (int b = 0; b < PB_MEL_BANDS; b++) {
-                /* `a` demosuyla AYNI gösterim penceresi: -75..-15 dB. */
+                /* The SAME display window as the `a` demo: -75..-15 dB. */
                 float v = (pb_mel_q_to_db(mel_q[b]) + 75.0f) * (255.0f / 60.0f);
                 if (v < 0.0f) v = 0.0f;
                 if (v > 255.0f) v = 255.0f;
@@ -2808,7 +2810,7 @@ static void cmd_result_screen(void) {
             pb_spec_push_column(bins, PB_MEL_BANDS);
         }
 
-        /* 2) Tanıma durumu -> karar kuralı. */
+        /* 2) Recognition state -> the decision rule. */
         pb_recognizer_read(&d);
         pb_decision_input_t gi = {
             .now_ms   = to_ms_since_boot(get_absolute_time()),
@@ -2821,9 +2823,9 @@ static void cmd_result_screen(void) {
         if (gi.fresh_result) seen = d.version;
         pb_decision_update(&decision, &gi);
 
-        /* Ekranda görünen her değişiklik seri porta da düşsün: bu komutun
-         * göz gerektirmeyen kaydı bu — kullanıcı ekrana bakarken ben aynı
-         * olayları terminalde okuyabiliyorum. */
+        /* Every change visible on screen also goes to the serial console:
+         * that is this command's eyes-free record, so the same events can be
+         * read in the terminal while someone watches the screen. */
         if (decision.version != decision_version) {
             decision_version = decision.version;
             const int c = decision.cls;
@@ -2835,13 +2837,14 @@ static void cmd_result_screen(void) {
         }
 
         if (time_reached(next_rate)) {
-            last_rate = d.frame - kare0;
-            kare0 = d.frame;
+            last_rate = d.frame - frame0;
+            frame0 = d.frame;
             next_rate = make_timeout_time_ms(1000);
         }
 
-        /* Kartı 4 Hz güncelle. Her güncelleme kartın QSPI'ye yeniden basılması
-         * (68,8 KB) demek; sonuç ekranında daha hızlısının bir karşılığı yok. */
+        /* Update the card at 4 Hz. Every update means re-pushing the card
+         * over QSPI (68.8 KB), and on a result screen there is nothing to be
+         * gained from going faster. */
         if (time_reached(next_card)) {
             pb_result_view_t view;
             memset(&view, 0, sizeof(view));
@@ -2875,24 +2878,25 @@ static void cmd_result_screen(void) {
     pb_recognizer_read(&d);
     pb_recognizer_stop();
 
-    printf("\n  kare %lu (kapi acik %%%lu), cikarim %lu, atlanan %lu, "
+    printf("\n  frames %lu (gate open %%%lu), inferences %lu, skipped %lu, "
            "overrun %lu\n",
            (unsigned long)d.frame,
            (unsigned long)(d.frame ? d.gate_open * 100 / d.frame : 0),
            (unsigned long)d.inference, (unsigned long)d.skipped,
            (unsigned long)d.overrun);
-    printf("  LVGL flush %lu, satir adimi != alan_w: %lu, panel_w %lu..%lu, "
-           "dilim basimi %lu\n",
+    printf("  LVGL flush %lu, row stride != area_w: %lu, panel_w %lu..%lu, "
+           "slice pushes %lu\n",
            (unsigned long)pb_lv_flush_count,
            (unsigned long)pb_lv_flush_stride_differs,
            (unsigned long)pb_lv_flush_w_min, (unsigned long)pb_lv_flush_w_max,
            (unsigned long)pb_lv_slice_press);
-    /* Kaydırma teşhisi — GÖZ GEREKMEZ. Kaydırma çalışmıyorsa hangi aşamada
-     * durduğu buradan okunuyor: dokunma hiç gelmiyor mu, geliyor da hareket
-     * eşiği mi aşılmıyor, yoksa panel dışı kareler mi düşürülüyor. */
-    printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
-           "panel disi %lu, son ham dx %ld (esik 200), ham_y %ld, "
-           "buton basim %lu\n\n",
+    /* Swipe diagnostics — NO EYES NEEDED. If swiping does not work, this
+     * says which stage it stops at: does no touch arrive at all, does it
+     * arrive but fail the movement threshold, or are off-panel frames being
+     * dropped? */
+    printf("  swipe: touches %lu, begun %lu, accepted %lu, too short %lu, "
+           "off-panel %lu, last raw dx %ld (threshold 200), raw_y %ld, "
+           "button presses %lu\n\n",
            (unsigned long)pb_swipe_touch, (unsigned long)pb_swipe_begin,
            (unsigned long)pb_swipe_accept, (unsigned long)pb_swipe_short,
            (unsigned long)pb_lv_touch_invalidate,
@@ -2900,37 +2904,40 @@ static void cmd_result_screen(void) {
            (unsigned long)pb_button_press);
 }
 
-/* ── C: SONUÇ KARTI GÖSTERİM TESTİ (mikrofonsuz) ──────────────────────────
+/* ── C: RESULT CARD DISPLAY TEST (no microphone) ──────────────────────────
  *
- * NEDEN AYRI BİR KOMUT: `c` ancak gerçek bir kuş sesi duyulursa tür adı
- * yazıyor. Sessiz odada kart hep "dinliyor" gösterir, yani ASIL çizim yolu
- * (uzun tür adı, sarma, güven, ilk 3, renkler) hiç sınanmaz. Bu komut aynı
- * kartı sahte bir sonuç dizisiyle sürüyor: göz testi tek bakışta yapılabilsin.
+ * WHY THIS IS A SEPARATE COMMAND: `c` only prints a species name if a real
+ * bird is heard. In a quiet room the card always shows "listening", so the
+ * actual drawing path (a long species name, wrapping, confidence, the top 3,
+ * the colours) is never exercised. This command drives the same card with a
+ * synthetic result sequence, so the visual check can be done at a glance.
  *
- * KARAR KURALI BİLEREK DEVREDE DEĞİL — burada sınanan şey ÇİZİM. Kuralın
- * kendisi host testlerinde (test/dsp_test.c, `test_karar`) zaman ilerletilerek
- * sınanıyor; ikisini karıştırmak, bir hata çıktığında hangisinde olduğunu
- * belirsizleştirirdi.
+ * THE DECISION RULE IS DELIBERATELY NOT INVOLVED — what is tested here is the
+ * DRAWING. The rule itself is tested on the host (firmware/test/dsp_test.c)
+ * by advancing time; mixing the two would make it ambiguous which one a
+ * failure came from.
  *
- * Desen düz renk DEĞİL (§9o uyarısı): en uzun tür adı, iki alternatif satırı
- * ve sağda hareketli bir spektrogram deseni var — kayma olursa yazıda görünür.
+ * The pattern is deliberately NOT a flat colour: the longest species name,
+ * two alternative rows, and a moving spectrogram pattern on the right — a
+ * slip would show up in the text.
  */
 static void cmd_result_card_demo(void) {
-    /* En UZUN tür adını bul: sarmanın ve kenarların en kötü durumu bu.
-     * İndeks sabitlemek yerine aramak, sınıf tablosu yeniden üretilse de
-     * testin en kötü durumu göstermeye devam etmesini sağlıyor. */
-    int lengthy = 0;
+    /* Find the LONGEST species name: that is the worst case for wrapping and
+     * for the edges. Searching rather than hard-coding an index means the
+     * test keeps showing the worst case even if the class table is
+     * regenerated. */
+    int longest = 0;
     for (int i = 0; i < PB_CLASS_COUNT; i++) {
-        if (strlen(pb_class_name[i]) > strlen(pb_class_name[lengthy])) lengthy = i;
+        if (strlen(pb_class_name[i]) > strlen(pb_class_name[longest])) longest = i;
     }
-    const int second = (lengthy + 1) % PB_CLASS_COUNT;
-    const int third = (lengthy + 2) % PB_CLASS_COUNT;
+    const int second = (longest + 1) % PB_CLASS_COUNT;
+    const int third = (longest + 2) % PB_CLASS_COUNT;
 
-    printf("\n=== SONUC KARTI GOSTERIM TESTI (mikrofon YOK) ===\n");
-    printf("Cihazi USB soketi SAGDA olacak sekilde yatay tutun.\n");
-    printf("En uzun tur adi: \"%s\" (%d karakter)\n",
-           pb_class_name[lengthy], (int)strlen(pb_class_name[lengthy]));
-    printf("Kart dort asamadan gecip basa donuyor. Cikmak icin bir tusa basin.\n\n");
+    printf("\n=== RESULT CARD DISPLAY TEST (NO microphone) ===\n");
+    printf("Hold the device in landscape with the USB socket on the RIGHT.\n");
+    printf("Longest species name: \"%s\" (%d characters)\n",
+           pb_class_name[longest], (int)strlen(pb_class_name[longest]));
+    printf("The card cycles through four stages. Press any key to exit.\n\n");
 
     backlight_set(true);
     pb_lcd_fill(0x0000);
@@ -2939,18 +2946,18 @@ static void cmd_result_card_demo(void) {
     for (int i = 0; i < 4; i++) { pb_ui_tick(); sleep_ms(5); }
     pb_spec_init();
 
-    /* Günlük ekranı da sınanabilsin: boş liste hiçbir çizim sorununu
-     * göstermez. Üç sahte kayıt, en uzun ad dâhil. */
-    pb_ui_log_add(pb_class_name[lengthy],   pb_class_latin[lengthy],   0.91f);
+    /* So the log screen can be checked too: an empty list would reveal no
+     * drawing problem. Three synthetic entries, including the longest name. */
+    pb_ui_log_add(pb_class_name[longest],   pb_class_latin[longest],   0.91f);
     pb_ui_log_add(pb_class_name[second], pb_class_latin[second], 0.74f);
     pb_ui_log_add(pb_class_name[third], pb_class_latin[third], 0.63f);
 
-    const struct { pb_decision_mode_t mode; bool species; float confidence; const char *ne; }
+    const struct { pb_decision_mode_t mode; bool species; float confidence; const char *what; }
     stage[] = {
-        { PB_DECISION_LISTENING, false, 0.00f, "dinliyor (tur yok)"      },
-        { PB_DECISION_SOUND,      false, 0.00f, "ses algilandi"           },
-        { PB_DECISION_UNSURE, true,  0.42f, "belirsiz, kehribar"      },
-        { PB_DECISION_SPECIES,      true,  0.91f, "tur adi, sari, en uzun"  },
+        { PB_DECISION_LISTENING, false, 0.00f, "listening (no species)"      },
+        { PB_DECISION_SOUND,     false, 0.00f, "sound detected"              },
+        { PB_DECISION_UNSURE,    true,  0.42f, "unsure, amber"               },
+        { PB_DECISION_SPECIES,   true,  0.91f, "species name, green, longest" },
     };
     const int count = (int)(sizeof(stage) / sizeof(stage[0]));
 
@@ -2971,11 +2978,11 @@ static void cmd_result_card_demo(void) {
             memset(&view, 0, sizeof(view));
             view.mode = stage[a].mode;
             view.confidence = stage[a].confidence;
-            view.species_name = stage[a].species ? pb_class_name[lengthy] : NULL;
-            view.top3_name[0] = pb_class_name[lengthy];
+            view.species_name = stage[a].species ? pb_class_name[longest] : NULL;
+            view.top3_name[0] = pb_class_name[longest];
             view.top3_name[1] = pb_class_name[second];
             view.top3_name[2] = pb_class_name[third];
-            view.top3_latin[0] = pb_class_latin[lengthy];
+            view.top3_latin[0] = pb_class_latin[longest];
             view.top3_latin[1] = pb_class_latin[second];
             view.top3_latin[2] = pb_class_latin[third];
             view.top3_probability[0] = stage[a].confidence;
@@ -2988,26 +2995,26 @@ static void cmd_result_card_demo(void) {
             view.band_db = -38.0f;
             pb_ui_update(&view);
 
-            printf("  asama %d/%d: %s  [ekran %d]\n", a + 1, count, stage[a].ne,
+            printf("  stage %d/%d: %s  [screen %d]\n", a + 1, count, stage[a].what,
                    pb_ui_screen());
             a = (a + 1) % count;
             next = make_timeout_time_ms(2500);
         }
 
-        /* Spektrogram şeridi: gerçek bir ötüşe benzeyen desen — heceler,
-         * süpüren bir temel frekans, iki harmonik ve gürültü tabanı.
+        /* The spectrogram strip: a pattern resembling a real song —
+         * syllables, a sweeping fundamental, two harmonics and a noise floor.
          *
-         * Düz renk OLMAMASI şart (§9o): düz blok satır kaymasını gizler.
-         * Ama düz olmayan her desen de yetmiyor — tek bir hareketli tepe
-         * gerçek spektrograma benzemediği için "doğru görünüyor mu?"
-         * sorusuna cevap vermiyordu. Bu desen hem kaymayı gösteriyor hem de
-         * gerçek çıktının nasıl görüneceğini. */
+         * It MUST NOT be a flat colour: a flat block hides row slip. But not
+         * every non-flat pattern will do either — a single moving peak looks
+         * nothing like a real spectrogram, so it could not answer "does this
+         * look right?". This pattern shows both the slip and what the real
+         * output will look like. */
         uint8_t bins[PB_MEL_BANDS];
-        const uint32_t phase = column % 48;             /* hece ~0,77 s        */
-        const bool silent = (phase >= 34);             /* heceler arası       */
-        const int base = 13 + (int)(phase < 17 ? phase : 34 - phase);  /* süpürme */
+        const uint32_t phase = column % 48;          /* syllable ~0.77 s      */
+        const bool silent = (phase >= 34);           /* between syllables     */
+        const int base = 13 + (int)(phase < 17 ? phase : 34 - phase);  /* sweep */
         for (int b = 0; b < PB_MEL_BANDS; b++) {
-            int v = 10 + (int)((column * 7u + (uint32_t)b * 13u) % 9u);  /* taban */
+            int v = 10 + (int)((column * 7u + (uint32_t)b * 13u) % 9u);  /* floor */
             if (!silent) {
                 for (int h = 1; h <= 3; h++) {
                     const int center = base * h;
@@ -3015,8 +3022,8 @@ static void cmd_result_card_demo(void) {
                     int d = b - center;
                     if (d < 0) d = -d;
                     if (d <= 2) {
-                        const int parlak = 255 - d * 70 - (h - 1) * 60;
-                        if (parlak > v) v = parlak;
+                        const int bright = 255 - d * 70 - (h - 1) * 60;
+                        if (bright > v) v = bright;
                     }
                 }
             }
@@ -3030,9 +3037,9 @@ static void cmd_result_card_demo(void) {
         pb_ui_tick();
         sleep_ms(16);
     }
-    printf("cikildi\n");
-    printf("  kaydirma: dokunma %lu, basla %lu, kabul %lu, kisa/egik %lu, "
-           "panel disi %lu, son dx %ld dy %ld, buton basim %lu\n\n",
+    printf("exited\n");
+    printf("  swipe: touches %lu, begun %lu, accepted %lu, too short %lu, "
+           "off-panel %lu, last dx %ld dy %ld, button presses %lu\n\n",
            (unsigned long)pb_swipe_touch, (unsigned long)pb_swipe_begin,
            (unsigned long)pb_swipe_accept, (unsigned long)pb_swipe_short,
            (unsigned long)pb_lv_touch_invalidate,
@@ -3040,29 +3047,32 @@ static void cmd_result_card_demo(void) {
            (unsigned long)pb_button_press);
 }
 
-/* ── F: KART FRAMEBUFFER DÖKÜMÜ — göz GEREKMEZ, teşhisi ikiye böler ───────
+/* ── F: CARD FRAMEBUFFER DUMP — NO EYES NEEDED, splits the diagnosis ──────
  *
- * `C` ekranında yazılar üst üste binmiş görünüyordu. İki ihtimal vardı ve
- * fotoğraftan ayırt edilemiyordu:
- *   (a) LVGL/yerleşim yanlış çiziyor  -> framebuffer'da da bozuk olur
- *   (b) panele giden yol bozuyor      -> framebuffer TEMİZ, ekran bozuk
+ * On the `C` screen the text looked as though it overlapped. There were two
+ * possibilities and a photograph could not tell them apart:
+ *   (a) LVGL/the layout is drawing it wrong -> the framebuffer is corrupt too
+ *   (b) the path to the panel corrupts it   -> the framebuffer is CLEAN and
+ *                                              only the screen is wrong
  *
- * Bu komut kartı iki kez kurup (a) hâlini seri porta ASCII döküyor. Terminalde
- * yazı düzgün okunuyorsa suçlu (b), okunmuyorsa (a) — ve (a) panele hiç
- * bakmadan düzeltilebilir.
+ * This command builds the card twice and dumps state (a) to the serial
+ * console as ASCII. If the text is legible in the terminal the culprit is
+ * (b); if it is not, it is (a) — and (a) can be fixed without looking at the
+ * panel at all.
  *
- * İKİ AŞAMA BİLEREK: önce kısa içerik ("dinliyor", tür yok), sonra en uzun
- * tür adı. İkinci dökümde birinci aşamanın kalıntısı varsa sorun "eski yazı
- * silinmiyor"dur; kalıntı yoksa ve satırlar üst üste biniyorsa sorun
- * yerleşimdir (etiketler birbirinin alanına taşıyor).
+ * TWO STAGES, DELIBERATELY: first short content ("listening", no species),
+ * then the longest species name. If the second dump contains remnants of the
+ * first stage the problem is "old text is not cleared"; if there are no
+ * remnants but the rows overlap, the problem is the layout (labels spilling
+ * into each other's areas).
  */
 static void cmd_card_fb_dump(void) {
-    int lengthy = 0;
+    int longest = 0;
     for (int i = 0; i < PB_CLASS_COUNT; i++) {
-        if (strlen(pb_class_name[i]) > strlen(pb_class_name[lengthy])) lengthy = i;
+        if (strlen(pb_class_name[i]) > strlen(pb_class_name[longest])) longest = i;
     }
 
-    printf("\n=== KART FRAMEBUFFER DOKUMU (goz GEREKMEZ) ===\n");
+    printf("\n=== CARD FRAMEBUFFER DUMP (NO EYES NEEDED) ===\n");
     backlight_set(true);
     pb_lcd_fill(0x0000);
     pb_lv_init();
@@ -3073,14 +3083,14 @@ static void cmd_card_fb_dump(void) {
         memset(&view, 0, sizeof(view));
         if (stage == 0) {
             view.mode = PB_DECISION_LISTENING;
-            printf("\n--- asama 1: dinliyor, tur yok ---\n");
+            printf("\n--- stage 1: listening, no species ---\n");
         } else {
             view.mode = PB_DECISION_SPECIES;
-            view.species_name = pb_class_name[lengthy];
+            view.species_name = pb_class_name[longest];
             view.confidence = 0.91f;
-            view.top3_name[0] = pb_class_name[lengthy];
-            view.top3_name[1] = pb_class_name[(lengthy + 1) % PB_CLASS_COUNT];
-            view.top3_name[2] = pb_class_name[(lengthy + 2) % PB_CLASS_COUNT];
+            view.top3_name[0] = pb_class_name[longest];
+            view.top3_name[1] = pb_class_name[(longest + 1) % PB_CLASS_COUNT];
+            view.top3_name[2] = pb_class_name[(longest + 2) % PB_CLASS_COUNT];
             view.top3_probability[0] = 0.91f;
             view.top3_probability[1] = 0.21f;
             view.top3_probability[2] = 0.07f;
@@ -3088,8 +3098,8 @@ static void cmd_card_fb_dump(void) {
             view.inference = 6;
             view.merged = 8;
             view.band_db = -38.0f;
-            printf("\n--- asama 2: en uzun tur adi (\"%s\") ---\n",
-                   pb_class_name[lengthy]);
+            printf("\n--- stage 2: longest species name (\"%s\") ---\n",
+                   pb_class_name[longest]);
         }
         pb_ui_update(&view);
         for (int i = 0; i < 6; i++) { pb_ui_tick(); sleep_ms(5); }
@@ -3099,35 +3109,35 @@ static void cmd_card_fb_dump(void) {
 }
 
 static void print_help(void) {
-    printf("\nKomutlar:\n");
-    printf("  i  cihaz ve ses yapilandirmasi\n");
-    printf("  n  gurultu tabani olcumu\n");
-    printf("  e  EMI taramasi (arka isik etkisi)\n");
-    printf("  g  mikrofon kazanci (0-7)\n");
-    printf("  r  %d s kayit al ve aktar\n", CAPTURE_SECONDS);
-    printf("  d  ekran testi (panel baslatma varyantlari)\n");
-    printf("  o  yon testi (dort koseye dort renk)\n");
-    printf("  t  dokunmatik teshisi ve koordinat esleme\n");
-    printf("  m  mel + kapi hatti (M3, canli mikrofon)\n");
-    printf("  a  DEMO: LVGL kart + canli mel spektrogrami + kapi\n");
-    printf("  b  arka isik teshisi\n");
-    printf("  v  QSPI veri yolu teshisi\n");
-    printf("  w  QSPI zamanlama teshisi (WaitIdle olcumu, goz GEREKMEZ)\n");
-    printf("  y  melez yol testi: pencere ve piksel ayri yollardan (goz gerekir)\n");
-    printf("  z  satir adresleme testi: RASET calisiyor mu (goz gerekir)\n");
-    printf("  j  imlec konumlandirma testi: dar pencereyle ucuz atlama (goz gerekir)\n");
-    printf("  L  yazi teshisi: LVGL cizimini ASCII dok (goz GEREKMEZ)\n");
-    printf("  S  dar pencere kayma testi: cizgiler duz mu (goz gerekir)\n");
-    printf("  s  canli spektrogram\n");
-    printf("  x  TUR AGI: cihaz ici dogrulama + arena + cikarim suresi\n");
-    printf("  X  IKILI AGI (Asama-1): cihaz ici dogrulama + arena + cikarim suresi\n");
-    printf("  k  gercek zamanli tanima (core 1, seri porta yazar)\n");
-    printf("  K  aynisi ama kapi yoksayilir — olcum kipi\n");
-    printf("  c  ARAYUZ: dinleme + gunluk ekrani, canli tanima (goz gerekir)\n");
-    printf("  C  arayuz gosterim testi, mikrofonsuz (goz gerekir)\n");
-    printf("     c/C icinde: KAYDIR ya da bosluk/'n' = ekran degistir\n");
-    printf("  F  kart framebuffer dokumu: ASCII, goz GEREKMEZ\n");
-    printf("  ?  bu yardim\n\n");
+    printf("\nCommands:\n");
+    printf("  i  device and audio configuration\n");
+    printf("  n  noise floor measurement\n");
+    printf("  e  EMI sweep (backlight effect)\n");
+    printf("  g  microphone gain (0-7)\n");
+    printf("  r  record %d s and transfer\n", CAPTURE_SECONDS);
+    printf("  d  display test (panel init variants)\n");
+    printf("  o  orientation test (four colours in four corners)\n");
+    printf("  t  touch diagnostic and coordinate mapping\n");
+    printf("  m  mel + gate pipeline (live microphone)\n");
+    printf("  a  DEMO: LVGL card + live mel spectrogram + gate\n");
+    printf("  b  backlight diagnostic\n");
+    printf("  v  QSPI data path diagnostic\n");
+    printf("  w  QSPI timing diagnostic (WaitIdle measurement, NO EYES)\n");
+    printf("  y  hybrid path test: window and pixels by separate routes (eyes)\n");
+    printf("  z  row addressing test: does RASET work (eyes)\n");
+    printf("  j  cursor positioning test: cheap skip via a narrow window (eyes)\n");
+    printf("  L  text diagnostic: dump LVGL's drawing as ASCII (NO EYES)\n");
+    printf("  S  narrow-window slip test: are the lines straight (eyes)\n");
+    printf("  s  live spectrogram\n");
+    printf("  x  SPECIES NET: on-device validation + arena + inference time\n");
+    printf("  X  BINARY NET (stage 1): on-device validation + arena + time\n");
+    printf("  k  real-time recognition (core 1, prints to serial)\n");
+    printf("  K  the same but ignoring the gate - measurement mode\n");
+    printf("  c  UI: listen + log screens, live recognition (eyes)\n");
+    printf("  C  UI display test, no microphone (eyes)\n");
+    printf("     inside c/C: SWIPE or space/'n' = change screen\n");
+    printf("  F  card framebuffer dump: ASCII, NO EYES\n");
+    printf("  ?  this help\n\n");
 }
 
 int main(void) {
@@ -3135,23 +3145,23 @@ int main(void) {
     for (int i = 0; i < 30 && !stdio_usb_connected(); i++) sleep_ms(100);
 
     printf("\n========================================\n");
-    printf(" PokeBird — M1: mikrofon bring-up\n");
+    printf(" PokeBird\n");
     printf("========================================\n");
 
     power_latch_init();
     backlight_init();
     pb_i2c_init();
 
-    /* SIRA ÖNEMLİ: ES8311'in dahili PLL'i MCLK olmadan register yazimlarina
-     * duzgun tepki vermiyor. Once MCLK, sonra codec yapilandirmasi. */
+    /* THE ORDER MATTERS: the ES8311's internal PLL does not respond properly
+     * to register writes without MCLK. MCLK first, then codec config. */
     if (!pb_audio_mclk_start(&s_audio_cfg)) {
-        printf("[!] MCLK baslatilamadi.\n");
+        printf("[!] MCLK could not be started.\n");
     }
     sleep_ms(10);
 
     if (!pb_i2c_probe(ES8311_I2C_ADDR)) {
-        printf("[!] ES8311 I2C adresi 0x%02x yanit vermiyor.\n", ES8311_I2C_ADDR);
-        printf("    Hat: SDA=GPIO%d SCL=GPIO%d\n", PB_PIN_I2C_SDA, PB_PIN_I2C_SCL);
+        printf("[!] The ES8311 does not respond at I2C address 0x%02x.\n", ES8311_I2C_ADDR);
+        printf("    Bus: SDA=GPIO%d SCL=GPIO%d\n", PB_PIN_I2C_SDA, PB_PIN_I2C_SCL);
     }
 
     es8311_init(s_audio_cfg);
@@ -3160,42 +3170,45 @@ int main(void) {
     es8311_microphone_gain_set((es8311_mic_gain_t)s_mic_gain);
 
     if (!pb_audio_i2s_init(&s_audio_cfg)) {
-        printf("[!] I2S yakalama yolu kurulamadi.\n");
+        printf("[!] The I2S capture path could not be set up.\n");
     }
 
-    /* ── Ekran ──────────────────────────────────────────────────────────
-     * QSPI pio0'da, ses pio1'de — state machine çakışması yok.
+    /* ── Display ─────────────────────────────────────────────────────────
+     * QSPI is on pio0 and audio on pio1, so there is no state machine clash.
      *
-     * SIRA ZORUNLU (Waveshare örneğindeki sıra):
-     *   1. QSPI_GPIO_Init   — CS/RST/PWR_EN pin yönleri
-     *   2. QSPI_PIO_Init    — PIO programını yükle (SM'leri KAPALI bırakır)
-     *   3. QSPI_4Wrie_Mode  — 4-bit SM'i ETKİNLEŞTİR ve qspi.sm'i ayarla
-     *   4. pb_display_dma_init — DREQ doğru SM'e bağlansın diye 3'ten sonra
-     *   5. LCD_3IN49_Init   — panel reset + register dizisi
+     * THE ORDER IS MANDATORY (the same order as Waveshare's example):
+     *   1. QSPI_GPIO_Init      — CS/RST/PWR_EN pin directions
+     *   2. QSPI_PIO_Init       — load the PIO program (leaves the SMs OFF)
+     *   3. QSPI_4Wrie_Mode     — ENABLE the 4-bit SM and set qspi.sm
+     *   4. pb_display_dma_init — after 3, so DREQ binds to the right SM
+     *   5. LCD_3IN49_Init      — panel reset + register sequence
      *
-     * 3. adım atlanırsa hiçbir SM çalışmadığı için PIO TX FIFO hiç
-     * boşalmıyor ve DMA sonsuza kadar bekliyor — ekran tamamen siyah kalıyor,
-     * üstelik ilk çizim çağrısında kilitleniyor. */
-    /* PANEL HAZIR OLMA PENCERESİ — silmeyin, ölçülerek kondu.
+     * Skip step 3 and no SM is running, so the PIO TX FIFO never drains and
+     * DMA waits forever — the screen stays completely black and the firmware
+     * locks up on the first draw call. */
+    /* THE PANEL READINESS WINDOW — do not delete this, it was placed by
+     * measurement.
      *
-     * AXS15231B açılıştan sonra bir süre başlatma dizisini kabul etmiyor.
-     * Erken başlatılırsa panel kendi başlatılmamış GRAM'ını göstermeye devam
-     * ediyor (karıncalanma) ve bu durum KALICI: GPIO34 dışarıdan yüksek
-     * tutulduğu için panele donanım reset'i atamıyoruz (§5.11), yani yeniden
-     * deneme şansı yok.
+     * The AXS15231B refuses the init sequence for a while after power-up.
+     * Initialised too early, the panel keeps showing its own uninitialised
+     * GRAM (snow), and that state is PERMANENT: GPIO34 is held high from
+     * outside so we cannot hardware-reset the panel, which means there is no
+     * second chance.
      *
-     * NEDEN BÖYLE ÖĞRENDİK: `s_capture` temizliği bss'i 218.988'den 127.084'e
-     * indirdi. bss'i sıfırlamak (crt0, main'den önce) o kadar kısa sürmeye
-     * başladı ki firmware panel başlatmaya ~1 ms daha erken varır oldu ve
-     * ekran bozuldu. Yani eski hâl bu pencereyi KIL PAYI geçiyormuş; hata
-     * kodda zaten vardı, temizlik yalnızca payı bitirdi. Kartta ölçüldü:
-     * 20 ms'lik gecikme yetiyor (500 ms de çalışıyor, 0 çalışmıyor).
+     * HOW WE LEARNED THIS: removing the old capture buffer took bss from
+     * 218,988 to 127,084 bytes. Zeroing bss (in crt0, before main) then got
+     * short enough that the firmware reached panel init about 1 ms earlier —
+     * and the display broke. So the old build had been clearing this window
+     * by a hair; the bug was already in the code and the cleanup merely used
+     * up the margin. Measured on the board: a 20 ms delay is enough (500 ms
+     * also works, 0 does not).
      *
-     * NEDEN `sleep_ms` DEĞİL: sabit bir uyku yalnızca o anki paya sabit bir
-     * miktar ekler; kendinden ÖNCEKİ kod hızlanırsa aynı tuzak yeniden kurulur
-     * (bizi buraya tam olarak bu düşürdü). Mutlak alt sınır kısıtın kendisini
-     * ifade ediyor ve önceki kodun süresinden bağımsız. USB beklemesi zaten
-     * uzun sürdüyse bu satır hiç beklemez, yani normalde bedeli sıfır. */
+     * WHY NOT `sleep_ms`: a fixed sleep only adds a fixed amount to whatever
+     * margin happens to exist, so if the code BEFORE it gets faster the same
+     * trap is set again — which is exactly what got us here. An absolute
+     * lower bound expresses the constraint itself and is independent of how
+     * long the preceding code takes. If the USB wait already took long
+     * enough, this line waits not at all, so it normally costs nothing. */
     while (to_ms_since_boot(get_absolute_time()) < 250) sleep_ms(5);
 
     QSPI_GPIO_Init(qspi);
@@ -3204,21 +3217,22 @@ int main(void) {
     pb_display_dma_init();
     LCD_3IN49_Init();
     pb_lcd_fill(0x0000);
-    printf("Ekran hazir (%dx%d panel).\n", PB_PANEL_W, PB_PANEL_H);
+    printf("Display ready (%dx%d panel).\n", PB_PANEL_W, PB_PANEL_H);
 
     cmd_info();
     print_help();
 
-    /* Cihaz PC'ye bagli olmadan, elde tasinirken kendiliginden tanima
-     * ekranina girsin diye. Once burada baslatiyoruz; ekrandan (bosluk/n/r
-     * disinda) bir tusa basilirsa asagidaki komut dongusune duser, PC
-     * baglanmissa teshis komutlari yine erisilebilir kalir. */
+    /* So the device goes straight to the recognition screen when carried in
+     * the hand with no PC attached. We start it here; pressing any key other
+     * than space/n/r drops into the command loop below, so with a PC attached
+     * the diagnostic commands remain reachable. */
     cmd_result_screen();
 
     while (true) {
         printf("> ");
-        /* getchar_timeout_us(0) HEMEN doner (0 = beklemeden zaman asimi),
-         * bu da istemi bos yere dondurur. Bloklayan okuma icin getchar(). */
+        /* getchar_timeout_us(0) returns IMMEDIATELY (0 = time out without
+         * waiting), which would spin the prompt pointlessly. getchar() is the
+         * blocking read. */
         int c = getchar();
         if (c < 0) continue;
         switch (c) {
