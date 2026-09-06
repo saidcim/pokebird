@@ -5,6 +5,7 @@ a rp2350 microcontroller with no internet connection. and it knows the 178 bird
 species that live and can be heard in Istanbul
 
 I used AI for multiple parts of the project, but the ideas, architectural design, and choices that influenced the project's progress were all my own.
+<img width="1024" height="509" alt="image" src="https://github.com/user-attachments/assets/c7986000-c631-49ec-8cd8-acf3d774cfcc" />
 
 ## What it does
 You press the button, hold it up, and it listens. If it is a bird sound, the possible
