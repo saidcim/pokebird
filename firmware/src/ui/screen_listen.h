@@ -1,10 +1,11 @@
 /**
- * ekran_dinleme.h — EKRAN 0 · DİNLEME
+ * screen_listen.h — SCREEN 0 · LISTEN
  *
- * Sol 384 piksel (LVGL dilim 0..2): duruma göre başlık + sese en yakın üç tür,
- * her biri ad + bilimsel ad + güven çubuğu. Sağ 256 piksel (dilim 3..4)
- * spektrograma ait ve panele DOĞRUDAN yazılıyor — bu dosya oraya hiç
- * dokunmuyor (bkz. lv_port.c, dilim sahipliği).
+ * The left 384 pixels (LVGL slices 0..2): a status heading plus the three
+ * species closest to the sound, each with its name, scientific name and
+ * confidence bar. The right 256 pixels (slices 3..4) belong to the
+ * spectrogram and are written to the panel DIRECTLY — this file never touches
+ * them (see lv_port.c for slice ownership).
  */
 #ifndef POKEBIRD_SCREEN_LISTEN_H
 #define POKEBIRD_SCREEN_LISTEN_H
@@ -12,13 +13,14 @@
 #include "lvgl.h"
 #include "ui/interface.h"
 
-/** Ekranı kur ve döndür (LVGL'e yüklemek çağırana ait). */
+/** Build the screen and return it (loading it into LVGL is the caller's job). */
 lv_obj_t *pb_screen_listen_create(void);
 
-/** İçeriği tazele — yalnızca değişen etiketler yeniden yazılıyor. */
-void pb_screen_listen_update(const pb_result_view_t *g);
+/** Refresh the contents — only labels that actually changed are rewritten. */
+void pb_screen_listen_update(const pb_result_view_t *view);
 
-/** Kayıt butonunun görünümünü ayarla (dolu kare = dinliyor, daire = boşta). */
+/** Set the record button's appearance (filled square = listening, circle =
+ *  idle). */
 void pb_screen_listen_set_recording(bool recording);
 
 #endif /* POKEBIRD_SCREEN_LISTEN_H */

@@ -1,88 +1,90 @@
 /**
- * tema.h — Arayüzün renkleri, yazı tipleri ve ortak çizim yardımcıları
+ * theme.h — the UI's colours, fonts and shared drawing helpers
  *
- * Renkler `Kus Sesi Arayuz.dc.html` tasarımından BİREBİR alındı (retro/analog,
- * koyu tema). Tasarımın px değerleri doğrudan cihazın pikseli: ekran 640x172
- * ve tasarım da 640x172 çiziyor, arada ölçek yok.
+ * The colours are taken EXACTLY from the design (retro/analog, dark theme).
+ * The design's pixel values are the device's pixels directly: the screen is
+ * 640x172 and the design draws at 640x172, so there is no scaling in between.
  *
- * ⚠ YAZI TİPLERİ src/ui/fonts/ altında ÜRETİLMİŞ dosyalar — elle düzenlemeyin,
- * `python tools/generate_fonts.py` ile yeniden üretilirler. Tasarımın Oswald +
- * Space Mono ikilisi Google Fonts'ta; indirme yapmamak için Windows'un kendi
- * yazı tiplerinden aynı role oturan ikisi seçildi (gerekçe font_uret.py'de):
+ * WARNING: the fonts under firmware/src/ui/fonts/ are GENERATED files — do
+ * not edit them by hand, regenerate them with
+ * `python tools/generate_fonts.py`. The design's Oswald + Space Mono pairing
+ * lives on Google Fonts; to avoid a download, two of Windows' own fonts that
+ * fill the same roles were chosen instead (the reasoning is in
+ * generate_fonts.py):
  *
  *     Oswald      -> Liberation Sans Narrow Bold
- *     Space Mono  -> DejaVu Sans Mono (eğik)
+ *     Space Mono  -> DejaVu Sans Mono (oblique)
  *
- * ⚠ Bu yazı tiplerinde Türkçe harfler VAR (üretim sırasında doğrulanıyor).
- * §9p'deki ASCII indirgeme (`pb_ascii_fold`) artık EKRAN için gerekli değil;
- * tür adları ekrana tam Türkçe yazılıyor.
+ * These fonts do carry the accented Latin letters (verified during
+ * generation). Species names are drawn in full, with no ASCII folding.
  */
 #ifndef POKEBIRD_THEME_H
 #define POKEBIRD_THEME_H
 
 #include "lvgl.h"
 
-/* ── Yazı tipleri (src/ui/fonts/, üretilmiş) ─────────────────────────────── */
-extern const lv_font_t pb_font_name_18;      /* tür adı — sıkışık, kalın        */
-extern const lv_font_t pb_font_bold_13;   /* başlık, yüzde, günlük satırı    */
-extern const lv_font_t pb_font_narrow_11;     /* ikincil bilgi                   */
-extern const lv_font_t pb_font_mono_10;    /* bilimsel ad, sayaçlar (eğik)    */
+/* ── Fonts (firmware/src/ui/fonts/, generated) ───────────────────────────── */
+extern const lv_font_t pb_font_name_18;    /* species name — narrow, bold     */
+extern const lv_font_t pb_font_bold_13;    /* headings, percentages, log rows */
+extern const lv_font_t pb_font_narrow_11;  /* secondary information           */
+extern const lv_font_t pb_font_mono_10;    /* scientific name, counters (italic) */
 
-/* ── Renkler — tasarımdan ────────────────────────────────────────────────── */
-#define PB_COLOR_BACKGROUND      0x0B0908   /* ekran zemini                         */
-#define PB_COLOR_TEXT      0xE8E2D6   /* birincil metin                       */
-#define PB_COLOR_MUTED      0x8A8072   /* ikincil metin                        */
-#define PB_COLOR_FAINT      0x6F675C   /* üçüncül metin                        */
-#define PB_COLOR_LATIN      0x7A7263   /* bilimsel ad                          */
-#define PB_COLOR_LINE      0x2A2620   /* ayraç                                */
-#define PB_COLOR_ROW      0x211D18   /* satır altı çizgisi / çubuk yatağı    */
-#define PB_COLOR_BORDER      0x3A332A   /* rozet kenarı, pasif nokta            */
-#define PB_COLOR_INACTIVE      0x5F5849   /* pasif çubuk dolgusu                  */
+/* ── Colours — from the design ───────────────────────────────────────────── */
+#define PB_COLOR_BACKGROUND  0x0B0908   /* screen background                  */
+#define PB_COLOR_TEXT        0xE8E2D6   /* primary text                       */
+#define PB_COLOR_MUTED       0x8A8072   /* secondary text                     */
+#define PB_COLOR_FAINT       0x6F675C   /* tertiary text                      */
+#define PB_COLOR_LATIN       0x7A7263   /* scientific name                    */
+#define PB_COLOR_LINE        0x2A2620   /* separator                          */
+#define PB_COLOR_ROW         0x211D18   /* row underline / bar bed            */
+#define PB_COLOR_BORDER      0x3A332A   /* badge border, inactive dot         */
+#define PB_COLOR_INACTIVE    0x5F5849   /* inactive bar fill                  */
 
-#define PB_COLOR_ACCENT      0xFFB020   /* kehribar — genel vurgu               */
-#define PB_COLOR_PEAK       0x7BD88F   /* yeşil — en yüksek skorlu tür         */
-#define PB_COLOR_RECORD      0xE86A5A   /* kırmızı — "dinliyor" noktası         */
+#define PB_COLOR_ACCENT      0xFFB020   /* amber — the general accent         */
+#define PB_COLOR_PEAK        0x7BD88F   /* green — highest-scoring species    */
+#define PB_COLOR_RECORD      0xE86A5A   /* red — the "listening" dot          */
 
-/* ── Yerleşim ────────────────────────────────────────────────────────────── */
+/* ── Layout ──────────────────────────────────────────────────────────────── */
 #define PB_SCREEN_W   640
 #define PB_SCREEN_H   172
 
-/* Spektrogram sağdaki İKİ dilimi (128 px x 2) kullanıyor; LVGL soldaki üçü.
- * Tasarım 236 px istiyordu — 256, dilim sınırına oturan en yakın değer ve
- * dilim sınırına oturmak şart: LVGL ile spektrogram aynı dilimi paylaşırsa
- * birbirlerini silerler (lv_port.c). */
+/* The spectrogram uses the TWO right-hand slices (128 px each); LVGL owns the
+ * three on the left. The design asked for 236 px — 256 is the nearest value
+ * that lands on a slice boundary, and landing on one is essential: if LVGL
+ * and the spectrogram shared a slice they would erase each other (lv_port.c). */
 #define PB_SPEC_SLICE_COUNT  2
-#define PB_LVGL_SLICE_MASK_LISTEN  0x07u   /* dilim 0,1,2 -> ui x 0..383    */
-#define PB_LVGL_SLICE_MASK_ALL      0x1Fu   /* beşi de LVGL'in              */
+#define PB_LVGL_SLICE_MASK_LISTEN  0x07u  /* slices 0,1,2 -> ui x 0..383      */
+#define PB_LVGL_SLICE_MASK_ALL     0x1Fu  /* all five belong to LVGL          */
 
-#define PB_LEFT_W     384                     /* dinleme ekranının sol sütunu  */
-#define PB_MARGIN     18                      /* sol/sağ iç boşluk             */
+#define PB_LEFT_W     384   /* left column of the listening screen            */
+#define PB_MARGIN     18    /* left/right inner padding                       */
 
-/* ── Ortak çizim yardımcıları (tema.c) ───────────────────────────────────── */
+/* ── Shared drawing helpers (theme.c) ────────────────────────────────────── */
 
-/** Zemini, dolgusu ve kenarlığı sıfırlanmış boş bir ekran nesnesi. */
+/** An empty screen object with background, padding and border all zeroed. */
 lv_obj_t *pb_screen_new(void);
 
-/** Sol üstten konumlanan etiket. */
+/** A label positioned from its top-left corner. */
 lv_obj_t *pb_label(lv_obj_t *par, const lv_font_t *f, uint32_t color,
-                    int32_t x, int32_t y);
+                   int32_t x, int32_t y);
 
-/** Düz renk dikdörtgen — çubuk, ayraç çizgisi, nokta. `yaricap` yuvarlaklık. */
+/** A flat-colour rectangle — bar, separator line, dot. `radius` rounds it. */
 lv_obj_t *pb_box(lv_obj_t *par, int32_t x, int32_t y, int32_t w, int32_t h,
-                  uint32_t color, int32_t yaricap);
+                 uint32_t color, int32_t radius);
 
 /**
- * Etikete metni YALNIZCA DEĞİŞTİYSE yaz.
+ * Write text to a label ONLY IF IT CHANGED.
  *
- * `lv_label_set_text` metin aynı olsa da nesneyi kirletiyor; kirli alan da o
- * dilimin QSPI'ye yeniden basılması (44 KB) demek. Ekran 4 Hz güncelleniyor,
- * boşuna basmanın bedeli gerçek.
+ * `lv_label_set_text` dirties the object even when the text is identical, and
+ * a dirty area means that slice gets pushed over QSPI again (44 KB). The
+ * screen updates at 4 Hz, so the cost of a pointless push is real.
  *
- * @return metin değiştiyse true (çağıran rengi de güncellemek isteyebilir).
+ * @return true if the text changed (the caller may want to update the colour
+ *         as well).
  */
 bool pb_write(lv_obj_t *o, char *last, uint32_t n, const char *text);
 
-/** Alt ortadaki sayfa noktaları — iki ekran olduğunu gösteren tek işaret. */
+/** The page dots at bottom centre — the only hint that there are two screens. */
 void pb_page_dots(lv_obj_t *par, int active);
 
 #endif /* POKEBIRD_THEME_H */

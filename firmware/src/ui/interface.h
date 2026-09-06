@@ -1,22 +1,28 @@
 /**
- * arayuz.h — Cihazın iki ekranlı arayüzü ve aralarındaki kaydırma geçişi
+ * interface.h — the device's two screens and the swipe between them
  *
- * Tasarım: `Kus Sesi Arayuz.dc.html` (retro/analog, koyu tema, 640x172).
+ * Design: retro/analog, dark theme, 640x172.
  *
- *   EKRAN 0 · DİNLEME   sol: en yakın 3 tür (ad + bilimsel ad + güven çubuğu)
- *                       sağ: canlı spektrogram (panele DOĞRUDAN yazılıyor)
- *   EKRAN 1 · GÜNLÜK    o ana kadar tanınan türlerin listesi
+ *   SCREEN 0 · LISTEN   left:  the three closest species (name + scientific
+ *                              name + confidence bar)
+ *                       right: the live spectrogram (written to the panel
+ *                              DIRECTLY)
+ *   SCREEN 1 · LOG      the species identified so far
  *
- * ⛔ EKRAN SÖZLEŞMESİ: bu modülde panele doğrudan yazan tek satır yok. Çizimin
- * tamamı LVGL'den geçiyor; `lv_port.c` panele her zaman TAM GENİŞLİKTE
- * (0..171 sütun) dikey dilimler hâlinde basıyor. Dar sütun bandına çok satırlı
- * yazma bu panelde KAYIYOR (§9n). Buraya panel çağrısı eklemeyin.
+ * SCREEN CONTRACT: not one line in this module writes to the panel directly.
+ * All drawing goes through LVGL, and `lv_port.c` always pushes vertical
+ * slices to the panel at FULL WIDTH (columns 0..171). Multi-row writes into a
+ * narrow column band SLIP on this panel. Do not add panel calls here.
  *
- * ⚠ GEÇİŞ YOLU İKİ TANE — ve bu bilinçli. Kaydırma dokunmatiğe bağlı,
- * dokunmatik ise bugüne kadar hiç parmakla denenmedi (§9b: boşta sabit 0xDB
- * geliyor, "dokunma yok" mu hata mı belirlenemedi). Bu yüzden ekran değiştirme
- * `pb_ui_set_screen`nın arkasında duruyor ve seri porttan da
- * sürülebiliyor: dokunmatik ölü çıksa bile arayüz kullanılabilir kalıyor.
+ * NOTE — THERE ARE TWO WAYS TO CHANGE SCREEN, deliberately. Swiping depends
+ * on the touch controller, and at the time this was written touch had never
+ * been confirmed with a finger (a constant 0xDB when idle, which could have
+ * been "no touch" or a fault). So screen switching sits behind
+ * `pb_ui_set_screen` and can also be driven from the serial console: even if
+ * touch turned out to be dead, the UI would stay usable.
+ *
+ * (Touch has since been confirmed working by hand; the serial path remains as
+ * a diagnostic.)
  */
 #ifndef POKEBIRD_INTERFACE_H
 #define POKEBIRD_INTERFACE_H
@@ -27,86 +33,89 @@
 #include "ai/decision.h"
 
 #define PB_SCREEN_LISTEN  0
-#define PB_SCREEN_LOG   1
+#define PB_SCREEN_LOG     1
 #define PB_SCREEN_COUNT   2
 
-/** Arayüzün bir güncellemede göstereceği her şey. Sınıf adlarını çağıran
- *  veriyor: bu modül `siniflar.h`'yi dahil etmiyor, böylece 179 elemanlı
- *  tablonun ikinci bir kopyası flash'a girmiyor. */
+/** Everything the UI shows in one update. The caller supplies the class
+ *  names: this module does not include `classes.h`, which keeps a second copy
+ *  of the 179-entry table out of flash. */
 typedef struct {
     pb_decision_mode_t mode;
-    const char    *species_name;          /* gösterilecek tür; yoksa NULL           */
-    float          confidence;           /* 0..1                                   */
+    const char    *species_name;      /* species to show; NULL if none       */
+    float          confidence;        /* 0..1                                */
 
-    const char    *top3_name[3];      /* birleştirmenin ilk 3'ü; NULL olabilir  */
-    const char    *top3_latin[3];   /* bilimsel adlar; NULL olabilir          */
+    const char    *top3_name[3];      /* the vote's top 3; entries may be NULL */
+    const char    *top3_latin[3];     /* scientific names; may be NULL       */
     float          top3_probability[3];
 
-    /* Alt satırdaki teşhis sayaçları — göz gerektirmeyen doğrulama için
-     * ekranda da duruyorlar (seri portta da var). */
-    uint32_t frame_rate;              /* mel karesi / s                         */
+    /* The diagnostic counters on the bottom row. They live on screen as well
+     * as on the serial console so the pipeline can be checked without one. */
+    uint32_t frame_rate;              /* mel frames per second               */
     uint32_t inference;
     uint32_t merged;
     uint32_t overrun;
     float    band_db;
 } pb_result_view_t;
 
-/** İki ekranı da kur. `pb_lv_init()` önce çağrılmış olmalı. */
+/** Build both screens. `pb_lv_init()` must already have been called. */
 void pb_ui_create(void);
 
 /**
- * LVGL'i çevir, kaydırmayı yokla, kirli dilimleri panele bas.
- * Ana döngüden düzenli çağrılmalı (eski `pb_lv_tick`in yerine).
+ * Turn LVGL over, poll for a swipe, and push dirty slices to the panel.
+ * Must be called regularly from the main loop.
  */
 void pb_ui_tick(void);
 
-/** Dinleme ekranının içeriğini tazele. */
-void pb_ui_update(const pb_result_view_t *g);
+/** Refresh the contents of the listening screen. */
+void pb_ui_update(const pb_result_view_t *view);
 
 /**
- * Günlüğe bir tespit yaz. Aynı tür arka arkaya gelirse yeni satır AÇMIYOR,
- * en üstteki satırı tazeliyor: karar kuralı bir türü 5 saniye ekranda tutuyor
- * (`PB_DECISION_HOLD_MS`) ve o süre boyunca aynı tespit tekrar tekrar düşerse
- * günlük tek bir olayla dolardı.
+ * Add a detection to the log. If the same species arrives again immediately
+ * it does NOT open a new row, it refreshes the top one: the decision rule
+ * holds a species on screen for five seconds (`PB_DECISION_HOLD_MS`), and if
+ * the same detection kept landing during that time the log would fill up with
+ * a single event.
  */
 void pb_ui_log_add(const char *name, const char *latin, float confidence);
 
-/** Etkin ekran (PB_EKRAN_*). */
+/** The active screen (PB_SCREEN_*). */
 int  pb_ui_screen(void);
 
-/** Ekranı değiştir. Aralık dışı değer yok sayılır. */
+/** Change screen. An out-of-range value is ignored. */
 void pb_ui_set_screen(int screen);
 
-/** Bir sonraki ekrana geç (döngüsel) — seri porttaki yedek yol. */
+/** Move to the next screen (wrapping) — the fallback path from serial. */
 void pb_ui_next(void);
 
-/* ── Kayıt (dinleme) durumu ───────────────────────────────────────────────
+/* ── Recording (listening) state ──────────────────────────────────────────
  *
- * Cihaz artık SÜREKLİ DİNLEMİYOR (kullanıcının kararı): dinlemeyi kayıt
- * butonu başlatıp durduruyor ve açılışta kapalı. Butonun kendisi dinleme
- * ekranının sol 96 pikselinde, TAM YÜKSEKLİKTE bir şerit — gerekçesi
- * ekran_dinleme.c'de: dokunmatik kalibrasyonu kısa ekseni kullanılamaz
- * gösterdi, bir dokunuşun yalnızca YATAY yerini biliyoruz.
+ * The device does NOT listen continuously: the record button starts and stops
+ * listening, and it is off at boot. The button itself is a FULL-HEIGHT strip
+ * in the leftmost 96 pixels of the listening screen — the reason is in
+ * screen_listen.c: touch calibration showed the short axis to be unusable, so
+ * we only know the HORIZONTAL position of a touch.
  *
- * Hattı gerçekten durdurup başlatmak ÇAĞIRANIN işi: bu modül donanıma
- * dokunmuyor, yalnızca durumu ve görünümü tutuyor. `main.c` her turda
- * `pb_ui_recording()`ya bakıp `pb_recognizer_start`/`pb_recognizer_stop`
- * çağırıyor.
+ * Actually stopping and starting the pipeline is the CALLER's job: this
+ * module never touches hardware, it only holds the state and the appearance.
+ * `main.c` checks `pb_ui_recording()` each turn and calls
+ * `pb_recognizer_start` / `pb_recognizer_stop`.
  */
 bool pb_ui_recording(void);
 void pb_ui_set_recording(bool recording);
 
-/** Kayıt butonuna kaç kez basıldı — göz gerektirmeyen ölçüm. */
+/** How many times the record button has been pressed — a measurement that
+ *  needs no eyes on the screen. */
 extern uint32_t pb_button_press;
 
-/* ── Kaydırma teşhisi — GÖZ GEREKMEZ ──────────────────────────────────────
- * Dokunmatik doğrulanmadığı için kaydırmanın neden çalışmadığını ekrana
- * bakmadan anlayabilmek şart. Sayaçlar seri porta dökülüyor. */
-extern uint32_t pb_swipe_touch;    /* geçerli okunan dokunma karesi     */
-extern uint32_t pb_swipe_begin;      /* parmak indi                        */
-extern uint32_t pb_swipe_accept;      /* kaydırma sayıldı                   */
-extern uint32_t pb_swipe_short;       /* hareket eşiğin altında kaldı       */
-extern int32_t  pb_swipe_last_dx;     /* son parmak hareketi (ui px)        */
+/* ── Swipe diagnostics — NO EYES NEEDED ───────────────────────────────────
+ * Because touch was unverified for a long time, being able to tell why a
+ * swipe did not register without looking at the screen was essential. These
+ * counters are dumped to the serial console. */
+extern uint32_t pb_swipe_touch;    /* valid touch frames read              */
+extern uint32_t pb_swipe_begin;    /* finger went down                     */
+extern uint32_t pb_swipe_accept;   /* counted as a swipe                   */
+extern uint32_t pb_swipe_short;    /* movement stayed below the threshold  */
+extern int32_t  pb_swipe_last_dx;  /* last finger movement (ui px)         */
 extern int32_t  pb_swipe_last_dy;
 
 #endif /* POKEBIRD_INTERFACE_H */

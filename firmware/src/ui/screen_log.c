@@ -8,14 +8,14 @@
 #include "ui/text.h"
 #include "ui/theme.h"
 
-/* ── Yerleşim (tam 640) ───────────────────────────────────────────────────
- *     y   8   başlık "BUGÜN · TODAY"          sağda kayıt sayısı
- *     y  30   ayraç
- *     y  38   1. kayıt  \
- *     y  76   2. kayıt   >  satır yüksekliği 38 (ad + bilimsel ad alt alta)
- *     y 114   3. kayıt  /
- *     y 150   sayaçlar (göz gerektirmeyen doğrulama)
- *     y 162   sayfa noktaları
+/* ── Layout (the full 640) ────────────────────────────────────────────────
+ *     y   8   "TODAY" heading            entry count on the right
+ *     y  30   separator
+ *     y  38   entry 1  \
+ *     y  76   entry 2   >  row height 38 (name above scientific name)
+ *     y 114   entry 3  /
+ *     y 150   counters (verification that needs no other instrumentation)
+ *     y 162   page dots
  */
 #define ROW_Y0    38
 #define ROW_STEP  38
@@ -32,22 +32,22 @@
 #define PERCENT_X     572
 #define PERCENT_W     48
 
-/* ── Kayıt halkası ────────────────────────────────────────────────────────
- * SD kart günlüğü gelene kadar (M7 adım 5) tespitler RAM'de duruyor. Sekiz
- * yeter: ekranda üçü görünüyor, kalanı "kaydırınca daha fazlası" için değil,
- * yalnızca en yenisinin doğru seçilebilmesi için. Maliyet ~800 bayt. */
+/* ── The entry ring ───────────────────────────────────────────────────────
+ * Until an SD-card log exists, detections live in RAM. Eight is enough: three
+ * are visible on screen, and the rest are not there for "scroll for more" but
+ * simply so the newest can always be picked correctly. Cost ~800 bytes. */
 #define RING 8
 
 typedef struct {
     char     name[48];
     char     latin[40];
     float    confidence;
-    uint32_t ms;            /* açılıştan bu yana */
+    uint32_t ms;            /* milliseconds since boot */
     bool     full;
 } record_t;
 
 static record_t s_record[RING];
-static uint32_t s_head;          /* en yeni kaydın indeksi + 1 (mod HALKA) */
+static uint32_t s_head;          /* index of the newest entry + 1 (mod RING) */
 static uint32_t s_total;
 
 typedef struct {
@@ -60,13 +60,14 @@ static lv_obj_t *s_screen, *s_count, *s_empty, *s_counter;
 static row_t   s_row[VISIBLE_ROWS];
 static char      s_last_count[24], s_last_counter[64];
 
-static void row_kur(row_t *s, int32_t y)
+static void row_build(row_t *s, int32_t y)
 {
     s->time = pb_label(s_screen, &pb_font_mono_10, PB_COLOR_FAINT, TIME_X, y + 4);
     lv_obj_set_width(s->time, TIME_W);
 
-    /* ⚠ Yükseklik de veriliyor — yalnızca genişlikle `DOTS` kesmiyor, uzun ad
-     * iki satıra sarıp bilimsel adın üstüne biniyor (bkz. ekran_dinleme.c). */
+    /* A height is set as well: with a width alone, `DOTS` does not truncate
+     * and a long name wraps onto a second line, overlapping the scientific
+     * name below it (see screen_listen.c). */
     s->name = pb_label(s_screen, &pb_font_bold_13, PB_COLOR_TEXT, NAME_X, y);
     lv_obj_set_size(s->name, NAME_W, 16);
     lv_label_set_long_mode(s->name, LV_LABEL_LONG_MODE_DOTS);
@@ -102,18 +103,19 @@ lv_obj_t *pb_screen_log_create(void)
     pb_box(s_screen, LEFT, 30, RIGHT - LEFT, 1, PB_COLOR_LINE, 0);
 
     for (int i = 0; i < VISIBLE_ROWS; i++) {
-        row_kur(&s_row[i], ROW_Y0 + i * ROW_STEP);
+        row_build(&s_row[i], ROW_Y0 + i * ROW_STEP);
     }
 
-    /* Boş durum — cihaz yeni açıldığında ekranın anlamsız görünmemesi için. */
+    /* Empty state, so a freshly booted device does not look broken. */
     s_empty = pb_label(s_screen, &pb_font_narrow_11, PB_COLOR_FAINT, LEFT, 84);
     lv_obj_set_width(s_empty, RIGHT - LEFT);
     lv_obj_set_style_text_align(s_empty, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_text(s_empty, "No entries yet · listening");
 
-    /* Sayaçlar tasarımda YOK; buraya konuldu çünkü §9p'de bilerek ekrana
-     * yazılmışlardı (göz gerektirmeyen doğrulama). Dinleme ekranını
-     * kalabalıklaştırmamak için ikinci ekranın altına alındılar. */
+    /* The counters are NOT in the design. They are here because putting them
+     * on screen deliberately makes the pipeline verifiable without a serial
+     * console. They live at the bottom of the second screen so they do not
+     * crowd the listening screen. */
     s_counter = pb_label(s_screen, &pb_font_mono_10, PB_COLOR_BORDER, LEFT, 150);
     lv_obj_set_width(s_counter, 400);
 
@@ -129,9 +131,10 @@ void pb_screen_log_add(const char *name, const char *latin, float confidence)
 
     const uint32_t now = to_ms_since_boot(get_absolute_time());
 
-    /* Aynı tür üst üste gelirse yeni satır AÇMA, en üsttekini tazele: karar
-     * kuralı bir türü PB_DECISION_HOLD_MS boyunca ekranda tutuyor ve o süre
-     * boyunca aynı tespit tekrar tekrar düşerse günlük tek olayla dolardı. */
+    /* If the same species arrives again, do NOT open a new row, refresh the
+     * top one: the decision rule holds a species on screen for
+     * PB_DECISION_HOLD_MS, and if the same detection kept landing during that
+     * window the log would fill up with a single event. */
     if (s_total > 0) {
         record_t *top = &s_record[(s_head + RING - 1) % RING];
         if (strncmp(top->name, name, sizeof(top->name) - 1) == 0) {
@@ -152,8 +155,9 @@ void pb_screen_log_add(const char *name, const char *latin, float confidence)
     if (s_total < 0xFFFFFFFFu) s_total++;
 }
 
-/** "az önce" / "3 dk önce" / "2 sa önce" — RTC yok, açılıştan bu yana. */
-static void time_write(uint32_t elapsed_ms, char *out, uint32_t n)
+/** "just now" / "3 min ago" / "2 hr ago" — there is no RTC, so this is
+ *  time since boot. */
+static void write_age(uint32_t elapsed_ms, char *out, uint32_t n)
 {
     const uint32_t sn = elapsed_ms / 1000u;
     if (sn < 60u)        snprintf(out, n, "just now");
@@ -179,7 +183,7 @@ void pb_screen_log_refresh(uint32_t frame_rate, uint32_t inference, uint32_t ove
 
     for (int i = 0; i < VISIBLE_ROWS; i++) {
         row_t *s = &s_row[i];
-        /* i=0 en yeni: halkada bir geri. */
+        /* i=0 is the newest: one step back in the ring. */
         const record_t *k = &s_record[(s_head + RING - 1 - (uint32_t)i) % RING];
 
         if (!k->full || (uint32_t)i >= s_total) {
@@ -191,7 +195,7 @@ void pb_screen_log_refresh(uint32_t frame_rate, uint32_t inference, uint32_t ove
             continue;
         }
 
-        time_write(now - k->ms, buf, sizeof(buf));
+        write_age(now - k->ms, buf, sizeof(buf));
         pb_write(s->time, s->last_time, sizeof(s->last_time), buf);
 
         pb_text_upper(k->name, buf, sizeof(buf));
