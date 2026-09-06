@@ -26,26 +26,26 @@
 #define PB_VOTE_WINDOWS  8
 
 typedef struct {
-    uint32_t surum;          /* her yeni sonuçta artar — core 0 buna bakar   */
+    uint32_t version;          /* her yeni sonuçta artar — core 0 buna bakar   */
 
-    uint32_t kare;           /* toplam mel karesi                            */
-    uint32_t kapi_acik;      /* kapısı açık kare sayısı                      */
-    uint32_t cikarim;        /* çalıştırılan çıkarım sayısı (tür ağı)        */
-    uint32_t atlanan;        /* kapı kapalı olduğu için atlanan pencere      */
-    uint32_t ikili_calisti;  /* Aşama-1 ikili ağın çalıştığı pencere sayısı  */
-    uint32_t ikili_red;      /* ikili ağın "kuş değil" dediği (tür ağı atlandı) */
-    float    ikili_son_p;    /* son ikili ağ çıktısı — "kuş" olasılığı (0..1) */
+    uint32_t frame;           /* toplam mel karesi                            */
+    uint32_t gate_open;      /* kapısı açık kare sayısı                      */
+    uint32_t inference;        /* çalıştırılan çıkarım sayısı (tür ağı)        */
+    uint32_t skipped;        /* kapı kapalı olduğu için atlanan pencere      */
+    uint32_t binary_ran;  /* Aşama-1 ikili ağın çalıştığı pencere sayısı  */
+    uint32_t binary_red;      /* ikili ağın "kuş değil" dediği (tür ağı atlandı) */
+    float    binary_last_p;    /* son ikili ağ çıktısı — "kuş" olasılığı (0..1) */
     uint32_t overrun;        /* ses halkası taştı — süreklilik koptu         */
-    uint32_t son_sure_us;    /* son Invoke() süresi                          */
-    uint32_t birlesen;       /* kaç pencere birleştirildi (≤ 8)              */
+    uint32_t last_time_us;    /* son Invoke() süresi                          */
+    uint32_t merged;       /* kaç pencere birleştirildi (≤ 8)              */
 
-    int16_t  ilk3[3];        /* sınıf indeksleri, en iyiden                  */
-    float    ilk3_olasilik[3];
-    bool     gecerli;        /* en az bir çıkarım yapıldı mı                 */
-    bool     kapi_su_an;     /* kapı EN SON karede açık mıydı — arayüz için  */
+    int16_t  top3[3];        /* sınıf indeksleri, en iyiden                  */
+    float    top3_probability[3];
+    bool     valid;        /* en az bir çıkarım yapıldı mı                 */
+    bool     gate_su_an;     /* kapı EN SON karede açık mıydı — arayüz için  */
 
     /* Kapı ve gürültü tabanı — teşhis için, `m` komutundakilerin aynısı. */
-    float    bant_db, taban_db, aki;
+    float    band_db, base_db, aki;
 } pb_recognizer_state_t;
 
 /**
@@ -60,7 +60,7 @@ typedef struct {
  *                     yolu gerçek zamanlı yük altında hiç test edilemez.
  * @return model yüklenemezse false (core 1 başlatılmaz)
  */
-bool pb_recognizer_start(bool kapi_yoksay);
+bool pb_recognizer_start(bool gate_ignore);
 
 /** Core 1'i durdur ve sıfırla. */
 void pb_recognizer_stop(void);

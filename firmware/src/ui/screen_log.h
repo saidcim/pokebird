@@ -18,10 +18,10 @@
 lv_obj_t *pb_screen_log_create(void);
 
 /** Günlüğe bir tespit ekle (en üste). */
-void pb_screen_log_add(const char *ad, const char *latin, float guven);
+void pb_screen_log_add(const char *name, const char *latin, float confidence);
 
 /** "x dk önce" metinlerini ve sayaç satırını tazele. */
-void pb_screen_log_refresh(uint32_t kare_hiz, uint32_t cikarim,
+void pb_screen_log_refresh(uint32_t frame_rate, uint32_t inference,
                             uint32_t overrun);
 
 #endif /* POKEBIRD_SCREEN_LOG_H */

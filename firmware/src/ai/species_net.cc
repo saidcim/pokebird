@@ -53,12 +53,12 @@ static tflite::MicroMutableOpResolver<4> s_resolver;
 /* MicroInterpreter'ın varsayılan kurucusu yok; placement new ile kuruluyor
  * ki statik ömürlü olsun ve heap'e dokunulmasın. */
 alignas(alignof(tflite::MicroInterpreter))
-static uint8_t s_interp_bellek[sizeof(tflite::MicroInterpreter)];
+static uint8_t s_interp_memory[sizeof(tflite::MicroInterpreter)];
 static tflite::MicroInterpreter *s_interp = nullptr;
 
-static TfLiteTensor *s_girdi  = nullptr;
-static TfLiteTensor *s_cikti  = nullptr;
-static uint32_t      s_sure_us = 0;
+static TfLiteTensor *s_input  = nullptr;
+static TfLiteTensor *s_output  = nullptr;
+static uint32_t      s_time_us = 0;
 
 extern "C" bool pb_species_net_init(void) {
     if (s_interp) return true;
@@ -78,7 +78,7 @@ extern "C" bool pb_species_net_init(void) {
         return false;
     }
 
-    s_interp = new (s_interp_bellek) tflite::MicroInterpreter(
+    s_interp = new (s_interp_memory) tflite::MicroInterpreter(
         model, s_resolver, s_arena, sizeof(s_arena));
 
     if (s_interp->AllocateTensors() != kTfLiteOk) {
@@ -89,33 +89,33 @@ extern "C" bool pb_species_net_init(void) {
         return false;
     }
 
-    s_girdi = s_interp->input(0);
-    s_cikti = s_interp->output(0);
+    s_input = s_interp->input(0);
+    s_output = s_interp->output(0);
 
     /* ── Cihaz sözleşmesinin cihaz TARAFINDAKİ sağlaması ──────────────────
      * §9k'daki assert PC tarafındaydı. Aynı kontrolü burada da yapıyoruz:
      * model yeniden eğitilip .h değişirse ve ölçek 1.0'dan kayarsa,
      * memcpy sessizce yanlış girdi verir ve doğruluk hiçbir hata mesajı
      * olmadan düşer. Bu projede o sınıf hata iki kez pahalıya patladı. */
-    const size_t bekleniyor = (size_t)PB_MEL_FRAMES * PB_MEL_BANDS;
-    if (s_girdi->type != kTfLiteInt8 || s_girdi->bytes != bekleniyor) {
+    const size_t waiting = (size_t)PB_MEL_FRAMES * PB_MEL_BANDS;
+    if (s_input->type != kTfLiteInt8 || s_input->bytes != waiting) {
         printf("[!] TUR AGI: girdi tensoru uyumsuz (tip %d, %u bayt; "
                "beklenen int8 %u bayt)\n",
-               (int)s_girdi->type, (unsigned)s_girdi->bytes,
-               (unsigned)bekleniyor);
+               (int)s_input->type, (unsigned)s_input->bytes,
+               (unsigned)waiting);
         s_interp = nullptr;
         return false;
     }
-    if (s_girdi->params.scale != 1.0f || s_girdi->params.zero_point != 0) {
+    if (s_input->params.scale != 1.0f || s_input->params.zero_point != 0) {
         printf("[!] TUR AGI: girdi olcegi %.6f / sifir %d — 1.0 / 0 bekleniyordu.\n"
                "    Model degismis: memcpy yerine donusum gerekiyor (§9k).\n",
-               (double)s_girdi->params.scale, (int)s_girdi->params.zero_point);
+               (double)s_input->params.scale, (int)s_input->params.zero_point);
         s_interp = nullptr;
         return false;
     }
-    if (s_cikti->type != kTfLiteInt8 || s_cikti->bytes != PB_SPECIES_NET_CLASSES) {
+    if (s_output->type != kTfLiteInt8 || s_output->bytes != PB_SPECIES_NET_CLASSES) {
         printf("[!] TUR AGI: cikti tensoru uyumsuz (%u sinif, beklenen %d)\n",
-               (unsigned)s_cikti->bytes, PB_SPECIES_NET_CLASSES);
+               (unsigned)s_output->bytes, PB_SPECIES_NET_CLASSES);
         s_interp = nullptr;
         return false;
     }
@@ -129,27 +129,27 @@ extern "C" size_t pb_species_net_arena_used(void) {
 extern "C" size_t pb_species_net_arena_total(void) { return sizeof(s_arena); }
 
 extern "C" int8_t *pb_species_net_input(void) {
-    return s_girdi ? s_girdi->data.int8 : nullptr;
+    return s_input ? s_input->data.int8 : nullptr;
 }
 
 extern "C" bool pb_species_net_run(void) {
     if (!s_interp) return false;
     const uint32_t t0 = time_us_32();
     const TfLiteStatus st = s_interp->Invoke();
-    s_sure_us = time_us_32() - t0;
+    s_time_us = time_us_32() - t0;
     return st == kTfLiteOk;
 }
 
-extern "C" uint32_t pb_species_net_last_time_us(void) { return s_sure_us; }
+extern "C" uint32_t pb_species_net_last_time_us(void) { return s_time_us; }
 
 extern "C" const int8_t *pb_species_net_output(void) {
-    return s_cikti ? s_cikti->data.int8 : nullptr;
+    return s_output ? s_output->data.int8 : nullptr;
 }
 
 extern "C" float pb_species_net_output_scale(void) {
-    return s_cikti ? s_cikti->params.scale : 0.0f;
+    return s_output ? s_output->params.scale : 0.0f;
 }
 
 extern "C" int pb_species_net_output_zero(void) {
-    return s_cikti ? s_cikti->params.zero_point : 0;
+    return s_output ? s_output->params.zero_point : 0;
 }

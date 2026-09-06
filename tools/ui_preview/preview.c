@@ -43,20 +43,20 @@ static lv_display_t *s_disp;
 /* Cihazdaki gibi PARTIAL kip: LVGL şeritler hâlinde çiziyor, flush_cb onları
  * framebuffer'a işliyor. DIRECT kip yerine bu seçildi çünkü cihazın çizim
  * yolu da bu — aynı kod yolundan geçmek önizlemenin değerini artırıyor. */
-#define SERIT_H 43
-static uint16_t s_draw[W * SERIT_H];
+#define STRIP_H 43
+static uint16_t s_draw[W * STRIP_H];
 
 static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px) {
     const uint16_t *src = (const uint16_t *)(void *)px;
 
-    int32_t adim = a->x2 - a->x1 + 1;
+    int32_t step = a->x2 - a->x1 + 1;
     lv_draw_buf_t *db = lv_display_get_buf_active(d);
-    if (db && db->header.stride) adim = (int32_t)(db->header.stride / 2);
+    if (db && db->header.stride) step = (int32_t)(db->header.stride / 2);
 
     for (int32_t y = a->y1; y <= a->y2; y++) {
         for (int32_t x = a->x1; x <= a->x2; x++) {
             if (x < 0 || x >= W || y < 0 || y >= H) continue;
-            s_fb[y * W + x] = src[(size_t)(y - a->y1) * adim + (x - a->x1)];
+            s_fb[y * W + x] = src[(size_t)(y - a->y1) * step + (x - a->x1)];
         }
     }
     lv_display_flush_ready(d);
@@ -93,18 +93,18 @@ void pb_lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
  *  (§9o), yoksa hem kayma gizlenir hem de gerçek çıktı hakkında fikir vermez. */
 static void spektrogram_doldur(void) {
     pb_spec_init();
-    for (uint32_t sutun = 0; sutun < PB_SPEC_WIDTH; sutun++) {
+    for (uint32_t column = 0; column < PB_SPEC_WIDTH; column++) {
         uint8_t bins[64];
-        const uint32_t faz = sutun % 48;
-        const bool sessiz = (faz >= 34);
-        const int temel = 13 + (int)(faz < 17 ? faz : 34 - faz);
+        const uint32_t phase = column % 48;
+        const bool silent = (phase >= 34);
+        const int base = 13 + (int)(phase < 17 ? phase : 34 - phase);
         for (int b = 0; b < 64; b++) {
-            int v = 10 + (int)((sutun * 7u + (uint32_t)b * 13u) % 9u);
-            if (!sessiz) {
+            int v = 10 + (int)((column * 7u + (uint32_t)b * 13u) % 9u);
+            if (!silent) {
                 for (int hrm = 1; hrm <= 3; hrm++) {
-                    const int merkez = temel * hrm;
-                    const int d = b - merkez;
-                    if (merkez < 64 && d > -4 && d < 4) {
+                    const int center = base * hrm;
+                    const int d = b - center;
+                    if (center < 64 && d > -4 && d < 4) {
                         const int g = (d < 0 ? -d : d);
                         v += (240 / hrm) - g * 40;
                     }
@@ -117,9 +117,9 @@ static void spektrogram_doldur(void) {
 }
 
 /** Framebuffer'ı PPM (P6, 8 bit RGB) olarak yaz — ppm_png.py PNG'ye çeviriyor. */
-static void dok(const char *ad) {
-    FILE *f = fopen(ad, "wb");
-    if (!f) { printf("acilamadi: %s\n", ad); return; }
+static void dok(const char *name) {
+    FILE *f = fopen(name, "wb");
+    if (!f) { printf("acilamadi: %s\n", name); return; }
     fprintf(f, "P6\n%d %d\n255\n", W, H);
     for (int i = 0; i < W * H; i++) {
         const uint16_t p = s_fb[i];
@@ -131,12 +131,12 @@ static void dok(const char *ad) {
         fputc(r, f); fputc(g, f); fputc(b, f);
     }
     fclose(f);
-    printf("  yazildi: %s\n", ad);
+    printf("  yazildi: %s\n", name);
 }
 
 /** LVGL yığın kullanımı — cihazla AYNI lv_conf (LV_MEM_SIZE) geçerli, yani
  *  burada dolan havuz kartta da dolar. */
-static void bellek(const char *nerede) {
+static void memory(const char *nerede) {
     lv_mem_monitor_t m;
     lv_mem_monitor(&m);
     printf("  [LVGL yigin] %-22s kullanilan %6u / %6u bayt  (%%%u dolu, "
@@ -148,12 +148,12 @@ static void bellek(const char *nerede) {
 /* LVGL ONCE, spektrogram SONRA: onizlemede dilim sahipligi taklit
  * edilmiyor, yani LVGL 640'in tamamini boyuyor ve sirasi ters olursa
  * seridi siler. Cihazda bu sorun yok (lv_port.c dilim maskesi). */
-static void ciz(lv_obj_t *scr, const char *ad, bool spektro) {
+static void draw(lv_obj_t *scr, const char *name, bool spektro) {
     lv_screen_load(scr);
     lv_obj_invalidate(scr);
     lv_refr_now(s_disp);
     if (spektro) spektrogram_doldur();
-    dok(ad);
+    dok(name);
 }
 
 int main(void) {
@@ -171,69 +171,69 @@ int main(void) {
 
     /* ── EKRAN 0 · DİNLEME ────────────────────────────────────────────────
      * Gerçekçi ve ZOR bir örnek: uzun bir tür adı, üç aday, karar TANINDI. */
-    lv_obj_t *dinleme = pb_screen_listen_create();
-    bellek("ekran0 kuruldu");
+    lv_obj_t *listen = pb_screen_listen_create();
+    memory("ekran0 kuruldu");
 
     pb_result_view_t g;
     memset(&g, 0, sizeof(g));
-    g.kip = PB_DECISION_SPECIES;
-    g.tur_ad = "Common Nightingale";
-    g.guven = 0.94f;
-    g.ilk3_ad[0] = "Common Nightingale";
-    g.ilk3_ad[1] = "Eurasian Blackbird";
-    g.ilk3_ad[2] = "European Robin";
-    g.ilk3_latin[0] = "Luscinia megarhynchos";
-    g.ilk3_latin[1] = "Turdus merula";
-    g.ilk3_latin[2] = "Erithacus rubecula";
-    g.ilk3_olasilik[0] = 0.94f;
-    g.ilk3_olasilik[1] = 0.61f;
-    g.ilk3_olasilik[2] = 0.38f;
-    g.kare_hiz = 63;
-    g.cikarim = 12;
+    g.mode = PB_DECISION_SPECIES;
+    g.species_name = "Common Nightingale";
+    g.confidence = 0.94f;
+    g.top3_name[0] = "Common Nightingale";
+    g.top3_name[1] = "Eurasian Blackbird";
+    g.top3_name[2] = "European Robin";
+    g.top3_latin[0] = "Luscinia megarhynchos";
+    g.top3_latin[1] = "Turdus merula";
+    g.top3_latin[2] = "Erithacus rubecula";
+    g.top3_probability[0] = 0.94f;
+    g.top3_probability[1] = 0.61f;
+    g.top3_probability[2] = 0.38f;
+    g.frame_rate = 63;
+    g.inference = 12;
     g.overrun = 0;
     pb_screen_listen_set_recording(true);
     pb_screen_listen_update(&g);
-    ciz(dinleme, "ekran0_tanindi.ppm", true);
+    draw(listen, "ekran0_tanindi.ppm", true);
 
     /* Dinleme kipi — hiçbir tür yokken ekran ne gösteriyor. */
     pb_result_view_t b;
     memset(&b, 0, sizeof(b));
-    b.kip = PB_DECISION_LISTENING;
-    b.kare_hiz = 63;
+    b.mode = PB_DECISION_LISTENING;
+    b.frame_rate = 63;
     pb_screen_listen_set_recording(true);
     pb_screen_listen_update(&b);
-    ciz(dinleme, "ekran0_dinliyor.ppm", true);
+    draw(listen, "ekran0_dinliyor.ppm", true);
 
     /* BOSTA — cihaz acilista dinlemiyor, kullanici butona basacak. */
     pb_screen_listen_set_recording(false);
     pb_screen_listen_update(&b);
-    ciz(dinleme, "ekran0_bosta.ppm", true);
+    draw(listen, "ekran0_bosta.ppm", true);
 
     /* Longest species name — the worst case for wrapping and truncation. */
     pb_result_view_t u;
     memset(&u, 0, sizeof(u));
-    u.kip = PB_DECISION_UNSURE;
-    u.tur_ad = "Greater White-fronted Goose";
-    u.guven = 0.42f;
-    u.ilk3_ad[0] = "Greater White-fronted Goose";
-    u.ilk3_ad[1] = "Eastern Olivaceous Warbler";
-    u.ilk3_ad[2] = "Lesser Spotted Woodpecker";
-    u.ilk3_latin[0] = "Anser albifrons";
-    u.ilk3_latin[1] = "Iduna pallida";
-    u.ilk3_latin[2] = "Dryobates minor";
-    u.ilk3_olasilik[0] = 0.42f;
-    u.ilk3_olasilik[1] = 0.29f;
-    u.ilk3_olasilik[2] = 0.11f;
+    u.mode = PB_DECISION_UNSURE;
+    u.species_name = "Greater White-fronted Goose";
+    u.confidence = 0.42f;
+    u.top3_name[0] = "Greater White-fronted Goose";
+    u.top3_name[1] = "Eastern Olivaceous Warbler";
+    u.top3_name[2] = "Lesser Spotted Woodpecker";
+    u.top3_latin[0] = "Anser albifrons";
+    u.top3_latin[1] = "Iduna pallida";
+    u.top3_latin[2] = "Dryobates minor";
+    u.top3_probability[0] = 0.42f;
+    u.top3_probability[1] = 0.29f;
+    u.top3_probability[2] = 0.11f;
     pb_screen_listen_set_recording(true);
     pb_screen_listen_update(&u);
-    ciz(dinleme, "ekran0_uzun_ad.ppm", true);
+    draw(listen, "ekran0_uzun_ad.ppm", true);
 
     /* ── EKRAN 1 · GÜNLÜK ─────────────────────────────────────────────── */
-    lv_obj_t *gunluk = pb_screen_log_create();
-    bellek("ekran1 kuruldu");
+    lv_obj_t *log = pb_screen_log_create();
+    memory("ekran1 kuruldu");
 
     pb_preview_ms = 0;
-    ciz(gunluk, "ekran1_bos.ppm", false);
+    draw(log, "ekran1_bos.ppm", false);
 
     /* Saati elle ilerleterek üç farklı yaş üret. */
     pb_preview_ms = 10u * 1000u;
@@ -245,7 +245,7 @@ int main(void) {
 
     pb_preview_ms = 96u * 60u * 1000u;
     pb_screen_log_refresh(63, 12, 0);
-    ciz(gunluk, "ekran1_dolu.ppm", false);
+    draw(log, "ekran1_dolu.ppm", false);
 
     printf("bitti\n");
     return 0;

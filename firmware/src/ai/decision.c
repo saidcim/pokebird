@@ -23,80 +23,80 @@
  */
 #include "ai/decision.h"
 
-static void goster(pb_decision_t *k, pb_decision_mode_t kip, int16_t sinif,
-                   float guven, uint32_t simdi_ms) {
-    if (k->kip != kip || k->sinif != sinif) {
-        k->giris_ms = simdi_ms;
-        k->surum++;
+static void show(pb_decision_t *k, pb_decision_mode_t mode, int16_t cls,
+                   float confidence, uint32_t now_ms) {
+    if (k->mode != mode || k->cls != cls) {
+        k->enter_ms = now_ms;
+        k->version++;
     }
-    k->kip = kip;
-    k->sinif = sinif;
-    k->guven = guven;
-    k->son_destek_ms = simdi_ms;
+    k->mode = mode;
+    k->cls = cls;
+    k->confidence = confidence;
+    k->last_support_ms = now_ms;
 }
 
-void pb_decision_reset(pb_decision_t *k, uint32_t simdi_ms) {
+void pb_decision_reset(pb_decision_t *k, uint32_t now_ms) {
     if (!k) return;
-    k->kip = PB_DECISION_LISTENING;
-    k->sinif = -1;
-    k->guven = 0.0f;
+    k->mode = PB_DECISION_LISTENING;
+    k->cls = -1;
+    k->confidence = 0.0f;
     /* "Çoktan geçmişte": açılışta ne ses göstergesi ne de bir gösterim
      * tutması yanlışlıkla canlı görünsün. Fark hesapları işaretsiz olduğu
      * için taşma da doğru çalışıyor. */
-    k->son_kapi_ms = simdi_ms - (PB_DECISION_SOUND_HOLD_MS + 1u);
-    k->son_destek_ms = simdi_ms - (PB_DECISION_HOLD_MS + 1u);
-    k->giris_ms = simdi_ms;
-    k->surum = 0;
+    k->last_gate_ms = now_ms - (PB_DECISION_SOUND_HOLD_MS + 1u);
+    k->last_support_ms = now_ms - (PB_DECISION_HOLD_MS + 1u);
+    k->enter_ms = now_ms;
+    k->version = 0;
 }
 
 void pb_decision_update(pb_decision_t *k, const pb_decision_input_t *g) {
     if (!k || !g) return;
 
-    if (g->kapi_acik) k->son_kapi_ms = g->simdi_ms;
+    if (g->gate_open) k->last_gate_ms = g->now_ms;
 
-    if (g->yeni_sonuc) {
-        const bool aday =
-            g->sinif >= 0 &&
-            g->sinif != PB_DECISION_NEGATIVE_CLASS &&
-            g->birlesen >= PB_DECISION_MIN_WINDOWS;
+    if (g->fresh_result) {
+        const bool candidate =
+            g->cls >= 0 &&
+            g->cls != PB_DECISION_NEGATIVE_CLASS &&
+            g->merged >= PB_DECISION_MIN_WINDOWS;
         const bool gosteriliyor =
-            (k->kip == PB_DECISION_SPECIES || k->kip == PB_DECISION_UNSURE);
+            (k->mode == PB_DECISION_SPECIES || k->mode == PB_DECISION_UNSURE);
 
-        if (aday && g->olasilik >= PB_DECISION_ENTER_THRESHOLD) {
-            goster(k, PB_DECISION_SPECIES, g->sinif, g->olasilik, g->simdi_ms);
-        } else if (aday && g->olasilik >= PB_DECISION_EXIT_THRESHOLD &&
-                   gosteriliyor && g->sinif == k->sinif) {
+        if (candidate && g->probability >= PB_DECISION_ENTER_THRESHOLD) {
+            show(k, PB_DECISION_SPECIES, g->cls, g->probability, g->now_ms);
+        } else if (candidate && g->probability >= PB_DECISION_EXIT_THRESHOLD &&
+                   gosteriliyor && g->cls == k->cls) {
             /* Histerezis: ekrandaki tür, çıkma eşiğinin üstünde kaldığı
              * sürece kipini korur — TÜR ise TÜR kalır. */
-            goster(k, k->kip, k->sinif, g->olasilik, g->simdi_ms);
-        } else if (aday && g->olasilik >= PB_DECISION_EXIT_THRESHOLD && !gosteriliyor) {
-            goster(k, PB_DECISION_UNSURE, g->sinif, g->olasilik, g->simdi_ms);
+            show(k, k->mode, k->cls, g->probability, g->now_ms);
+        } else if (candidate && g->probability >= PB_DECISION_EXIT_THRESHOLD && !gosteriliyor) {
+            show(k, PB_DECISION_UNSURE, g->cls, g->probability, g->now_ms);
         }
         /* aksi hâlde: destek yok, aşağıdaki tutma süresi karar versin */
     }
 
-    if (k->kip == PB_DECISION_SPECIES || k->kip == PB_DECISION_UNSURE) {
-        if (g->simdi_ms - k->son_destek_ms > PB_DECISION_HOLD_MS) {
-            k->sinif = -1;
-            k->guven = 0.0f;
-            k->kip = PB_DECISION_LISTENING;   /* aşağıdaki satır SES'e yükseltebilir */
-            k->surum++;
+    if (k->mode == PB_DECISION_SPECIES || k->mode == PB_DECISION_UNSURE) {
+        if (g->now_ms - k->last_support_ms > PB_DECISION_HOLD_MS) {
+            k->cls = -1;
+            k->confidence = 0.0f;
+            k->mode = PB_DECISION_LISTENING;   /* aşağıdaki satır SES'e yükseltebilir */
+            k->version++;
         }
     }
 
-    if (k->kip != PB_DECISION_SPECIES && k->kip != PB_DECISION_UNSURE) {
-        const pb_decision_mode_t yeni =
-            (g->simdi_ms - k->son_kapi_ms <= PB_DECISION_SOUND_HOLD_MS)
+    if (k->mode != PB_DECISION_SPECIES && k->mode != PB_DECISION_UNSURE) {
+        const pb_decision_mode_t fresh =
+            (g->now_ms - k->last_gate_ms <= PB_DECISION_SOUND_HOLD_MS)
                 ? PB_DECISION_SOUND : PB_DECISION_LISTENING;
-        if (yeni != k->kip) {
-            k->kip = yeni;
-            k->surum++;
+        if (fresh != k->mode) {
+            k->mode = fresh;
+            k->version++;
         }
     }
 }
 
-const char *pb_decision_mode_name(pb_decision_mode_t kip) {
-    switch (kip) {
+const char *pb_decision_mode_name(pb_decision_mode_t mode) {
+    switch (mode) {
         case PB_DECISION_LISTENING:  return "dinliyor";
         case PB_DECISION_SOUND:       return "SES ALGILANDI";
         case PB_DECISION_UNSURE:  return "olabilir";

@@ -14,8 +14,8 @@
  * mel.c'deki pb_mel_window() düzeninin aynısı ve eğitim kümesi de öyle
  * üretildi (tools/build_dataset.py, §9j).
  */
-#ifndef POKEBIRD_AI_TUR_AGI_H
-#define POKEBIRD_AI_TUR_AGI_H
+#ifndef POKEBIRD_AI_SPECIES_AGI_H
+#define POKEBIRD_AI_SPECIES_AGI_H
 
 #include <stdbool.h>
 #include <stddef.h>

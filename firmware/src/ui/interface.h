@@ -34,21 +34,21 @@
  *  veriyor: bu modül `siniflar.h`'yi dahil etmiyor, böylece 179 elemanlı
  *  tablonun ikinci bir kopyası flash'a girmiyor. */
 typedef struct {
-    pb_decision_mode_t kip;
-    const char    *tur_ad;          /* gösterilecek tür; yoksa NULL           */
-    float          guven;           /* 0..1                                   */
+    pb_decision_mode_t mode;
+    const char    *species_name;          /* gösterilecek tür; yoksa NULL           */
+    float          confidence;           /* 0..1                                   */
 
-    const char    *ilk3_ad[3];      /* birleştirmenin ilk 3'ü; NULL olabilir  */
-    const char    *ilk3_latin[3];   /* bilimsel adlar; NULL olabilir          */
-    float          ilk3_olasilik[3];
+    const char    *top3_name[3];      /* birleştirmenin ilk 3'ü; NULL olabilir  */
+    const char    *top3_latin[3];   /* bilimsel adlar; NULL olabilir          */
+    float          top3_probability[3];
 
     /* Alt satırdaki teşhis sayaçları — göz gerektirmeyen doğrulama için
      * ekranda da duruyorlar (seri portta da var). */
-    uint32_t kare_hiz;              /* mel karesi / s                         */
-    uint32_t cikarim;
-    uint32_t birlesen;
+    uint32_t frame_rate;              /* mel karesi / s                         */
+    uint32_t inference;
+    uint32_t merged;
     uint32_t overrun;
-    float    bant_db;
+    float    band_db;
 } pb_result_view_t;
 
 /** İki ekranı da kur. `pb_lv_init()` önce çağrılmış olmalı. */
@@ -69,13 +69,13 @@ void pb_ui_update(const pb_result_view_t *g);
  * (`PB_DECISION_HOLD_MS`) ve o süre boyunca aynı tespit tekrar tekrar düşerse
  * günlük tek bir olayla dolardı.
  */
-void pb_ui_log_add(const char *ad, const char *latin, float guven);
+void pb_ui_log_add(const char *name, const char *latin, float confidence);
 
 /** Etkin ekran (PB_EKRAN_*). */
 int  pb_ui_screen(void);
 
 /** Ekranı değiştir. Aralık dışı değer yok sayılır. */
-void pb_ui_set_screen(int ekran);
+void pb_ui_set_screen(int screen);
 
 /** Bir sonraki ekrana geç (döngüsel) — seri porttaki yedek yol. */
 void pb_ui_next(void);
@@ -94,7 +94,7 @@ void pb_ui_next(void);
  * çağırıyor.
  */
 bool pb_ui_recording(void);
-void pb_ui_set_recording(bool kayitta);
+void pb_ui_set_recording(bool recording);
 
 /** Kayıt butonuna kaç kez basıldı — göz gerektirmeyen ölçüm. */
 extern uint32_t pb_button_press;

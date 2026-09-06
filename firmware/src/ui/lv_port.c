@@ -55,7 +55,7 @@
 /* Panel yöneliminde tutuluyor ([panel satırı][panel sütunu]) ki panele
  * basarken devrik alma ya da adımlı okuma gerekmesin: bir satır bandı
  * doğrudan bitişik. */
-static uint16_t s_dilim_fb[PB_SLICE_W][PB_PANEL_W];
+static uint16_t s_slice_fb[PB_SLICE_W][PB_PANEL_W];
 
 /* 172 = 4 x 43, yani bir dilim tam olarak dört şeritte çiziliyor; artık
  * kalmıyor ve son şerit kısa olmuyor. */
@@ -67,15 +67,15 @@ static lv_display_t *s_disp;
 /* Hangi dilimleri LVGL çiziyor. Spektrogram panele DOĞRUDAN yazıyor (kendi
  * hızlı sütun yolu var, 62 Hz); onun dilimlerini LVGL basmamalı yoksa iki
  * yazan aynı bölgede birbirini siler. Ekranlar bunu kendileri bildiriyor. */
-static uint32_t s_lvgl_dilimleri = (1u << PB_SLICE_COUNT) - 1u;
+static uint32_t s_lvgl_slices = (1u << PB_SLICE_COUNT) - 1u;
 
 /* Yeniden çizilmesi gereken dilimler. LVGL'in kendi geçersizleştirmesinden
  * besleniyor (aşağıdaki olay kancası): hangi etiket değiştiyse yalnızca onun
  * düştüğü dilim basılıyor. Kart 4 Hz güncelleniyor ve her dilim 44 KB QSPI
  * demek — hepsini basmak boşuna 3 kat maliyet olurdu. */
-static uint32_t s_kirli;
-static bool     s_ciziyor;              /* kendi invalidate'imizi saymamak için */
-static int32_t  s_aktif_dilim = -1;     /* flush_cb hangi dilime yazıyor       */
+static uint32_t s_dirty;
+static bool     s_drawing;              /* kendi invalidate'imizi saymamak için */
+static int32_t  s_active_slice = -1;     /* flush_cb hangi dilime yazıyor       */
 
 /* ── Yön çevrimi ──────────────────────────────────────────────────────────
  * Kartta ölçüldü (`o` komutu). Cihaz USB soketi SAĞDA, yatay tutuluyor:
@@ -96,9 +96,9 @@ int32_t  pb_lv_last_stride_px, pb_lv_last_area_w;
 
 uint32_t pb_lv_slice_press;             /* panele basılan dilim sayısı */
 
-static int s_dokum_kalan = 0;
+static int s_dump_remaining = 0;
 
-void pb_lv_request_dump(int adet) { s_dokum_kalan = adet; }
+void pb_lv_request_dump(int count) { s_dump_remaining = count; }
 
 void pb_lv_flush_counters_reset(void)
 {
@@ -116,7 +116,7 @@ void pb_lv_flush_counters_reset(void)
  * normal işletsin). Gerçek çizim `pb_lv_tick`te dilim dilim yapılıyor. */
 static void invalidate_cb(lv_event_t *e)
 {
-    if (s_ciziyor) return;              /* kendi dilim isteğimiz — saymayalım */
+    if (s_drawing) return;              /* kendi dilim isteğimiz — saymayalım */
 
     const lv_area_t *a = (const lv_area_t *)lv_event_get_param(e);
     if (!a) return;
@@ -126,7 +126,7 @@ static void invalidate_cb(lv_event_t *e)
     if (x1 > x2) return;
 
     for (int32_t d = x1 / PB_SLICE_W; d <= x2 / PB_SLICE_W; d++) {
-        s_kirli |= (1u << d);
+        s_dirty |= (1u << d);
     }
 }
 
@@ -141,12 +141,12 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     /* ⚠ SATIR ADIMI ALAN GENİŞLİĞİ DEĞİL — LVGL'e sorulmalı. LVGL çizim
      * tamponunun adımını `LV_DRAW_BUF_STRIDE_ALIGN`e göre yuvarlayabiliyor,
      * dolayısıyla `x2-x1+1` VARSAYMAK yanlış (§9n'de bir tur buna gitti). */
-    int32_t satir_adimi = alan_w;
+    int32_t row_step = alan_w;
     lv_draw_buf_t *db = lv_display_get_buf_active(disp);
-    if (db && db->header.stride) satir_adimi = (int32_t)(db->header.stride / 2);
-    pb_lv_last_stride_px = satir_adimi;
+    if (db && db->header.stride) row_step = (int32_t)(db->header.stride / 2);
+    pb_lv_last_stride_px = row_step;
     pb_lv_last_area_w = alan_w;
-    if (satir_adimi != alan_w) pb_lv_flush_stride_differs++;
+    if (row_step != alan_w) pb_lv_flush_stride_differs++;
 
     pb_lv_flush_count++;
     pb_lv_last_x1 = x1; pb_lv_last_x2 = x2;
@@ -158,11 +158,11 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
      * her şey burada DÜŞÜRÜLÜYOR: içeriği kaybetmiyoruz, çünkü o alanın
      * düştüğü dilim maskede işaretli ve sırası gelince tamamı çiziliyor.
      * Kırpmadan yazmak framebuffer'ın dışına taşardı. */
-    if (s_aktif_dilim < 0) { lv_display_flush_ready(disp); return; }
+    if (s_active_slice < 0) { lv_display_flush_ready(disp); return; }
 
-    const int32_t dilim_x0 = s_aktif_dilim * PB_SLICE_W;
-    int32_t xb = x1 > dilim_x0 ? x1 : dilim_x0;
-    int32_t xs = x2 < dilim_x0 + PB_SLICE_W - 1 ? x2 : dilim_x0 + PB_SLICE_W - 1;
+    const int32_t slice_x0 = s_active_slice * PB_SLICE_W;
+    int32_t xb = x1 > slice_x0 ? x1 : slice_x0;
+    int32_t xs = x2 < slice_x0 + PB_SLICE_W - 1 ? x2 : slice_x0 + PB_SLICE_W - 1;
 
     if (xb > xs) { lv_display_flush_ready(disp); return; }
 
@@ -175,13 +175,13 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
      * Alanı, sürücünün OKUDUĞU indislemeyle seri porta ASCII olarak döküyor.
      * Terminalde yazı düzgün okunuyorsa hem LVGL'in çizimi hem devrik okuma
      * doğru demektir ve bozulma daha aşağıda; okunmuyorsa LVGL tarafında. */
-    if (s_dokum_kalan > 0 && (xs - xb) < 180) {
-        s_dokum_kalan--;
+    if (s_dump_remaining > 0 && (xs - xb) < 180) {
+        s_dump_remaining--;
         printf("#DOKUM ui x(%ld..%ld) y(%ld..%ld) dilim %ld adim %ld\n",
                (long)xb, (long)xs, (long)y1, (long)y2,
-               (long)s_aktif_dilim, (long)satir_adimi);
+               (long)s_active_slice, (long)row_step);
         for (int32_t y = y1; y <= y2; y++) {
-            const uint16_t *s = &src[(size_t)(y - y1) * satir_adimi + (xb - x1)];
+            const uint16_t *s = &src[(size_t)(y - y1) * row_step + (xb - x1)];
             for (int32_t x = xb; x <= xs; x++) {
                 const uint16_t px = *s++;
                 const uint32_t l = ((px >> 11) & 0x1F) + ((px >> 6) & 0x1F) + (px & 0x1F);
@@ -196,10 +196,10 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
      * Dış döngü ui_y olduğu için KAYNAK ardışık okunuyor (çizim tamponu
      * satır sıralı); hedefte sütun sabit, satır atlıyor. */
     for (int32_t y = y1; y <= y2; y++) {
-        const uint16_t *s = &src[(size_t)(y - y1) * satir_adimi + (xb - x1)];
+        const uint16_t *s = &src[(size_t)(y - y1) * row_step + (xb - x1)];
         const uint32_t pc = (uint32_t)(PB_LCD_H - 1 - y);
         for (int32_t x = xb; x <= xs; x++) {
-            s_dilim_fb[x - dilim_x0][pc] = *s++;
+            s_slice_fb[x - slice_x0][pc] = *s++;
         }
     }
 
@@ -252,17 +252,17 @@ bool pb_lv_touch_get(int32_t *ux, int32_t *uy)
     pb_touch_state_t st = pb_touch_read();
     if (!st.ok || st.fingers == 0) return false;
 
-    const uint32_t uzun  = st.p.raw_x;      /* bayt 2,3 — panel Y (0..639) */
-    const uint32_t kisa  = st.p.raw_y;      /* bayt 4,5 — panel X (0..171) */
+    const uint32_t lengthy  = st.p.raw_x;      /* bayt 2,3 — panel Y (0..639) */
+    const uint32_t brief  = st.p.raw_y;      /* bayt 4,5 — panel X (0..171) */
 
-    if (uzun >= (uint32_t)PB_LCD_W + PB_TOUCH_TOLERANCE ||
-        kisa >= (uint32_t)PB_LCD_H + PB_TOUCH_TOLERANCE) {
+    if (lengthy >= (uint32_t)PB_LCD_W + PB_TOUCH_TOLERANCE ||
+        brief >= (uint32_t)PB_LCD_H + PB_TOUCH_TOLERANCE) {
         pb_lv_touch_invalidate++;
         return false;
     }
 
-    int32_t x = (int32_t)PB_LCD_W - 1 - (int32_t)uzun;
-    int32_t y = (int32_t)PB_LCD_H - 1 - (int32_t)kisa;
+    int32_t x = (int32_t)PB_LCD_W - 1 - (int32_t)lengthy;
+    int32_t y = (int32_t)PB_LCD_H - 1 - (int32_t)brief;
 
     if (x < 0) x = 0; else if (x > PB_LV_W - 1) x = PB_LV_W - 1;
     if (y < 0) y = 0; else if (y > PB_LV_H - 1) y = PB_LV_H - 1;
@@ -287,18 +287,18 @@ static void indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 
 void pb_lv_set_slice_owner(uint32_t maske)
 {
-    s_lvgl_dilimleri = maske & ((1u << PB_SLICE_COUNT) - 1u);
+    s_lvgl_slices = maske & ((1u << PB_SLICE_COUNT) - 1u);
 }
 
 void pb_lv_invalidate_all(void)
 {
-    s_kirli = (1u << PB_SLICE_COUNT) - 1u;
+    s_dirty = (1u << PB_SLICE_COUNT) - 1u;
 }
 
 /** Bir dilimi çiz ve panele bas. */
-static void dilimi_bas(int32_t d)
+static void dilimi_head(int32_t d)
 {
-    s_aktif_dilim = d;
+    s_active_slice = d;
 
     lv_area_t a = {
         .x1 = d * PB_SLICE_W,
@@ -307,17 +307,17 @@ static void dilimi_bas(int32_t d)
         .y2 = PB_LV_H - 1,
     };
 
-    s_ciziyor = true;
+    s_drawing = true;
     lv_obj_invalidate_area(lv_screen_active(), &a);
     lv_refr_now(s_disp);
-    s_ciziyor = false;
+    s_drawing = false;
 
-    s_aktif_dilim = -1;
+    s_active_slice = -1;
 
     /* Tam genişlik (172 sütun), satır bandı [d*128 .. d*128+127].
      * Panelin sözleşmesine birebir uyan tek geometri (§9n). */
     pb_lcd_blit(0, (uint32_t)(d * PB_SLICE_W), PB_PANEL_W, PB_SLICE_W,
-                &s_dilim_fb[0][0]);
+                &s_slice_fb[0][0]);
     pb_lv_slice_press++;
 }
 
@@ -327,23 +327,23 @@ void pb_lv_dump_card_fb(void)
      * dilim başına 172 satır x 128 sütun, soldan sağa. Dökümü sürücünün
      * YAZDIĞI eşlemenin tersiyle okuyor, yani eşlemeyi de sınıyor. */
     for (int32_t d = 0; d < PB_SLICE_COUNT; d++) {
-        if (!((s_lvgl_dilimleri >> d) & 1u)) continue;
+        if (!((s_lvgl_slices >> d) & 1u)) continue;
 
-        s_aktif_dilim = d;
+        s_active_slice = d;
         lv_area_t a = { .x1 = d * PB_SLICE_W, .y1 = 0,
                         .x2 = d * PB_SLICE_W + PB_SLICE_W - 1, .y2 = PB_LV_H - 1 };
-        s_ciziyor = true;
+        s_drawing = true;
         lv_obj_invalidate_area(lv_screen_active(), &a);
         lv_refr_now(s_disp);
-        s_ciziyor = false;
-        s_aktif_dilim = -1;
+        s_drawing = false;
+        s_active_slice = -1;
 
         printf("#KARTFB dilim %ld  ui x %ld..%ld  (%d satir x %d sutun)\n",
                (long)d, (long)(d * PB_SLICE_W),
                (long)(d * PB_SLICE_W + PB_SLICE_W - 1), PB_LV_H, PB_SLICE_W);
         for (int32_t uy = 0; uy < PB_LV_H; uy++) {
             for (int32_t ux = 0; ux < PB_SLICE_W; ux++) {
-                const uint16_t px = s_dilim_fb[ux][PB_LV_H - 1 - uy];
+                const uint16_t px = s_slice_fb[ux][PB_LV_H - 1 - uy];
                 const uint32_t l = ((px >> 11) & 0x1F) + ((px >> 6) & 0x1F) + (px & 0x1F);
                 putchar(l < 6 ? '.' : (l < 24 ? '+' : '#'));
             }
@@ -394,12 +394,12 @@ void pb_lv_tick(void)
 
     /* Kirli ve BİZİM olan dilimleri artan sırada bas. Artan sıra önemli:
      * panel imleci ileri yürüyor, geri atlama olmuyor (§9n). */
-    uint32_t is = s_kirli & s_lvgl_dilimleri;
+    uint32_t is = s_dirty & s_lvgl_slices;
     if (!is) return;
 
-    s_kirli &= ~s_lvgl_dilimleri;
+    s_dirty &= ~s_lvgl_slices;
 
     for (int32_t d = 0; d < PB_SLICE_COUNT; d++) {
-        if ((is >> d) & 1u) dilimi_bas(d);
+        if ((is >> d) & 1u) dilimi_head(d);
     }
 }

@@ -17,55 +17,55 @@ lv_obj_t *pb_screen_new(void)
     return scr;
 }
 
-lv_obj_t *pb_label(lv_obj_t *par, const lv_font_t *f, uint32_t renk,
+lv_obj_t *pb_label(lv_obj_t *par, const lv_font_t *f, uint32_t color,
                     int32_t x, int32_t y)
 {
     lv_obj_t *l = lv_label_create(par);
     lv_obj_set_style_text_font(l, f, LV_PART_MAIN);
-    lv_obj_set_style_text_color(l, lv_color_hex(renk), LV_PART_MAIN);
+    lv_obj_set_style_text_color(l, lv_color_hex(color), LV_PART_MAIN);
     lv_obj_set_pos(l, x, y);
     lv_label_set_text(l, "");
     return l;
 }
 
 lv_obj_t *pb_box(lv_obj_t *par, int32_t x, int32_t y, int32_t w, int32_t h,
-                  uint32_t renk, int32_t yaricap)
+                  uint32_t color, int32_t yaricap)
 {
     lv_obj_t *o = lv_obj_create(par);
     lv_obj_remove_style_all(o);
     lv_obj_set_pos(o, x, y);
     lv_obj_set_size(o, w, h);
-    lv_obj_set_style_bg_color(o, lv_color_hex(renk), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(o, yaricap, LV_PART_MAIN);
     return o;
 }
 
-bool pb_write(lv_obj_t *o, char *son, uint32_t n, const char *metin)
+bool pb_write(lv_obj_t *o, char *last, uint32_t n, const char *text)
 {
-    if (!o || !son || n == 0) return false;
-    if (strncmp(son, metin, n - 1) == 0) return false;
+    if (!o || !last || n == 0) return false;
+    if (strncmp(last, text, n - 1) == 0) return false;
     /* strncpy yerine elle: sonlandırmayı garanti ediyoruz. */
     uint32_t i = 0;
-    for (; i + 1 < n && metin[i]; i++) son[i] = metin[i];
-    son[i] = '\0';
-    lv_label_set_text(o, son);
+    for (; i + 1 < n && text[i]; i++) last[i] = text[i];
+    last[i] = '\0';
+    lv_label_set_text(o, last);
     return true;
 }
 
-void pb_page_dots(lv_obj_t *par, int aktif)
+void pb_page_dots(lv_obj_t *par, int active)
 {
     /* Cihazda başka hiçbir kumanda yok: kullanıcıya "ikinci bir ekran var"
      * demenin tek yolu bu iki nokta. Tasarım bunları yalnızca günlük
      * ekranında gösteriyor; ikisine de konuldu, yoksa dinleme ekranında
      * kaydırılabildiği hiçbir yerden anlaşılmıyor. */
     const int32_t w = 16, h = 3, ara = 6;
-    const int32_t toplam = 2 * w + ara;
-    const int32_t x0 = (PB_SCREEN_W - toplam) / 2;
+    const int32_t total = 2 * w + ara;
+    const int32_t x0 = (PB_SCREEN_W - total) / 2;
     const int32_t y  = PB_SCREEN_H - 10;
 
     for (int i = 0; i < 2; i++) {
         pb_box(par, x0 + i * (w + ara), y, w, h,
-                i == aktif ? PB_COLOR_ACCENT : PB_COLOR_BORDER, 2);
+                i == active ? PB_COLOR_ACCENT : PB_COLOR_BORDER, 2);
     }
 }

@@ -76,7 +76,7 @@ extern uint32_t pb_lv_touch_invalidate;
  * hem 90° devrik okumayı aynı anda sınıyor. Terminalde yazı düzgün
  * okunuyorsa bozulma daha aşağıda (panel/hat); okunmuyorsa LVGL tarafında.
  */
-void pb_lv_request_dump(int adet);
+void pb_lv_request_dump(int count);
 
 /**
  * Kart framebuffer'ının TAMAMINI seri porta ASCII dök — GÖZ GEREKMEZ.

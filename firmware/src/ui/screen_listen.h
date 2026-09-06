@@ -19,6 +19,6 @@ lv_obj_t *pb_screen_listen_create(void);
 void pb_screen_listen_update(const pb_result_view_t *g);
 
 /** Kayıt butonunun görünümünü ayarla (dolu kare = dinliyor, daire = boşta). */
-void pb_screen_listen_set_recording(bool kayitta);
+void pb_screen_listen_set_recording(bool recording);
 
 #endif /* POKEBIRD_SCREEN_LISTEN_H */

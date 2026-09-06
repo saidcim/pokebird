@@ -81,7 +81,7 @@ void pb_lcd_fill(uint16_t color);
  * tersi) yollayıp hangisinin düştüğünü görebilmek için. Pencereyi çağıran
  * ayarlar; bu fonksiyon yalnızca RAMWR + veri yolluyor.
  */
-void pb_lcd_stream_flat(uint16_t renk, uint32_t piksel);
+void pb_lcd_stream_flat(uint16_t color, uint32_t pixel);
 
 /**
  * Ham piksel akışı — panelin GERÇEK sözleşmesini ifade eden üçlü.
@@ -98,7 +98,7 @@ void pb_lcd_stream_flat(uint16_t renk, uint32_t piksel);
  * çağrılırsa), `bitir` CS'i kaldırır. Pencereyi çağıran ayarlar.
  */
 void pb_lcd_stream_begin(uint8_t ramwr);
-void pb_lcd_stream_color(uint16_t renk, uint32_t piksel);
+void pb_lcd_stream_color(uint16_t color, uint32_t pixel);
 /** Tek satır (n piksel, normal RGB565) akıt; bayt sırasını kendi çevirir. */
 void pb_lcd_stream_row(const uint16_t *src, uint32_t n);
 void pb_lcd_stream_end(void);
@@ -114,6 +114,6 @@ void pb_lcd_column_window(uint32_t x1, uint32_t x2);
 void pb_lcd_cursor_invalidate(void);
 
 /** Sonraki `adet` satırı DMA'ya giderken seri porta ASCII dök (teşhis). */
-void pb_lcd_request_row_dump(int adet);
+void pb_lcd_request_row_dump(int count);
 
 #endif /* POKEBIRD_LCD_BLIT_H */

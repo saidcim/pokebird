@@ -123,8 +123,8 @@ uint32_t pb_mel_frame_count(void) { return s_total; }
 
 bool pb_mel_last_frame(int8_t *out) {
     if (s_total == 0 || !out) return false;
-    const uint32_t son = (s_write + PB_MEL_FRAMES - 1) % PB_MEL_FRAMES;
-    memcpy(out, s_ring[son], PB_MEL_BANDS);
+    const uint32_t last = (s_write + PB_MEL_FRAMES - 1) % PB_MEL_FRAMES;
+    memcpy(out, s_ring[last], PB_MEL_BANDS);
     return true;
 }
 
@@ -138,37 +138,37 @@ bool pb_mel_window(int8_t *out) {
     if (s_total < PB_MEL_FRAMES) return false;
 
     /* En eski kare, bir sonraki yazılacak satırdır. */
-    const uint32_t ilk = s_write;
+    const uint32_t first = s_write;
 
     /* Pencere içi ortalama ve standart sapma — dB alanında. */
-    float toplam = 0.0f, toplam_kare = 0.0f;
+    float total = 0.0f, total_frame = 0.0f;
     for (uint32_t r = 0; r < PB_MEL_FRAMES; r++) {
-        const int8_t *satir = s_ring[(ilk + r) % PB_MEL_FRAMES];
+        const int8_t *row = s_ring[(first + r) % PB_MEL_FRAMES];
         for (int b = 0; b < PB_MEL_BANDS; b++) {
-            float db = pb_mel_q_to_db(satir[b]);
-            toplam += db;
-            toplam_kare += db * db;
+            float db = pb_mel_q_to_db(row[b]);
+            total += db;
+            total_frame += db * db;
         }
     }
     const float n = (float)(PB_MEL_FRAMES * PB_MEL_BANDS);
-    const float ort = toplam / n;
-    float var = toplam_kare / n - ort * ort;
+    const float avg = total / n;
+    float var = total_frame / n - avg * avg;
     if (var < 1e-6f) var = 1e-6f;
     const float std = sqrtf(var);
 
     /* ±4 sigma'yı int8'in tamamına yay. Kırpma nadir ama zararsız: 4 sigma
      * dışındaki değerler zaten aşırı uçlar. */
-    const float olcek = 127.0f / (4.0f * std);
+    const float scale = 127.0f / (4.0f * std);
 
     for (uint32_t r = 0; r < PB_MEL_FRAMES; r++) {
-        const int8_t *satir = s_ring[(ilk + r) % PB_MEL_FRAMES];
-        int8_t *hedef = out + (size_t)r * PB_MEL_BANDS;
+        const int8_t *row = s_ring[(first + r) % PB_MEL_FRAMES];
+        int8_t *target = out + (size_t)r * PB_MEL_BANDS;
         for (int b = 0; b < PB_MEL_BANDS; b++) {
-            float z = (pb_mel_q_to_db(satir[b]) - ort) * olcek;
+            float z = (pb_mel_q_to_db(row[b]) - avg) * scale;
             int v = (int)lrintf(z);
             if (v < -128) v = -128;
             if (v > 127) v = 127;
-            hedef[b] = (int8_t)v;
+            target[b] = (int8_t)v;
         }
     }
     return true;

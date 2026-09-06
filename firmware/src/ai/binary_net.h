@@ -16,8 +16,8 @@
  * gerektirir — kırılgan. Ayrı arena çok daha küçük (ölçülecek, ~15-30 KB
  * bekleniyor, tür ağının 120 KB'ının yanında önemsiz).
  */
-#ifndef POKEBIRD_AI_IKILI_AGI_H
-#define POKEBIRD_AI_IKILI_AGI_H
+#ifndef POKEBIRD_AI_BINARY_AGI_H
+#define POKEBIRD_AI_BINARY_AGI_H
 
 #include <stdbool.h>
 #include <stddef.h>

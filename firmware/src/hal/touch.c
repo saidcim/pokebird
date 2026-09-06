@@ -39,8 +39,8 @@ bool pb_touch_init(void) {
 }
 
 pb_touch_state_t pb_touch_read(void) {
-    uint32_t simdi = time_us_32();
-    if (s_have_last && (uint32_t)(simdi - s_last_us) < TP_CACHE_US) {
+    uint32_t now = time_us_32();
+    if (s_have_last && (uint32_t)(now - s_last_us) < TP_CACHE_US) {
         return s_last;
     }
 
@@ -56,7 +56,7 @@ pb_touch_state_t pb_touch_read(void) {
                                           s_raw, PB_TOUCH_PACKET_LEN,
                                           false, TP_TIMEOUT_US);
     if (w < 0 || r < 0) {
-        s_last = st; s_last_us = simdi; s_have_last = true;
+        s_last = st; s_last_us = now; s_have_last = true;
         return st;
     }
 
@@ -72,7 +72,7 @@ pb_touch_state_t pb_touch_read(void) {
     st.p.raw_y = (uint16_t)(((s_raw[4] & 0x0F) << 8) | s_raw[5]);
 
     s_last = st;
-    s_last_us = simdi;
+    s_last_us = now;
     s_have_last = true;
     return st;
 }

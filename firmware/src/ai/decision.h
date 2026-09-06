@@ -76,24 +76,24 @@ typedef enum {
 } pb_decision_mode_t;
 
 typedef struct {
-    uint32_t simdi_ms;      /* şu an (to_ms_since_boot)                    */
-    bool     kapi_acik;     /* Aşama-0 kapısı bu an açık mı                */
-    bool     yeni_sonuc;    /* bu çağrıda yeni bir birleştirme geldi mi    */
-    int16_t  sinif;         /* birleştirilmiş top-1 sınıf indeksi          */
-    float    olasilik;      /* o sınıfın birleştirilmiş olasılığı (0..1)   */
-    uint32_t birlesen;      /* kaç pencere birleştirildi                   */
+    uint32_t now_ms;      /* şu an (to_ms_since_boot)                    */
+    bool     gate_open;     /* Aşama-0 kapısı bu an açık mı                */
+    bool     fresh_result;    /* bu çağrıda yeni bir birleştirme geldi mi    */
+    int16_t  cls;         /* birleştirilmiş top-1 sınıf indeksi          */
+    float    probability;      /* o sınıfın birleştirilmiş olasılığı (0..1)   */
+    uint32_t merged;      /* kaç pencere birleştirildi                   */
 } pb_decision_input_t;
 
 typedef struct {
-    pb_decision_mode_t kip;
-    int16_t  sinif;         /* gösterilen sınıf; kip < BELIRSIZ ise -1     */
-    float    guven;         /* gösterilen sınıfın son desteklenen olasılığı*/
+    pb_decision_mode_t mode;
+    int16_t  cls;         /* gösterilen sınıf; kip < BELIRSIZ ise -1     */
+    float    confidence;         /* gösterilen sınıfın son desteklenen olasılığı*/
 
     /* ── iç durum ── */
-    uint32_t son_kapi_ms;   /* kapının en son açık görüldüğü an            */
-    uint32_t son_destek_ms; /* gösterimin en son desteklendiği an          */
-    uint32_t giris_ms;      /* gösterime geçilen an (günlük/istatistik)    */
-    uint32_t surum;         /* ekranda görünen şey her değiştiğinde artar  */
+    uint32_t last_gate_ms;   /* kapının en son açık görüldüğü an            */
+    uint32_t last_support_ms; /* gösterimin en son desteklendiği an          */
+    uint32_t enter_ms;      /* gösterime geçilen an (günlük/istatistik)    */
+    uint32_t version;         /* ekranda görünen şey her değiştiğinde artar  */
 } pb_decision_t;
 
 /**
@@ -103,7 +103,7 @@ typedef struct {
  * çalışıyor: sıfırdan başlatılan bir "kapı en son şu an açıktı" damgası,
  * açılıştan 700 ms sonra başlatılan bir kip için "ses var" anlamına gelirdi.
  */
-void pb_decision_reset(pb_decision_t *k, uint32_t simdi_ms);
+void pb_decision_reset(pb_decision_t *k, uint32_t now_ms);
 
 /**
  * Kuralı bir adım ilerlet. Her arayüz turunda çağrılır; yeni bir birleştirme
@@ -114,6 +114,6 @@ void pb_decision_update(pb_decision_t *k, const pb_decision_input_t *g);
 
 /** Kip için sabit durum yazısı — arayüz ve seri port aynı sözcükleri
  *  kullansın diye tek yerde. */
-const char *pb_decision_mode_name(pb_decision_mode_t kip);
+const char *pb_decision_mode_name(pb_decision_mode_t mode);
 
 #endif /* POKEBIRD_DECISION_H */

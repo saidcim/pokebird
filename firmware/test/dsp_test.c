@@ -24,13 +24,13 @@
 static int g_fail = 0;
 static int g_run  = 0;
 
-static void check(bool ok, const char *ad, const char *ayrinti) {
+static void check(bool ok, const char *name, const char *detail) {
     g_run++;
     if (ok) {
-        printf("  [gecti] %s\n", ad);
+        printf("  [gecti] %s\n", name);
     } else {
         g_fail++;
-        printf("  [KALDI] %s — %s\n", ad, ayrinti);
+        printf("  [KALDI] %s — %s\n", name, detail);
     }
 }
 
@@ -57,13 +57,13 @@ static void test_fft_scale(void) {
     float power[PB_FFT_POWER_BINS];
     pb_fft_power(buf, power);
 
-    int tepe = 0;
+    int peak = 0;
     for (int k = 1; k < PB_FFT_POWER_BINS; k++) {
-        if (power[k] > power[tepe]) tepe = k;
+        if (power[k] > power[peak]) peak = k;
     }
     char msg[128];
-    snprintf(msg, sizeof(msg), "tepe bin %d, beklenen %d", tepe, bin);
-    check(tepe == bin, "tepe dogru bin'de", msg);
+    snprintf(msg, sizeof(msg), "tepe bin %d, beklenen %d", peak, bin);
+    check(peak == bin, "tepe dogru bin'de", msg);
 
     snprintf(msg, sizeof(msg), "guc %.4f, beklenen ~1.0", (double)power[bin]);
     check(power[bin] > 0.85f && power[bin] < 1.15f, "tam olcek sinus ~1.0 guc", msg);
@@ -83,25 +83,25 @@ static void test_mel_peak(void) {
     printf("Mel bant esleme:\n");
     pb_mel_init();
 
-    const float frekanslar[] = { 500.0f, 1000.0f, 3000.0f, 8000.0f };
-    int onceki_tepe = -1;
+    const float frequencies[] = { 500.0f, 1000.0f, 3000.0f, 8000.0f };
+    int previous_peak = -1;
     bool artan = true;
 
-    for (size_t i = 0; i < sizeof(frekanslar) / sizeof(frekanslar[0]); i++) {
+    for (size_t i = 0; i < sizeof(frequencies) / sizeof(frequencies[0]); i++) {
         int16_t buf[PB_FFT_SIZE];
-        sine(buf, PB_FFT_SIZE, frekanslar[i], 0.9f);
+        sine(buf, PB_FFT_SIZE, frequencies[i], 0.9f);
 
         int8_t mel[PB_MEL_BANDS];
         pb_mel_frame(buf, mel);
 
-        int tepe = 0;
-        for (int b = 1; b < PB_MEL_BANDS; b++) if (mel[b] > mel[tepe]) tepe = b;
+        int peak = 0;
+        for (int b = 1; b < PB_MEL_BANDS; b++) if (mel[b] > mel[peak]) peak = b;
 
         printf("        %6.0f Hz -> bant %2d (%.1f dB)\n",
-               (double)frekanslar[i], tepe, (double)pb_mel_q_to_db(mel[tepe]));
+               (double)frequencies[i], peak, (double)pb_mel_q_to_db(mel[peak]));
 
-        if (onceki_tepe >= 0 && tepe <= onceki_tepe) artan = false;
-        onceki_tepe = tepe;
+        if (previous_peak >= 0 && peak <= previous_peak) artan = false;
+        previous_peak = peak;
     }
     check(artan, "tepe bant frekansla artiyor", "monotonluk bozuldu");
 }
@@ -115,9 +115,9 @@ static void test_mel_silence(void) {
     int8_t mel[PB_MEL_BANDS];
     pb_mel_frame(buf, mel);
 
-    bool hepsi_taban = true;
-    for (int b = 0; b < PB_MEL_BANDS; b++) if (mel[b] != -128) hepsi_taban = false;
-    check(hepsi_taban, "sessizlik tabana oturuyor", "bazi bantlar taban degil");
+    bool all_base = true;
+    for (int b = 0; b < PB_MEL_BANDS; b++) if (mel[b] != -128) all_base = false;
+    check(all_base, "sessizlik tabana oturuyor", "bazi bantlar taban degil");
 }
 
 /* ── Halka tamponu ve pencere normalizasyonu ─────────────────────────────── */
@@ -125,8 +125,8 @@ static void test_mel_window(void) {
     printf("Mel halka tamponu:\n");
     pb_mel_reset();
 
-    int8_t *pencere = malloc((size_t)PB_MEL_BANDS * PB_MEL_FRAMES);
-    check(!pb_mel_window(pencere), "dolmadan pencere vermiyor", "erken true dondu");
+    int8_t *window = malloc((size_t)PB_MEL_BANDS * PB_MEL_FRAMES);
+    check(!pb_mel_window(window), "dolmadan pencere vermiyor", "erken true dondu");
 
     int16_t buf[PB_FFT_SIZE];
     for (int f = 0; f < PB_MEL_FRAMES; f++) {
@@ -139,15 +139,15 @@ static void test_mel_window(void) {
     char msg[128];
     snprintf(msg, sizeof(msg), "kare sayisi %u", pb_mel_frame_count());
     check(pb_mel_frame_count() == PB_MEL_FRAMES, "187 kare biriktti", msg);
-    check(pb_mel_window(pencere), "pencere hazir", "false dondu");
+    check(pb_mel_window(window), "pencere hazir", "false dondu");
 
     /* Normalizasyon sonrası ortalama ~0 olmalı. */
-    double toplam = 0.0;
+    double total = 0.0;
     const int n = PB_MEL_BANDS * PB_MEL_FRAMES;
-    for (int i = 0; i < n; i++) toplam += pencere[i];
-    double ort = toplam / n;
-    snprintf(msg, sizeof(msg), "ortalama %.2f", ort);
-    check(fabs(ort) < 8.0, "normalize pencerenin ortalamasi ~0", msg);
+    for (int i = 0; i < n; i++) total += window[i];
+    double avg = total / n;
+    snprintf(msg, sizeof(msg), "ortalama %.2f", avg);
+    check(fabs(avg) < 8.0, "normalize pencerenin ortalamasi ~0", msg);
 
     /* Halka gerçekten dönmeli: 187 kare daha itip taşmadığını görelim. */
     for (int f = 0; f < PB_MEL_FRAMES; f++) {
@@ -157,7 +157,7 @@ static void test_mel_window(void) {
     snprintf(msg, sizeof(msg), "kare sayisi %u", pb_mel_frame_count());
     check(pb_mel_frame_count() == 2 * PB_MEL_FRAMES, "halka donuyor", msg);
 
-    free(pencere);
+    free(window);
 }
 
 /* ── Kapı ─────────────────────────────────────────────────────────────────
@@ -208,92 +208,92 @@ static void test_gate(void) {
  * histerezis, tutma süresi, ses göstergesinin sönmesi. Kartta sınamak için
  * gerçek saniyeler beklemek gerekirdi; burada zamanı elle ilerletiyoruz. */
 /** Yeni bir birleştirme sonucu gelmiş gibi bir adım ilerlet. */
-static void sonuc(pb_decision_t *k, uint32_t ms, int16_t sinif, float p,
-                  uint32_t birlesen) {
-    pb_decision_input_t g = { .simdi_ms = ms, .kapi_acik = true,
-                           .yeni_sonuc = true, .sinif = sinif,
-                           .olasilik = p, .birlesen = birlesen };
+static void result(pb_decision_t *k, uint32_t ms, int16_t cls, float p,
+                  uint32_t merged) {
+    pb_decision_input_t g = { .now_ms = ms, .gate_open = true,
+                           .fresh_result = true, .cls = cls,
+                           .probability = p, .merged = merged };
     pb_decision_update(k, &g);
 }
 
 /** Yeni sonuç YOKken bir adım ilerlet (zaman aşımları burada işliyor). */
-static void bos(pb_decision_t *k, uint32_t ms, bool kapi) {
-    pb_decision_input_t g = { .simdi_ms = ms, .kapi_acik = kapi,
-                           .yeni_sonuc = false, .sinif = -1,
-                           .olasilik = 0.0f, .birlesen = 0 };
+static void empty(pb_decision_t *k, uint32_t ms, bool gate) {
+    pb_decision_input_t g = { .now_ms = ms, .gate_open = gate,
+                           .fresh_result = false, .cls = -1,
+                           .probability = 0.0f, .merged = 0 };
     pb_decision_update(k, &g);
 }
 
-static void test_karar(void) {
+static void test_decision(void) {
     printf("Karar kurali (esik + histerezis + tutma):\n");
     pb_decision_t k;
     char msg[160];
 
     /* 1) Açılış: kapı hiç açılmadıysa "dinliyor". */
     pb_decision_reset(&k, 10000);
-    bos(&k, 10000, false);
-    check(k.kip == PB_DECISION_LISTENING && k.sinif < 0,
+    empty(&k, 10000, false);
+    check(k.mode == PB_DECISION_LISTENING && k.cls < 0,
           "acilista dinliyor", "baska bir kipte basladi");
 
     /* 2) Kapı açılınca ses göstergesi, kapanınca SES_TUT_MS sonra sönüyor. */
-    bos(&k, 10100, true);
-    const bool ses_yandi = (k.kip == PB_DECISION_SOUND);
-    bos(&k, 10100 + PB_DECISION_SOUND_HOLD_MS + 1, false);
-    check(ses_yandi && k.kip == PB_DECISION_LISTENING,
+    empty(&k, 10100, true);
+    const bool ses_yandi = (k.mode == PB_DECISION_SOUND);
+    empty(&k, 10100 + PB_DECISION_SOUND_HOLD_MS + 1, false);
+    check(ses_yandi && k.mode == PB_DECISION_LISTENING,
           "kapi acilip kapaninca ses gostergesi sonuyor",
           ses_yandi ? "sonmedi" : "hic yanmadi");
 
     /* 3) Çıkma eşiğiyle girme eşiği arasındaki güven TÜR yazdırmıyor. */
     pb_decision_reset(&k, 20000);
-    sonuc(&k, 20000, 5, 0.5f * (PB_DECISION_ENTER_THRESHOLD + PB_DECISION_EXIT_THRESHOLD),
+    result(&k, 20000, 5, 0.5f * (PB_DECISION_ENTER_THRESHOLD + PB_DECISION_EXIT_THRESHOLD),
           PB_DECISION_MIN_WINDOWS);
-    check(k.kip == PB_DECISION_UNSURE && k.sinif == 5,
+    check(k.mode == PB_DECISION_UNSURE && k.cls == 5,
           "esikler arasi guven = belirsiz", "kip yanlis");
 
     /* 4) Girme eşiği aşılınca TÜR. */
-    sonuc(&k, 21000, 5, PB_DECISION_ENTER_THRESHOLD + 0.05f, PB_DECISION_MIN_WINDOWS);
-    check(k.kip == PB_DECISION_SPECIES && k.sinif == 5, "girme esigi -> TUR",
+    result(&k, 21000, 5, PB_DECISION_ENTER_THRESHOLD + 0.05f, PB_DECISION_MIN_WINDOWS);
+    check(k.mode == PB_DECISION_SPECIES && k.cls == 5, "girme esigi -> TUR",
           "TUR'a gecmedi");
 
     /* 5) HİSTEREZİS: güven girme eşiğinin ALTINA düşse de, çıkma eşiğinin
      *    üstünde kaldığı sürece aynı tür TUR olarak kalıyor. Ekranın
      *    zıplamamasını sağlayan madde bu. */
     for (uint32_t t = 22000; t <= 25000; t += 1000) {
-        sonuc(&k, t, 5, PB_DECISION_EXIT_THRESHOLD + 0.02f, PB_DECISION_MIN_WINDOWS);
+        result(&k, t, 5, PB_DECISION_EXIT_THRESHOLD + 0.02f, PB_DECISION_MIN_WINDOWS);
     }
-    snprintf(msg, sizeof(msg), "kip %d sinif %d", (int)k.kip, (int)k.sinif);
-    check(k.kip == PB_DECISION_SPECIES && k.sinif == 5,
+    snprintf(msg, sizeof(msg), "kip %d sinif %d", (int)k.mode, (int)k.cls);
+    check(k.mode == PB_DECISION_SPECIES && k.cls == 5,
           "girme esiginin altinda ama cikma esiginin ustunde: TUR kaliyor", msg);
 
     /* 6) Başka bir tür ancak GİRME eşiğiyle yerini alabiliyor. */
-    sonuc(&k, 26000, 9, PB_DECISION_EXIT_THRESHOLD + 0.02f, PB_DECISION_MIN_WINDOWS);
-    const bool degismedi = (k.sinif == 5);
-    sonuc(&k, 27000, 9, PB_DECISION_ENTER_THRESHOLD + 0.05f, PB_DECISION_MIN_WINDOWS);
-    check(degismedi && k.sinif == 9,
+    result(&k, 26000, 9, PB_DECISION_EXIT_THRESHOLD + 0.02f, PB_DECISION_MIN_WINDOWS);
+    const bool degismedi = (k.cls == 5);
+    result(&k, 27000, 9, PB_DECISION_ENTER_THRESHOLD + 0.05f, PB_DECISION_MIN_WINDOWS);
+    check(degismedi && k.cls == 9,
           "yeni tur yalnizca girme esigiyle yer aliyor",
           degismedi ? "girme esiginde de degismedi" : "cikma esiginde degisti");
 
     /* 7) Destek kesilince TUT_MS boyunca ekranda kalıyor, sonra siliniyor. */
-    bos(&k, 27000 + PB_DECISION_HOLD_MS - 100, false);
-    const bool duruyor = (k.kip == PB_DECISION_SPECIES && k.sinif == 9);
-    bos(&k, 27000 + PB_DECISION_HOLD_MS + 100, false);
-    snprintf(msg, sizeof(msg), "kip %d sinif %d", (int)k.kip, (int)k.sinif);
-    check(duruyor && k.kip == PB_DECISION_LISTENING && k.sinif < 0,
+    empty(&k, 27000 + PB_DECISION_HOLD_MS - 100, false);
+    const bool duruyor = (k.mode == PB_DECISION_SPECIES && k.cls == 9);
+    empty(&k, 27000 + PB_DECISION_HOLD_MS + 100, false);
+    snprintf(msg, sizeof(msg), "kip %d sinif %d", (int)k.mode, (int)k.cls);
+    check(duruyor && k.mode == PB_DECISION_LISTENING && k.cls < 0,
           "destek kesilince tutma suresi sonunda siliniyor",
           duruyor ? msg : "tutma suresi dolmadan silindi");
 
     /* 8) Negatif sınıf hiçbir güvende tür adı yazdırmıyor — sahadaki en
      *    pahalı hata "gürültüyü kuş sanmak" (models/thresholds.txt). */
     pb_decision_reset(&k, 40000);
-    sonuc(&k, 40000, PB_DECISION_NEGATIVE_CLASS, 0.99f, PB_DECISION_MIN_WINDOWS);
-    check(k.sinif < 0 && k.kip != PB_DECISION_SPECIES,
+    result(&k, 40000, PB_DECISION_NEGATIVE_CLASS, 0.99f, PB_DECISION_MIN_WINDOWS);
+    check(k.cls < 0 && k.mode != PB_DECISION_SPECIES,
           "negatif sinif ekrana tur yazdirmiyor", "negatif sinif gosterildi");
 
     /* 9) Yeterince pencere birleşmediyse karar yok: ölçüldü, 1 pencerede
      *    isabet %70,1, 3 pencerede %84,9 (models/thresholds.txt). */
     pb_decision_reset(&k, 50000);
-    sonuc(&k, 50000, 5, 0.95f, PB_DECISION_MIN_WINDOWS - 1);
-    check(k.sinif < 0, "az pencereyle karar verilmiyor", "erken karar verdi");
+    result(&k, 50000, 5, 0.95f, PB_DECISION_MIN_WINDOWS - 1);
+    check(k.cls < 0, "az pencereyle karar verilmiyor", "erken karar verdi");
 }
 
 /** Python referansıyla karşılaştırmak için tek kare CSV. */
@@ -331,18 +331,18 @@ static void dump_frame(void) {
  * örnek. Kare r = örnek[r*384 .. r*384+512).
  */
 static int dump_window(const char *yol) {
-    enum { GEREKEN = (PB_MEL_FRAMES - 1) * PB_MEL_HOP + PB_FFT_SIZE };
+    enum { REQUIRED = (PB_MEL_FRAMES - 1) * PB_MEL_HOP + PB_FFT_SIZE };
 
     FILE *f = fopen(yol, "rb");
     if (!f) { fprintf(stderr, "acilamadi: %s\n", yol); return 2; }
 
-    int16_t *s = (int16_t *)malloc(sizeof(int16_t) * GEREKEN);
+    int16_t *s = (int16_t *)malloc(sizeof(int16_t) * REQUIRED);
     if (!s) { fclose(f); fprintf(stderr, "bellek yok\n"); return 2; }
 
-    size_t okunan = fread(s, sizeof(int16_t), GEREKEN, f);
+    size_t okunan = fread(s, sizeof(int16_t), REQUIRED, f);
     fclose(f);
-    if (okunan < GEREKEN) {
-        fprintf(stderr, "kisa dosya: %zu ornek, gereken %d\n", okunan, GEREKEN);
+    if (okunan < REQUIRED) {
+        fprintf(stderr, "kisa dosya: %zu ornek, gereken %d\n", okunan, REQUIRED);
         free(s);
         return 2;
     }
@@ -350,20 +350,20 @@ static int dump_window(const char *yol) {
     pb_mel_reset();
     for (int r = 0; r < PB_MEL_FRAMES; r++) pb_mel_push(s + (size_t)r * PB_MEL_HOP);
 
-    int8_t *pencere = (int8_t *)malloc((size_t)PB_MEL_FRAMES * PB_MEL_BANDS);
-    if (!pencere || !pb_mel_window(pencere)) {
+    int8_t *window = (int8_t *)malloc((size_t)PB_MEL_FRAMES * PB_MEL_BANDS);
+    if (!window || !pb_mel_window(window)) {
         fprintf(stderr, "pencere olusmadi\n");
-        free(pencere); free(s);
+        free(window); free(s);
         return 2;
     }
 
     printf("kare,bant,q\n");
     for (int r = 0; r < PB_MEL_FRAMES; r++) {
         for (int b = 0; b < PB_MEL_BANDS; b++) {
-            printf("%d,%d,%d\n", r, b, pencere[(size_t)r * PB_MEL_BANDS + b]);
+            printf("%d,%d,%d\n", r, b, window[(size_t)r * PB_MEL_BANDS + b]);
         }
     }
-    free(pencere);
+    free(window);
     free(s);
     return 0;
 }
@@ -379,41 +379,41 @@ static int dump_window(const char *yol) {
  * species names the device now shows — it rendered "Common Nightingale" as
  * "COMMON NİGHTİNGALE". The first two cases below pin that down.
  */
-static void esit_metin(const char *girdi, const char *beklenen) {
+static void expect_text(const char *input, const char *beklenen) {
     char out[64];
-    pb_text_upper(girdi, out, sizeof(out));
-    char ayrinti[160];
-    snprintf(ayrinti, sizeof(ayrinti), "\"%s\" -> \"%s\", expected \"%s\"",
-             girdi, out, beklenen);
-    check(strcmp(out, beklenen) == 0, girdi, ayrinti);
+    pb_text_upper(input, out, sizeof(out));
+    char detail[160];
+    snprintf(detail, sizeof(detail), "\"%s\" -> \"%s\", expected \"%s\"",
+             input, out, beklenen);
+    check(strcmp(out, beklenen) == 0, input, detail);
 }
 
 static void test_text_upper(void) {
     printf("Uppercasing\n");
 
     /* ASCII `i` must stay a plain `I` — the regression described above. */
-    esit_metin("Common Nightingale", "COMMON NIGHTINGALE");
-    esit_metin("Eurasian Blackbird", "EURASIAN BLACKBIRD");
+    expect_text("Common Nightingale", "COMMON NIGHTINGALE");
+    expect_text("Eurasian Blackbird", "EURASIAN BLACKBIRD");
 
     /* Plain ASCII, and a hyphenated name. */
-    esit_metin("European Robin", "EUROPEAN ROBIN");
-    esit_metin("Greater White-fronted Goose", "GREATER WHITE-FRONTED GOOSE");
+    expect_text("European Robin", "EUROPEAN ROBIN");
+    expect_text("Greater White-fronted Goose", "GREATER WHITE-FRONTED GOOSE");
 
     /* Scientific names are shown as-is elsewhere, but must survive this. */
-    esit_metin("Anser albifrons", "ANSER ALBIFRONS");
+    expect_text("Anser albifrons", "ANSER ALBIFRONS");
 
     /* Multi-byte letters the fonts carry still uppercase correctly. */
-    esit_metin("çğöşü", "ÇĞÖŞÜ");
-    esit_metin("ı", "I");            /* dotless ı -> I: two bytes collapse to one */
+    expect_text("çğöşü", "ÇĞÖŞÜ");
+    expect_text("ı", "I");            /* dotless ı -> I: two bytes collapse to one */
 
     /* Edge cases. */
-    esit_metin("", "");
+    expect_text("", "");
 
     /* Buffer overflow must not leave half a UTF-8 sequence behind.
      * A 5-byte buffer holds "Ç" (2) + "Ç" (2) + terminator = exactly full. */
-    char kucuk[5];
-    pb_text_upper("çççç", kucuk, sizeof(kucuk));
-    check(strcmp(kucuk, "ÇÇ") == 0, "overflow leaves no partial UTF-8", kucuk);
+    char small[5];
+    pb_text_upper("çççç", small, sizeof(small));
+    check(strcmp(small, "ÇÇ") == 0, "overflow leaves no partial UTF-8", small);
 
     /* NULL input must not crash; it yields an empty string. */
     char nl[8] = "xxx";
@@ -438,7 +438,7 @@ int main(int argc, char **argv) {
     test_mel_silence();
     test_mel_window();
     test_gate();
-    test_karar();
+    test_decision();
     test_text_upper();
 
     printf("\n%d test, %d kaldi\n", g_run, g_fail);

@@ -74,7 +74,7 @@ pio_qspi_t qspi = {
     .pin_dio1 = PIN_DIO1,
     .pin_dio2 = PIN_DIO2,
     .pin_dio3 = PIN_DIO3,
-    .pin_pwr_en = PIN_PWR_EN,
+    .pin_pwr_max = PIN_PWR_MAX,
     .pin_rst = PIN_RST
 };
 
@@ -89,9 +89,9 @@ void QSPI_GPIO_Init(pio_qspi_t qspi){
     gpio_set_dir(qspi.pin_cs,GPIO_OUT);
     gpio_put(qspi.pin_cs,1);
 
-    gpio_init(qspi.pin_pwr_en);
-    gpio_set_dir(qspi.pin_pwr_en,GPIO_OUT);
-    gpio_put(qspi.pin_pwr_en,1);
+    gpio_init(qspi.pin_pwr_max);
+    gpio_set_dir(qspi.pin_pwr_max,GPIO_OUT);
+    gpio_put(qspi.pin_pwr_max,1);
 
     gpio_init(qspi.pin_rst);
     gpio_set_dir(qspi.pin_rst,GPIO_OUT);
@@ -133,28 +133,28 @@ void QSPI_WaitIdle(pio_qspi_t qspi){
      * varsa bekleme ISE YARAMAMIS demektir. Ikisi de sayiliyor. */
     pb_qspi_wait_calls++;
     if (!((qspi.pio->ctrl >> qspi.sm) & 1u)) pb_qspi_wait_sm_off++;
-    uint32_t giris_fifo = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
-    if (giris_fifo) {
+    uint32_t enter_fifo = pio_sm_get_tx_fifo_level(qspi.pio, qspi.sm);
+    if (enter_fifo) {
         pb_qspi_wait_fifo_full++;
-        if (giris_fifo > pb_qspi_wait_fifo_max) pb_qspi_wait_fifo_max = giris_fifo;
+        if (enter_fifo > pb_qspi_wait_fifo_max) pb_qspi_wait_fifo_max = enter_fifo;
     }
     uint32_t t0 = timer_hw->timerawl;
-    uint32_t donme = 0;
+    uint32_t spin = 0;
 
     qspi.pio->fdebug = stall;                       /* bayragi temizle */
-    absolute_time_t bitis = make_timeout_time_ms(50);
+    absolute_time_t end = make_timeout_time_ms(50);
     while (!(qspi.pio->fdebug & stall)) {
-        if (time_reached(bitis)) { pb_qspi_wait_timeout++; break; }  /* SM kapali/tikali */
-        donme++;
+        if (time_reached(end)) { pb_qspi_wait_timeout++; break; }  /* SM kapali/tikali */
+        spin++;
         tight_loop_contents();
     }
 
     uint32_t us = timer_hw->timerawl - t0;
     pb_qspi_wait_us_total += us;
     if (us > pb_qspi_wait_us_max) pb_qspi_wait_us_max = us;
-    if (donme) {
+    if (spin) {
         pb_qspi_wait_waited++;
-        if (donme > pb_qspi_wait_spin_max) pb_qspi_wait_spin_max = donme;
+        if (spin > pb_qspi_wait_spin_max) pb_qspi_wait_spin_max = spin;
     }
     if (!pio_sm_is_tx_fifo_empty(qspi.pio, qspi.sm)) pb_qspi_wait_residue++;
 }

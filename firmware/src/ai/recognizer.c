@@ -33,11 +33,11 @@
  * geçirme (yanlış "kuş") ucuz — tür ağı zaten kendi negatif sınıfıyla eliyor.
  * Bu yüzden eşik 0.5'ten AŞAĞI çekilmedi: ölçülen nokta zaten geri-çağırmayı
  * önceliklendiriyor (model seçimi de bu ölçütle yapıldı, bkz. ikili_egit.py). */
-#define IKILI_ESIK  0.5f
+#define BINARY_THRESHOLD  0.5f
 
 /* Çıkarım adımı: kaç mel karesinde bir pencere değerlendirilsin.
  * 63 kare × 16 ms = 1,008 s — plandaki 1 saniyelik pencere adımı (§7). */
-#define ADIM_KARE   63
+#define STEP_FRAME   63
 
 /* Kapı eşiği: son ADIM_KARE karenin en az bu kadarında kapı açık olmalı.
  *
@@ -49,60 +49,60 @@
  * ⚠ BU EŞİK SAHADA KALİBRE EDİLMELİ (M8). Şu anki değeri sessiz oda
  * ölçümünden türetildi; şehir gürültüsünde kapı çok daha sık açılacak ve
  * eşik seçiciliğini kaybedecek. O zaman işi Aşama-1 ikili ağı devralacak. */
-#define KAPI_ESIK   5
+#define GATE_THRESHOLD   5
 
 /* Birleştirme belleğinin bayatlama süresi. Bu kadar süre çıkarım yapılmazsa
  * (ortam sessizleşti) birikmiş olasılıklar atılıyor: 30 saniye önceki bir
  * ötüşü şimdiki sonuca karıştırmak yanlış olur. */
-#define BAYAT_MS    6000
+#define STALE_MS    6000
 
 /* ── Paylaşılan durum ──────────────────────────────────────────────────────
  * Core 1 yazar, core 0 okur. Kilit yok: `surum` alanı en SON yazılıyor ve
  * core 0 onu okuduktan sonra gövdeyi kopyalıyor; kopyaladıktan sonra sürümü
  * tekrar kontrol ediyor. Yırtık okuma olursa tekrar deniyor. Tek yazar
  * olduğu için bu yeterli — spinlock'a gerek yok. */
-static volatile pb_recognizer_state_t s_durum;
-static volatile bool s_calis = false;
-static volatile bool s_kapi_yoksay = false;
+static volatile pb_recognizer_state_t s_state;
+static volatile bool s_run = false;
+static volatile bool s_gate_ignore = false;
 
 /* Birleştirme halkası: son 8 pencerenin softmax olasılıkları.
  * 8 × 179 × 4 = 5.728 bayt. */
-static float s_olasilik[PB_VOTE_WINDOWS][PB_SPECIES_NET_CLASSES];
-static uint32_t s_olasilik_yaz = 0;
-static uint32_t s_olasilik_adet = 0;
+static float s_probability[PB_VOTE_WINDOWS][PB_SPECIES_NET_CLASSES];
+static uint32_t s_probability_write = 0;
+static uint32_t s_probability_count = 0;
 
 /* ── Spektrogram sütunu kuyruğu (core 1 -> core 0) ────────────────────────
  * Tek yazar / tek okuyucu halka. Kilit yok: yazar yalnızca `yaz`ı, okuyucu
  * yalnızca `oku`yu ilerletiyor; iki indeks arasındaki mesafe her zaman
  * güvenli tarafta kalıyor (dolu sayılan bir yuva asla üzerine yazılmıyor).
  * 64 x 64 = 4.096 bayt. */
-#define MEL_KUYRUK  64
-static int8_t s_mel_kuyruk[MEL_KUYRUK][PB_MEL_BANDS];
-static volatile uint32_t s_mel_yaz = 0, s_mel_oku = 0;
+#define MEL_QUEUE  64
+static int8_t s_mel_queue[MEL_QUEUE][PB_MEL_BANDS];
+static volatile uint32_t s_mel_write = 0, s_mel_read = 0;
 
 /* Core 1'in yığını. Pico SDK'nın varsayılanı 4 KB; TFLM Invoke'un ne kadar
  * yığın kullandığını ölçmedik (scratch tamponlarını arena'dan alıyor ama
  * çekirdek içi geçici diziler yığında). 8 KB, ölçmeden alınmış güvenli bir
  * pay — kanarya ile ölçülüp küçültülebilir. */
-static uint32_t s_core1_yigin[2048] __attribute__((aligned(8)));
+static uint32_t s_core1_heap[2048] __attribute__((aligned(8)));
 
 /**
  * int8 logit'lerden softmax. Ölçek/sıfır noktası modelden geliyor.
  * Taşmaya karşı en büyük değer çıkarılıyor (standart numaralı softmax).
  */
-static void softmax(const int8_t *q, float olcek, int sifir, float *out) {
-    int en_buyuk = q[0];
+static void softmax(const int8_t *q, float scale, int sifir, float *out) {
+    int max_big = q[0];
     for (int i = 1; i < PB_SPECIES_NET_CLASSES; i++) {
-        if (q[i] > en_buyuk) en_buyuk = q[i];
+        if (q[i] > max_big) max_big = q[i];
     }
-    float toplam = 0.0f;
+    float total = 0.0f;
     for (int i = 0; i < PB_SPECIES_NET_CLASSES; i++) {
-        const float z = ((float)q[i] - (float)en_buyuk) * olcek;
+        const float z = ((float)q[i] - (float)max_big) * scale;
         out[i] = expf(z);
-        toplam += out[i];
+        total += out[i];
     }
     (void)sifir;  /* fark alındığı için sıfır noktası sadeleşiyor */
-    const float ters = 1.0f / toplam;
+    const float ters = 1.0f / total;
     for (int i = 0; i < PB_SPECIES_NET_CLASSES; i++) out[i] *= ters;
 }
 
@@ -113,105 +113,105 @@ static void softmax(const int8_t *q, float olcek, int sifir, float *out) {
  * ölçülen %70,40 / %82,20 rakamları bu birleştirmeye ait. Başka bir kural
  * (örn. oy sayma) seçilirse o sayılar geçersiz olur.
  */
-static void birlestir(int16_t *ilk3, float *skor3, uint32_t *adet) {
-    float ort[PB_SPECIES_NET_CLASSES];
-    const uint32_t n = s_olasilik_adet < PB_VOTE_WINDOWS
-                           ? s_olasilik_adet : PB_VOTE_WINDOWS;
-    for (int c = 0; c < PB_SPECIES_NET_CLASSES; c++) ort[c] = 0.0f;
+static void birlestir(int16_t *top3, float *skor3, uint32_t *count) {
+    float avg[PB_SPECIES_NET_CLASSES];
+    const uint32_t n = s_probability_count < PB_VOTE_WINDOWS
+                           ? s_probability_count : PB_VOTE_WINDOWS;
+    for (int c = 0; c < PB_SPECIES_NET_CLASSES; c++) avg[c] = 0.0f;
     for (uint32_t k = 0; k < n; k++) {
-        const float *p = s_olasilik[k];
-        for (int c = 0; c < PB_SPECIES_NET_CLASSES; c++) ort[c] += p[c];
+        const float *p = s_probability[k];
+        for (int c = 0; c < PB_SPECIES_NET_CLASSES; c++) avg[c] += p[c];
     }
     const float ters = n ? 1.0f / (float)n : 0.0f;
-    for (int c = 0; c < PB_SPECIES_NET_CLASSES; c++) ort[c] *= ters;
+    for (int c = 0; c < PB_SPECIES_NET_CLASSES; c++) avg[c] *= ters;
 
-    for (int r = 0; r < 3; r++) { ilk3[r] = -1; skor3[r] = -1.0f; }
+    for (int r = 0; r < 3; r++) { top3[r] = -1; skor3[r] = -1.0f; }
     for (int c = 0; c < PB_SPECIES_NET_CLASSES; c++) {
         for (int r = 0; r < 3; r++) {
-            if (ort[c] > skor3[r]) {
+            if (avg[c] > skor3[r]) {
                 for (int j = 2; j > r; j--) {
                     skor3[j] = skor3[j - 1];
-                    ilk3[j] = ilk3[j - 1];
+                    top3[j] = top3[j - 1];
                 }
-                skor3[r] = ort[c];
-                ilk3[r] = (int16_t)c;
+                skor3[r] = avg[c];
+                top3[r] = (int16_t)c;
                 break;
             }
         }
     }
-    *adet = n;
+    *count = n;
 }
 
 static void core1_dongu(void) {
     /* Örtüşmeli kare: her turda PB_MEL_HOP yeni örnek alınıp kare sola
      * kaydırılıyor. Örtüşmesiz okumak 16 ms'lik adımı bozar. */
-    static int16_t kare[PB_FFT_SIZE];
-    static int8_t  pencere[PB_MEL_FRAMES * PB_MEL_BANDS];
-    const uint32_t kalan = PB_FFT_SIZE - PB_MEL_HOP;
+    static int16_t frame[PB_FFT_SIZE];
+    static int8_t  window[PB_MEL_FRAMES * PB_MEL_BANDS];
+    const uint32_t remaining = PB_FFT_SIZE - PB_MEL_HOP;
 
     pb_mel_reset();
     pb_gate_reset();
     pb_audio_stream_flush();
 
-    uint32_t adim = 0;            /* son çıkarımdan beri geçen kare        */
-    uint32_t adim_kapi = 0;       /* o karelerin kaçında kapı açıktı       */
+    uint32_t step = 0;            /* son çıkarımdan beri geçen kare        */
+    uint32_t step_gate = 0;       /* o karelerin kaçında kapı açıktı       */
     /* bir önceki pencerede ikili ağ "kuş" dedi, tür ağı BU pencereye ayrılı
      * (aynı pencerede ikisi birden çalışmıyor — bkz. aşağıdaki uyarı) */
-    bool ikili_beklemede = false;
-    absolute_time_t son_cikarim = get_absolute_time();
+    bool binary_pending = false;
+    absolute_time_t last_inference = get_absolute_time();
 
-    while (s_calis) {
-        memmove(kare, kare + PB_MEL_HOP, kalan * sizeof(int16_t));
+    while (s_run) {
+        memmove(frame, frame + PB_MEL_HOP, remaining * sizeof(int16_t));
         pb_capture_result_t cap =
-            pb_audio_stream_read(kare + kalan, PB_MEL_HOP, 1000);
+            pb_audio_stream_read(frame + remaining, PB_MEL_HOP, 1000);
         if (cap.samples < PB_MEL_HOP) continue;
-        if (cap.fifo_overrun) s_durum.overrun++;
+        if (cap.fifo_overrun) s_state.overrun++;
 
         float power[PB_FFT_POWER_BINS];
-        pb_fft_power(kare, power);
+        pb_fft_power(frame, power);
         pb_gate_result_t g = pb_gate_update(power);
-        pb_mel_push(kare);
+        pb_mel_push(frame);
 
         /* Kareyi arayüz kuyruğuna bırak (spektrogram). Kuyruk doluysa ATLA —
          * gerçek zamanlı hat arayüz için beklemez. */
         {
-            const uint32_t yaz = s_mel_yaz;
-            const uint32_t sonraki = (yaz + 1u) % MEL_KUYRUK;
-            if (sonraki != s_mel_oku && pb_mel_last_frame(s_mel_kuyruk[yaz])) {
+            const uint32_t write = s_mel_write;
+            const uint32_t next = (write + 1u) % MEL_QUEUE;
+            if (next != s_mel_read && pb_mel_last_frame(s_mel_queue[write])) {
                 __dmb();               /* veri, indeksten ÖNCE görünür olsun */
-                s_mel_yaz = sonraki;
+                s_mel_write = next;
             }
         }
 
-        s_durum.kare++;
-        s_durum.kapi_su_an = g.active;
-        if (g.active) { s_durum.kapi_acik++; adim_kapi++; }
-        s_durum.bant_db = g.band_db;
-        s_durum.taban_db = g.floor_db;
-        s_durum.aki = g.flux;
+        s_state.frame++;
+        s_state.gate_su_an = g.active;
+        if (g.active) { s_state.gate_open++; step_gate++; }
+        s_state.band_db = g.band_db;
+        s_state.base_db = g.floor_db;
+        s_state.aki = g.flux;
 
-        if (++adim < ADIM_KARE) continue;
-        adim = 0;
-        const uint32_t kapi_sayisi = adim_kapi;
-        adim_kapi = 0;
+        if (++step < STEP_FRAME) continue;
+        step = 0;
+        const uint32_t gate_count = step_gate;
+        step_gate = 0;
 
         /* Birleştirme belleği bayatladıysa temizle. */
-        if (absolute_time_diff_us(son_cikarim, get_absolute_time())
-                > (int64_t)BAYAT_MS * 1000) {
-            s_olasilik_adet = 0;
-            s_olasilik_yaz = 0;
+        if (absolute_time_diff_us(last_inference, get_absolute_time())
+                > (int64_t)STALE_MS * 1000) {
+            s_probability_count = 0;
+            s_probability_write = 0;
         }
 
         /* Aşama-0 kapısı: sessizlikte ağır iş HİÇ çalışmıyor. `ikili_beklemede`
          * iken kapı bu turu iptal ETMİYOR — bir önceki pencerede ikili ağ
          * "kuş" dedi ve tür ağı bu tura AYRILDI, geri çekilmiyor. */
-        if (!s_kapi_yoksay && !ikili_beklemede && kapi_sayisi < KAPI_ESIK) {
-            s_durum.atlanan++;
+        if (!s_gate_ignore && !binary_pending && gate_count < GATE_THRESHOLD) {
+            s_state.skipped++;
             continue;
         }
 
         /* 3 saniye dolmadıysa pencere yok. */
-        if (!pb_mel_window(pencere)) continue;
+        if (!pb_mel_window(window)) continue;
 
         /* ⚠ İKİLİ AĞ VE TÜR AĞI AYNI PENCEREDE ASLA İKİSİ BİRDEN ÇALIŞMAZ.
          *
@@ -226,78 +226,78 @@ static void core1_dongu(void) {
          * turda SADECE tür ağı çalışır (daha taze bir 3 s pencereyle —
          * bariz bir dezavantaj değil, tam tersi). Aksi hâlde SADECE ikili
          * ağ çalışır. */
-        if (ikili_beklemede) {
-            ikili_beklemede = false;
+        if (binary_pending) {
+            binary_pending = false;
         } else {
             /* Aynı cihaz sözleşmesi: ölçek 1.0, sıfır 0 (ikili_agi.cc'de
              * assert ediliyor). */
-            memcpy(pb_binary_net_input(), pencere, sizeof(pencere));
+            memcpy(pb_binary_net_input(), window, sizeof(window));
             if (!pb_binary_net_run()) continue;
-            s_durum.ikili_calisti++;
-            s_durum.ikili_son_p = pb_binary_net_probability();
-            if (s_durum.ikili_son_p < IKILI_ESIK) {
-                s_durum.ikili_red++;
+            s_state.binary_ran++;
+            s_state.binary_last_p = pb_binary_net_probability();
+            if (s_state.binary_last_p < BINARY_THRESHOLD) {
+                s_state.binary_red++;
                 continue;
             }
             /* "Kuş" dedi: tür ağını BU TURDA ÇALIŞTIRMA (zaman bütçesini
              * aşar), bir sonraki pencereye ayır. */
-            ikili_beklemede = true;
+            binary_pending = true;
             continue;
         }
 
         /* Cihaz sözleşmesi: girdi ölçeği 1.0, sıfır noktası 0 —
          * dönüşüm YOK, doğrudan kopya (§9k, tur_agi.cc'de assert ediliyor). */
-        memcpy(pb_species_net_input(), pencere, sizeof(pencere));
+        memcpy(pb_species_net_input(), window, sizeof(window));
         if (!pb_species_net_run()) continue;
 
-        s_durum.son_sure_us = pb_species_net_last_time_us();
-        s_durum.cikarim++;
-        son_cikarim = get_absolute_time();
+        s_state.last_time_us = pb_species_net_last_time_us();
+        s_state.inference++;
+        last_inference = get_absolute_time();
 
         softmax(pb_species_net_output(), pb_species_net_output_scale(),
-                pb_species_net_output_zero(), s_olasilik[s_olasilik_yaz]);
-        s_olasilik_yaz = (s_olasilik_yaz + 1) % PB_VOTE_WINDOWS;
-        if (s_olasilik_adet < PB_VOTE_WINDOWS) s_olasilik_adet++;
+                pb_species_net_output_zero(), s_probability[s_probability_write]);
+        s_probability_write = (s_probability_write + 1) % PB_VOTE_WINDOWS;
+        if (s_probability_count < PB_VOTE_WINDOWS) s_probability_count++;
 
-        int16_t ilk3[3];
+        int16_t top3[3];
         float skor3[3];
-        uint32_t birlesen;
-        birlestir(ilk3, skor3, &birlesen);
+        uint32_t merged;
+        birlestir(top3, skor3, &merged);
 
         for (int r = 0; r < 3; r++) {
-            s_durum.ilk3[r] = ilk3[r];
-            s_durum.ilk3_olasilik[r] = skor3[r];
+            s_state.top3[r] = top3[r];
+            s_state.top3_probability[r] = skor3[r];
         }
-        s_durum.birlesen = birlesen;
-        s_durum.gecerli = true;
+        s_state.merged = merged;
+        s_state.valid = true;
         __dmb();                 /* gövde sürümden ÖNCE görünür olsun */
-        s_durum.surum++;
+        s_state.version++;
     }
 }
 
-bool pb_recognizer_start(bool kapi_yoksay) {
-    if (s_calis) return true;
+bool pb_recognizer_start(bool gate_ignore) {
+    if (s_run) return true;
     if (!pb_binary_net_init()) return false;
     if (!pb_species_net_init()) return false;
 
-    s_kapi_yoksay = kapi_yoksay;
+    s_gate_ignore = gate_ignore;
 
-    memset((void *)&s_durum, 0, sizeof(s_durum));
-    s_olasilik_adet = 0;
-    s_olasilik_yaz = 0;
-    s_mel_yaz = 0;
-    s_mel_oku = 0;
-    s_calis = true;
+    memset((void *)&s_state, 0, sizeof(s_state));
+    s_probability_count = 0;
+    s_probability_write = 0;
+    s_mel_write = 0;
+    s_mel_read = 0;
+    s_run = true;
 
     multicore_reset_core1();
-    multicore_launch_core1_with_stack(core1_dongu, s_core1_yigin,
-                                      sizeof(s_core1_yigin));
+    multicore_launch_core1_with_stack(core1_dongu, s_core1_heap,
+                                      sizeof(s_core1_heap));
     return true;
 }
 
 void pb_recognizer_stop(void) {
-    if (!s_calis) return;
-    s_calis = false;
+    if (!s_run) return;
+    s_run = false;
     /* Core 1 en fazla bir okuma zaman aşımı (1 s) kadar sonra döngüden
      * çıkar; beklemeden sıfırlamak yarım kalmış bir Invoke'u kesebilir,
      * o yüzden önce kısa bir pay veriliyor. */
@@ -307,22 +307,22 @@ void pb_recognizer_stop(void) {
 
 bool pb_recognizer_get_mel(int8_t *out) {
     if (!out) return false;
-    const uint32_t oku = s_mel_oku;
-    if (oku == s_mel_yaz) return false;
+    const uint32_t read = s_mel_read;
+    if (read == s_mel_write) return false;
     __dmb();
-    memcpy(out, s_mel_kuyruk[oku], PB_MEL_BANDS);
+    memcpy(out, s_mel_queue[read], PB_MEL_BANDS);
     __dmb();
-    s_mel_oku = (oku + 1u) % MEL_KUYRUK;
+    s_mel_read = (read + 1u) % MEL_QUEUE;
     return true;
 }
 
 void pb_recognizer_read(pb_recognizer_state_t *out) {
     if (!out) return;
     for (int deneme = 0; deneme < 4; deneme++) {
-        const uint32_t v0 = s_durum.surum;
+        const uint32_t v0 = s_state.version;
         __dmb();
-        memcpy(out, (const void *)&s_durum, sizeof(*out));
+        memcpy(out, (const void *)&s_state, sizeof(*out));
         __dmb();
-        if (s_durum.surum == v0) return;   /* yırtık okuma yok */
+        if (s_state.version == v0) return;   /* yırtık okuma yok */
     }
 }

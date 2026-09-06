@@ -9,8 +9,8 @@
  * Bu dosya YALNIZCA tools/ui_preview derlemesinde görünür (include yolu
  * oraya özel); cihaz derlemesi gerçek SDK'yı kullanmaya devam ediyor.
  */
-#ifndef POKEBIRD_ONIZLE_PICO_STDLIB_H
-#define POKEBIRD_ONIZLE_PICO_STDLIB_H
+#ifndef POKEBIRD_PREVIEW_PICO_STDLIB_H
+#define POKEBIRD_PREVIEW_PICO_STDLIB_H
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -44,9 +44,9 @@ pb_gate_result_t pb_gate_update(const float *power) {
     memset(&r, 0, sizeof(r));
 
     /* Bant enerjisi */
-    float toplam = 0.0f;
-    for (int k = BIN_LO; k <= BIN_HI; k++) toplam += power[k];
-    r.band_db = 10.0f * log10f(toplam + 1e-12f);
+    float total = 0.0f;
+    for (int k = BIN_LO; k <= BIN_HI; k++) total += power[k];
+    r.band_db = 10.0f * log10f(total + 1e-12f);
 
     /* Spektral akı: bant şekli normalize edilip ardışık kareler arasındaki
      * POZİTİF farklar toplanıyor. Sadece artışlara bakmak önemli — sesin
@@ -58,23 +58,23 @@ pb_gate_result_t pb_gate_update(const float *power) {
      * Host testi ("ani ton kapiyi aciyor") bunu yakaladı.
      * Sessizlikte şekil düzgün dağılım kabul ediliyor: enerji bir banda
      * toplandığında akı doğal olarak yükseliyor. */
-    float simdiki[NBANDS];
-    const float duz = 1.0f / (float)NBANDS;
-    if (toplam > 1e-12f) {
-        const float inv = 1.0f / toplam;
-        for (int i = 0; i < NBANDS; i++) simdiki[i] = power[BIN_LO + i] * inv;
+    float current[NBANDS];
+    const float flat = 1.0f / (float)NBANDS;
+    if (total > 1e-12f) {
+        const float inv = 1.0f / total;
+        for (int i = 0; i < NBANDS; i++) current[i] = power[BIN_LO + i] * inv;
     } else {
-        for (int i = 0; i < NBANDS; i++) simdiki[i] = duz;
+        for (int i = 0; i < NBANDS; i++) current[i] = flat;
     }
 
     float akı = 0.0f;
     if (s_have_prev) {
         for (int i = 0; i < NBANDS; i++) {
-            float d = simdiki[i] - s_prev[i];
+            float d = current[i] - s_prev[i];
             if (d > 0.0f) akı += d;
         }
     }
-    memcpy(s_prev, simdiki, sizeof(s_prev));
+    memcpy(s_prev, current, sizeof(s_prev));
     s_have_prev = true;
     r.flux = akı;
 

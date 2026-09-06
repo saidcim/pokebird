@@ -17,198 +17,198 @@
  *     y 150   sayaçlar (göz gerektirmeyen doğrulama)
  *     y 162   sayfa noktaları
  */
-#define SATIR_Y0    38
-#define SATIR_ADIM  38
-#define GOSTERILEN  3
+#define ROW_Y0    38
+#define ROW_STEP  38
+#define VISIBLE_ROWS  3
 
-#define SOL         20
-#define SAG         620
-#define SURE_X      SOL
-#define SURE_W      86
-#define AD_X        (SOL + 96)
-#define AD_W        300
-#define CUBUK_X     440
-#define CUBUK_W     120
-#define YUZDE_X     572
-#define YUZDE_W     48
+#define LEFT         20
+#define RIGHT         620
+#define TIME_X      LEFT
+#define TIME_W      86
+#define NAME_X        (LEFT + 96)
+#define NAME_W        300
+#define BAR_X     440
+#define BAR_W     120
+#define PERCENT_X     572
+#define PERCENT_W     48
 
 /* ── Kayıt halkası ────────────────────────────────────────────────────────
  * SD kart günlüğü gelene kadar (M7 adım 5) tespitler RAM'de duruyor. Sekiz
  * yeter: ekranda üçü görünüyor, kalanı "kaydırınca daha fazlası" için değil,
  * yalnızca en yenisinin doğru seçilebilmesi için. Maliyet ~800 bayt. */
-#define HALKA 8
+#define RING 8
 
 typedef struct {
-    char     ad[48];
+    char     name[48];
     char     latin[40];
-    float    guven;
+    float    confidence;
     uint32_t ms;            /* açılıştan bu yana */
-    bool     dolu;
-} kayit_t;
+    bool     full;
+} record_t;
 
-static kayit_t s_kayit[HALKA];
-static uint32_t s_bas;          /* en yeni kaydın indeksi + 1 (mod HALKA) */
-static uint32_t s_toplam;
+static record_t s_record[RING];
+static uint32_t s_head;          /* en yeni kaydın indeksi + 1 (mod HALKA) */
+static uint32_t s_total;
 
 typedef struct {
-    lv_obj_t *sure, *ad, *latin, *cubuk, *yuzde;
-    char son_sure[24], son_ad[64], son_latin[48], son_yuzde[12];
-    int32_t son_cubuk_w;
-} satir_t;
+    lv_obj_t *time, *name, *latin, *bar, *percent;
+    char last_time[24], last_name[64], last_latin[48], last_percent[12];
+    int32_t last_bar_w;
+} row_t;
 
-static lv_obj_t *s_ekran, *s_sayi, *s_bos, *s_sayac;
-static satir_t   s_satir[GOSTERILEN];
-static char      s_son_sayi[24], s_son_sayac[64];
+static lv_obj_t *s_screen, *s_count, *s_empty, *s_counter;
+static row_t   s_row[VISIBLE_ROWS];
+static char      s_last_count[24], s_last_counter[64];
 
-static void satir_kur(satir_t *s, int32_t y)
+static void row_kur(row_t *s, int32_t y)
 {
-    s->sure = pb_label(s_ekran, &pb_font_mono_10, PB_COLOR_FAINT, SURE_X, y + 4);
-    lv_obj_set_width(s->sure, SURE_W);
+    s->time = pb_label(s_screen, &pb_font_mono_10, PB_COLOR_FAINT, TIME_X, y + 4);
+    lv_obj_set_width(s->time, TIME_W);
 
     /* ⚠ Yükseklik de veriliyor — yalnızca genişlikle `DOTS` kesmiyor, uzun ad
      * iki satıra sarıp bilimsel adın üstüne biniyor (bkz. ekran_dinleme.c). */
-    s->ad = pb_label(s_ekran, &pb_font_bold_13, PB_COLOR_TEXT, AD_X, y);
-    lv_obj_set_size(s->ad, AD_W, 16);
-    lv_label_set_long_mode(s->ad, LV_LABEL_LONG_MODE_DOTS);
+    s->name = pb_label(s_screen, &pb_font_bold_13, PB_COLOR_TEXT, NAME_X, y);
+    lv_obj_set_size(s->name, NAME_W, 16);
+    lv_label_set_long_mode(s->name, LV_LABEL_LONG_MODE_DOTS);
 
-    s->latin = pb_label(s_ekran, &pb_font_mono_10, PB_COLOR_LATIN, AD_X + 1, y + 16);
-    lv_obj_set_size(s->latin, AD_W, 13);
+    s->latin = pb_label(s_screen, &pb_font_mono_10, PB_COLOR_LATIN, NAME_X + 1, y + 16);
+    lv_obj_set_size(s->latin, NAME_W, 13);
     lv_label_set_long_mode(s->latin, LV_LABEL_LONG_MODE_DOTS);
 
-    pb_box(s_ekran, CUBUK_X, y + 8, CUBUK_W, 5, PB_COLOR_ROW, 3);
-    s->cubuk = pb_box(s_ekran, CUBUK_X, y + 8, 0, 5, PB_COLOR_ACCENT, 3);
+    pb_box(s_screen, BAR_X, y + 8, BAR_W, 5, PB_COLOR_ROW, 3);
+    s->bar = pb_box(s_screen, BAR_X, y + 8, 0, 5, PB_COLOR_ACCENT, 3);
 
-    s->yuzde = pb_label(s_ekran, &pb_font_bold_13, PB_COLOR_ACCENT, YUZDE_X, y + 1);
-    lv_obj_set_width(s->yuzde, YUZDE_W);
-    lv_obj_set_style_text_align(s->yuzde, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+    s->percent = pb_label(s_screen, &pb_font_bold_13, PB_COLOR_ACCENT, PERCENT_X, y + 1);
+    lv_obj_set_width(s->percent, PERCENT_W);
+    lv_obj_set_style_text_align(s->percent, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
-    s->son_sure[0] = s->son_ad[0] = s->son_latin[0] = s->son_yuzde[0] = '\0';
-    s->son_cubuk_w = -1;
+    s->last_time[0] = s->last_name[0] = s->last_latin[0] = s->last_percent[0] = '\0';
+    s->last_bar_w = -1;
 }
 
 lv_obj_t *pb_screen_log_create(void)
 {
-    s_ekran = pb_screen_new();
+    s_screen = pb_screen_new();
 
-    lv_obj_t *baslik = pb_label(s_ekran, &pb_font_bold_13, PB_COLOR_TEXT, SOL, 8);
-    lv_obj_set_style_text_letter_space(baslik, 3, LV_PART_MAIN);
-    lv_label_set_text(baslik, "TODAY");
+    lv_obj_t *title = pb_label(s_screen, &pb_font_bold_13, PB_COLOR_TEXT, LEFT, 8);
+    lv_obj_set_style_text_letter_space(title, 3, LV_PART_MAIN);
+    lv_label_set_text(title, "TODAY");
 
-    s_sayi = pb_label(s_ekran, &pb_font_narrow_11, PB_COLOR_FAINT,
-                       SAG - 120, 10);
-    lv_obj_set_width(s_sayi, 120);
-    lv_obj_set_style_text_align(s_sayi, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+    s_count = pb_label(s_screen, &pb_font_narrow_11, PB_COLOR_FAINT,
+                       RIGHT - 120, 10);
+    lv_obj_set_width(s_count, 120);
+    lv_obj_set_style_text_align(s_count, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
-    pb_box(s_ekran, SOL, 30, SAG - SOL, 1, PB_COLOR_LINE, 0);
+    pb_box(s_screen, LEFT, 30, RIGHT - LEFT, 1, PB_COLOR_LINE, 0);
 
-    for (int i = 0; i < GOSTERILEN; i++) {
-        satir_kur(&s_satir[i], SATIR_Y0 + i * SATIR_ADIM);
+    for (int i = 0; i < VISIBLE_ROWS; i++) {
+        row_kur(&s_row[i], ROW_Y0 + i * ROW_STEP);
     }
 
     /* Boş durum — cihaz yeni açıldığında ekranın anlamsız görünmemesi için. */
-    s_bos = pb_label(s_ekran, &pb_font_narrow_11, PB_COLOR_FAINT, SOL, 84);
-    lv_obj_set_width(s_bos, SAG - SOL);
-    lv_obj_set_style_text_align(s_bos, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_label_set_text(s_bos, "No entries yet · listening");
+    s_empty = pb_label(s_screen, &pb_font_narrow_11, PB_COLOR_FAINT, LEFT, 84);
+    lv_obj_set_width(s_empty, RIGHT - LEFT);
+    lv_obj_set_style_text_align(s_empty, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_text(s_empty, "No entries yet · listening");
 
     /* Sayaçlar tasarımda YOK; buraya konuldu çünkü §9p'de bilerek ekrana
      * yazılmışlardı (göz gerektirmeyen doğrulama). Dinleme ekranını
      * kalabalıklaştırmamak için ikinci ekranın altına alındılar. */
-    s_sayac = pb_label(s_ekran, &pb_font_mono_10, PB_COLOR_BORDER, SOL, 150);
-    lv_obj_set_width(s_sayac, 400);
+    s_counter = pb_label(s_screen, &pb_font_mono_10, PB_COLOR_BORDER, LEFT, 150);
+    lv_obj_set_width(s_counter, 400);
 
-    pb_page_dots(s_ekran, 1);
+    pb_page_dots(s_screen, 1);
 
-    s_son_sayi[0] = s_son_sayac[0] = '\0';
-    return s_ekran;
+    s_last_count[0] = s_last_counter[0] = '\0';
+    return s_screen;
 }
 
-void pb_screen_log_add(const char *ad, const char *latin, float guven)
+void pb_screen_log_add(const char *name, const char *latin, float confidence)
 {
-    if (!ad || !ad[0]) return;
+    if (!name || !name[0]) return;
 
-    const uint32_t simdi = to_ms_since_boot(get_absolute_time());
+    const uint32_t now = to_ms_since_boot(get_absolute_time());
 
     /* Aynı tür üst üste gelirse yeni satır AÇMA, en üsttekini tazele: karar
      * kuralı bir türü PB_DECISION_HOLD_MS boyunca ekranda tutuyor ve o süre
      * boyunca aynı tespit tekrar tekrar düşerse günlük tek olayla dolardı. */
-    if (s_toplam > 0) {
-        kayit_t *ust = &s_kayit[(s_bas + HALKA - 1) % HALKA];
-        if (strncmp(ust->ad, ad, sizeof(ust->ad) - 1) == 0) {
-            if (guven > ust->guven) ust->guven = guven;
-            ust->ms = simdi;
+    if (s_total > 0) {
+        record_t *top = &s_record[(s_head + RING - 1) % RING];
+        if (strncmp(top->name, name, sizeof(top->name) - 1) == 0) {
+            if (confidence > top->confidence) top->confidence = confidence;
+            top->ms = now;
             return;
         }
     }
 
-    kayit_t *k = &s_kayit[s_bas];
-    snprintf(k->ad, sizeof(k->ad), "%s", ad);
+    record_t *k = &s_record[s_head];
+    snprintf(k->name, sizeof(k->name), "%s", name);
     snprintf(k->latin, sizeof(k->latin), "%s", latin ? latin : "");
-    k->guven = guven;
-    k->ms = simdi;
-    k->dolu = true;
+    k->confidence = confidence;
+    k->ms = now;
+    k->full = true;
 
-    s_bas = (s_bas + 1) % HALKA;
-    if (s_toplam < 0xFFFFFFFFu) s_toplam++;
+    s_head = (s_head + 1) % RING;
+    if (s_total < 0xFFFFFFFFu) s_total++;
 }
 
 /** "az önce" / "3 dk önce" / "2 sa önce" — RTC yok, açılıştan bu yana. */
-static void sure_yaz(uint32_t gecen_ms, char *out, uint32_t n)
+static void time_write(uint32_t elapsed_ms, char *out, uint32_t n)
 {
-    const uint32_t sn = gecen_ms / 1000u;
+    const uint32_t sn = elapsed_ms / 1000u;
     if (sn < 60u)        snprintf(out, n, "just now");
     else if (sn < 3600u) snprintf(out, n, "%lu min ago", (unsigned long)(sn / 60u));
     else                 snprintf(out, n, "%lu hr ago", (unsigned long)(sn / 3600u));
 }
 
-void pb_screen_log_refresh(uint32_t kare_hiz, uint32_t cikarim, uint32_t overrun)
+void pb_screen_log_refresh(uint32_t frame_rate, uint32_t inference, uint32_t overrun)
 {
-    if (!s_ekran) return;
+    if (!s_screen) return;
 
-    const uint32_t simdi = to_ms_since_boot(get_absolute_time());
+    const uint32_t now = to_ms_since_boot(get_absolute_time());
 
     char buf[80];
-    snprintf(buf, sizeof(buf), "%lu entries", (unsigned long)s_toplam);
-    pb_write(s_sayi, s_son_sayi, sizeof(s_son_sayi), buf);
+    snprintf(buf, sizeof(buf), "%lu entries", (unsigned long)s_total);
+    pb_write(s_count, s_last_count, sizeof(s_last_count), buf);
 
-    if (s_toplam == 0) {
-        lv_obj_clear_flag(s_bos, LV_OBJ_FLAG_HIDDEN);
+    if (s_total == 0) {
+        lv_obj_clear_flag(s_empty, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_obj_add_flag(s_bos, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_empty, LV_OBJ_FLAG_HIDDEN);
     }
 
-    for (int i = 0; i < GOSTERILEN; i++) {
-        satir_t *s = &s_satir[i];
+    for (int i = 0; i < VISIBLE_ROWS; i++) {
+        row_t *s = &s_row[i];
         /* i=0 en yeni: halkada bir geri. */
-        const kayit_t *k = &s_kayit[(s_bas + HALKA - 1 - (uint32_t)i) % HALKA];
+        const record_t *k = &s_record[(s_head + RING - 1 - (uint32_t)i) % RING];
 
-        if (!k->dolu || (uint32_t)i >= s_toplam) {
-            pb_write(s->sure,  s->son_sure,  sizeof(s->son_sure),  "");
-            pb_write(s->ad,    s->son_ad,    sizeof(s->son_ad),    "");
-            pb_write(s->latin, s->son_latin, sizeof(s->son_latin), "");
-            pb_write(s->yuzde, s->son_yuzde, sizeof(s->son_yuzde), "");
-            if (s->son_cubuk_w != 0) { s->son_cubuk_w = 0; lv_obj_set_width(s->cubuk, 0); }
+        if (!k->full || (uint32_t)i >= s_total) {
+            pb_write(s->time,  s->last_time,  sizeof(s->last_time),  "");
+            pb_write(s->name,    s->last_name,    sizeof(s->last_name),    "");
+            pb_write(s->latin, s->last_latin, sizeof(s->last_latin), "");
+            pb_write(s->percent, s->last_percent, sizeof(s->last_percent), "");
+            if (s->last_bar_w != 0) { s->last_bar_w = 0; lv_obj_set_width(s->bar, 0); }
             continue;
         }
 
-        sure_yaz(simdi - k->ms, buf, sizeof(buf));
-        pb_write(s->sure, s->son_sure, sizeof(s->son_sure), buf);
+        time_write(now - k->ms, buf, sizeof(buf));
+        pb_write(s->time, s->last_time, sizeof(s->last_time), buf);
 
-        pb_text_upper(k->ad, buf, sizeof(buf));
-        pb_write(s->ad, s->son_ad, sizeof(s->son_ad), buf);
+        pb_text_upper(k->name, buf, sizeof(buf));
+        pb_write(s->name, s->last_name, sizeof(s->last_name), buf);
 
-        pb_write(s->latin, s->son_latin, sizeof(s->son_latin), k->latin);
+        pb_write(s->latin, s->last_latin, sizeof(s->last_latin), k->latin);
 
-        snprintf(buf, sizeof(buf), "%d%%", (int)(k->guven * 100.0f + 0.5f));
-        pb_write(s->yuzde, s->son_yuzde, sizeof(s->son_yuzde), buf);
+        snprintf(buf, sizeof(buf), "%d%%", (int)(k->confidence * 100.0f + 0.5f));
+        pb_write(s->percent, s->last_percent, sizeof(s->last_percent), buf);
 
-        int32_t w = (int32_t)(k->guven * (float)CUBUK_W + 0.5f);
-        if (w > CUBUK_W) w = CUBUK_W;
-        if (w != s->son_cubuk_w) { s->son_cubuk_w = w; lv_obj_set_width(s->cubuk, w); }
+        int32_t w = (int32_t)(k->confidence * (float)BAR_W + 0.5f);
+        if (w > BAR_W) w = BAR_W;
+        if (w != s->last_bar_w) { s->last_bar_w = w; lv_obj_set_width(s->bar, w); }
     }
 
     snprintf(buf, sizeof(buf), "%lu fps · inference %lu · overrun %lu",
-             (unsigned long)kare_hiz, (unsigned long)cikarim,
+             (unsigned long)frame_rate, (unsigned long)inference,
              (unsigned long)overrun);
-    pb_write(s_sayac, s_son_sayac, sizeof(s_son_sayac), buf);
+    pb_write(s_counter, s_last_counter, sizeof(s_last_counter), buf);
 }

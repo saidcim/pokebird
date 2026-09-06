@@ -64,12 +64,12 @@ extern const lv_font_t pb_font_mono_10;    /* bilimsel ad, sayaçlar (eğik)    
 lv_obj_t *pb_screen_new(void);
 
 /** Sol üstten konumlanan etiket. */
-lv_obj_t *pb_label(lv_obj_t *par, const lv_font_t *f, uint32_t renk,
+lv_obj_t *pb_label(lv_obj_t *par, const lv_font_t *f, uint32_t color,
                     int32_t x, int32_t y);
 
 /** Düz renk dikdörtgen — çubuk, ayraç çizgisi, nokta. `yaricap` yuvarlaklık. */
 lv_obj_t *pb_box(lv_obj_t *par, int32_t x, int32_t y, int32_t w, int32_t h,
-                  uint32_t renk, int32_t yaricap);
+                  uint32_t color, int32_t yaricap);
 
 /**
  * Etikete metni YALNIZCA DEĞİŞTİYSE yaz.
@@ -80,9 +80,9 @@ lv_obj_t *pb_box(lv_obj_t *par, int32_t x, int32_t y, int32_t w, int32_t h,
  *
  * @return metin değiştiyse true (çağıran rengi de güncellemek isteyebilir).
  */
-bool pb_write(lv_obj_t *o, char *son, uint32_t n, const char *metin);
+bool pb_write(lv_obj_t *o, char *last, uint32_t n, const char *text);
 
 /** Alt ortadaki sayfa noktaları — iki ekran olduğunu gösteren tek işaret. */
-void pb_page_dots(lv_obj_t *par, int aktif);
+void pb_page_dots(lv_obj_t *par, int active);
 
 #endif /* POKEBIRD_THEME_H */

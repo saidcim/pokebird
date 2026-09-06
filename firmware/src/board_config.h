@@ -59,7 +59,7 @@
 #define PB_PIN_LCD_RST      34
 #define PB_PIN_LCD_TE       35      /* tearing effect — yırtılmayı önlemek için */
 #define PB_PIN_LCD_BL       36      /* arka ışık PWM                            */
-#define PB_PIN_BL_EN        37      /* arka ışık yükseltici enable              */
+#define PB_PIN_BL_MAX        37      /* arka ışık yükseltici enable              */
 
 #define PB_LCD_NATIVE_W     172
 #define PB_LCD_NATIVE_H     640
@@ -77,7 +77,7 @@
 
 /* ── Güç ── */
 #define PB_PIN_SYS_OUT      38      /* güç mandalı: durum                      */
-#define PB_PIN_SYS_EN       39      /* güç mandalı: kendini kapatmak için      */
+#define PB_PIN_SYS_MAX       39      /* güç mandalı: kendini kapatmak için      */
 #define PB_PIN_BAT_ADC      40      /* pil voltajı (ADC)                       */
 #define PB_BAT_ADC_CHANNEL  (PB_PIN_BAT_ADC - 40)   /* RP2350B: ADC0 = GPIO40  */
 /* Şemadaki bölücü: R15 100K / R3 200K -> Vbat = Vadc * 1.5 */
