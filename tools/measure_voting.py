@@ -72,7 +72,8 @@ def main():
     y = np.load(csv_compat.resolve(os.path.join(TRAIN, "labels.npy")))
     with open(csv_compat.resolve(os.path.join(TRAIN, "samples.csv")), encoding="utf-8") as f:
         r = list(csv_compat.reader(f))
-    name = {int(s["class_index"]): s["turkish_name"] for s in
+    name = {int(s["class_index"]): (s.get("english_name")
+                                    or s.get("turkish_name", "")) for s in
           csv_compat.reader(open(csv_compat.resolve(os.path.join(TRAIN, "classes.csv")),
                               encoding="utf-8"))}
 

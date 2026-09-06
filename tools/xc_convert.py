@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """
-xc_convert.py — İndirilen Xeno-canto mp3'lerini cihaz formatına çevir.
+xc_convert.py — convert the downloaded Xeno-canto mp3s to the device's format.
 
-    mp3 (çeşitli oran/kanal)  ->  24 kHz mono 16-bit WAV
+    mp3 (various rates/channels)  ->  24 kHz mono 16-bit WAV
 
-NEDEN: Cihazın ses hattı 24 kHz mono (board_config.h · PB_SAMPLE_RATE).
-Eğitim verisi de aynı formatta olmalı, yoksa eğitimle çıkarım arasında sessiz
-bir uyumsuzluk kalır. Nasılsa yapılacak dönüşümü şimdi yapmak diski de
-yarıya indiriyor (ölçüldü: 26,6 GB mp3 -> 13,6 GB WAV; kayıtların ortalaması
-39 sn olduğu için WAV daha küçük çıkıyor — uzun kayıtlarda tersi olurdu).
+WHY: the device's audio path is 24 kHz mono (board_config.h, PB_SAMPLE_RATE).
+The training data has to be in the same format, otherwise a silent mismatch
+sits between training and inference. Doing the conversion now rather than
+later also halves the disk usage (measured: 26.6 GB of mp3 -> 13.6 GB of WAV;
+the recordings average 39 s, which is why WAV comes out smaller — for long
+recordings it would be the other way round).
 
-Tür başına en fazla `--adet` kayıt tutulur, fazlası ATILIR: en uzun kayıtlar
-değil, XC'nin döndürdüğü sırayla ilk N tutulur (o sıra kalite/alaka sırası).
+At most `--count` recordings are kept per species and the rest are DISCARDED.
+It keeps the first N in the order Xeno-canto returned them (that order is by
+quality and relevance), not the longest ones.
 
-Dönüşen mp3 varsayılan olarak SİLİNİR (`--mp3-sakla` ile korunur) — disk
-şişmesin diye. Kaynak dosya XC'de duruyor, gerekirse yeniden inebilir.
+Converted mp3s are DELETED by default (`--mp3-keep` preserves them) to stop
+the disk filling up. The source file is still on Xeno-canto and can be
+downloaded again if needed.
 
-    python tools/xc_convert.py --adet 40
+    python tools/xc_convert.py --count 40
 """
 
 import argparse
-import csv
 import os
 import shutil
 import subprocess
@@ -31,23 +33,23 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 XC_DIR = os.path.join(DATA, "xc")
 WAV_DIR = os.path.join(DATA, "wav")
-ORNEKLEME = 24000
+SAMPLE_RATE = 24000
 
 
-def ffmpeg_var():
+def have_ffmpeg():
     return shutil.which("ffmpeg") is not None
 
 
-def convert(is_):
-    mp3, wav, mp3_delete = is_
+def convert(job):
+    mp3, wav, delete_mp3 = job
     os.makedirs(os.path.dirname(wav), exist_ok=True)
     p = subprocess.run(
         ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", mp3,
-         "-ac", "1", "-ar", str(ORNEKLEME), "-c:a", "pcm_s16le", wav],
+         "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le", wav],
         capture_output=True, text=True)
     if p.returncode != 0:
         return (mp3, False, (p.stderr or "").strip()[:120])
-    if mp3_delete:
+    if delete_mp3:
         try:
             os.remove(mp3)
         except OSError:
@@ -58,73 +60,76 @@ def convert(is_):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=40,
-                    help="tur basina tutulacak kayit (varsayilan 40)")
+                    help="recordings to keep per species (default 40)")
     ap.add_argument("--mp3-keep", action="store_true",
-                    help="donusen mp3'leri silme (disk iki katina cikar)")
+                    help="do not delete converted mp3s (doubles disk usage)")
     ap.add_argument("--threads", type=int, default=4,
-                    help="es zamanli ffmpeg sayisi")
+                    help="number of concurrent ffmpeg processes")
     args = ap.parse_args()
 
-    if not ffmpeg_var():
-        sys.exit("[!] ffmpeg bulunamadi. https://ffmpeg.org/download.html")
+    if not have_ffmpeg():
+        sys.exit("[!] ffmpeg not found. https://ffmpeg.org/download.html")
     if not os.path.isdir(XC_DIR):
-        sys.exit(f"[!] {XC_DIR} yok. Once: python tools/xc_fetch.py --indir")
+        sys.exit(f"[!] {XC_DIR} does not exist. First run: "
+                 f"python tools/xc_fetch.py --download")
 
-    isler, atilan = [], 0
+    jobs, discarded = [], 0
     for species in sorted(os.listdir(XC_DIR)):
-        species_yolu = os.path.join(XC_DIR, species)
-        if not os.path.isdir(species_yolu):
+        species_dir = os.path.join(XC_DIR, species)
+        if not os.path.isdir(species_dir):
             continue
-        mp3ler = sorted(f for f in os.listdir(species_yolu) if f.endswith(".mp3"))
+        mp3s = sorted(f for f in os.listdir(species_dir) if f.endswith(".mp3"))
 
-        # Zaten çevrilmiş olanları say: tekrar çalıştırılabilir olsun.
+        # Count what is already converted, so this can be re-run safely.
         wav_species = os.path.join(WAV_DIR, species)
-        mevcut = len([f for f in os.listdir(wav_species)
-                      if f.endswith(".wav")]) if os.path.isdir(wav_species) else 0
+        existing = len([f for f in os.listdir(wav_species)
+                        if f.endswith(".wav")]) if os.path.isdir(wav_species) else 0
 
-        place = max(0, args.count - mevcut)
-        for f in mp3ler[:place]:
-            isler.append((os.path.join(species_yolu, f),
-                          os.path.join(wav_species, f[:-4] + ".wav"),
-                          not args.mp3_keep))
-        # Kotanın üstündeki mp3'ler: çevrilmeyecek, yer kaplamasın.
-        for f in mp3ler[place:]:
+        room = max(0, args.count - existing)
+        for f in mp3s[:room]:
+            jobs.append((os.path.join(species_dir, f),
+                         os.path.join(wav_species, f[:-4] + ".wav"),
+                         not args.mp3_keep))
+        # mp3s beyond the quota: they will not be converted, so do not let
+        # them take up space.
+        for f in mp3s[room:]:
             if not args.mp3_keep:
                 try:
-                    os.remove(os.path.join(species_yolu, f))
-                    atilan += 1
+                    os.remove(os.path.join(species_dir, f))
+                    discarded += 1
                 except OSError:
                     pass
 
-    if atilan:
-        print(f"{atilan:,} fazla mp3 silindi (tur basina kota {args.count})")
-    if not isler:
-        print("Cevrilecek yeni dosya yok.")
+    if discarded:
+        print(f"deleted {discarded:,} surplus mp3s "
+              f"(quota {args.count} per species)")
+    if not jobs:
+        print("No new files to convert.")
         return
 
-    print(f"{len(isler):,} dosya cevriliyor -> 24 kHz mono WAV\n", flush=True)
+    print(f"converting {len(jobs):,} files -> 24 kHz mono WAV\n", flush=True)
     ok = error = 0
     with ThreadPoolExecutor(max_workers=args.threads) as ex:
-        for i, (mp3, basarili, mesaj) in enumerate(ex.map(convert, isler), 1):
-            if basarili:
+        for i, (mp3, success, message) in enumerate(ex.map(convert, jobs), 1):
+            if success:
                 ok += 1
             else:
                 error += 1
-                print(f"  [!] {os.path.basename(mp3)}: {mesaj}")
-            if i % 250 == 0 or i == len(isler):
-                print(f"  {i:,}/{len(isler):,}", flush=True)
+                print(f"  [!] {os.path.basename(mp3)}: {message}")
+            if i % 250 == 0 or i == len(jobs):
+                print(f"  {i:,}/{len(jobs):,}", flush=True)
 
-    # Boşalan tür dizinlerini temizle
+    # Remove species directories that are now empty
     for species in os.listdir(XC_DIR):
         d = os.path.join(XC_DIR, species)
         if os.path.isdir(d) and not os.listdir(d):
             os.rmdir(d)
 
     size = sum(os.path.getsize(os.path.join(r, f))
-                for r, _, fs in os.walk(WAV_DIR) for f in fs if f.endswith(".wav"))
+               for r, _, fs in os.walk(WAV_DIR) for f in fs if f.endswith(".wav"))
     count = sum(1 for r, _, fs in os.walk(WAV_DIR) for f in fs if f.endswith(".wav"))
-    print(f"\nCevrildi {ok:,}, hata {error}")
-    print(f"{WAV_DIR}: {count:,} WAV, {size/1e9:.1f} GB")
+    print(f"\nConverted {ok:,}, errors {error}")
+    print(f"{WAV_DIR}: {count:,} WAVs, {size/1e9:.1f} GB")
 
 
 if __name__ == "__main__":

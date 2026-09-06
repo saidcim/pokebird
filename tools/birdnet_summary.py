@@ -76,7 +76,7 @@ def species_haritasi(map_yolu):
         )
     with open(map_yolu, encoding="utf-8") as f:
         return {
-            r["ebird_code"]: (r["birdnet_scientific_name"], r["turkish_name"])
+            r["ebird_code"]: (r["birdnet_scientific_name"], r["english_name"])
             for r in csv_compat.reader(f)
         }
 

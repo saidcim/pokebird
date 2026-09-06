@@ -25,7 +25,10 @@ LEGACY = {
     "indeks": "index",
     "sinif": "class_index",
     "ebird_kodu": "ebird_code",
-    "turkce_ad": "turkish_name",
+    # In the GENERATED files this column held the display name, which is
+    # now English. In the two committed CSVs the Turkish name is a column
+    # of its own and keeps its own header, so it is unaffected.
+    "turkce_ad": "english_name",
     "ingilizce_ad": "english_name",
     "bilimsel_ad": "scientific_name",
     "bizim_bilimsel_ad": "our_scientific_name",

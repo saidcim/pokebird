@@ -10,7 +10,7 @@ Cikti (data/egitim/):
     etiket.npy       (N,)         int16  — sinif indeksi (178 = negatif)
     ogretmen.npy     (N, 178)     float16— BirdNET yumusak skorlari (damitma)
     ornekler.csv     satir basina kaynak, bolum, bulasik bayragi
-    siniflar.csv     indeks -> ebird_kodu / turkce ad
+    siniflar.csv     indeks -> ebird_kodu / english ad
     ozet.txt         bu kosunun raporu
 
 ==========================================================================
@@ -420,13 +420,13 @@ def wav_length(path):
 
 
 def species_haritasi():
-    path = os.path.join(DATA, "birdnet_ad_haritasi.csv")
+    path = os.path.join(DATA, "birdnet_name_map.csv")
     if not os.path.exists(path):
         sys.exit(f"ad haritasi yok: {path} — once tools/birdnet_slist.py (§5.16)")
     with open(path, encoding="utf-8") as f:
         r = list(csv_compat.reader(f))
     return ({x["ebird_code"]: x["birdnet_scientific_name"] for x in r},
-            {x["ebird_code"]: x["turkish_name"] for x in r},
+            {x["ebird_code"]: x["english_name"] for x in r},
             {x["ebird_code"]: x["our_scientific_name"] for x in r})
 
 
@@ -541,7 +541,7 @@ def main():
         return listen(a.out, a.listen)
 
     sabitleri_verify()
-    birdnet_name, turkce, _ = species_haritasi()
+    birdnet_name, english, _ = species_haritasi()
     kodlar = sorted(birdnet_name)
     cls_indeks = {k: i for i, k in enumerate(kodlar)}
     name_cls = {birdnet_name[k]: cls_indeks[k] for k in kodlar}
@@ -668,7 +668,7 @@ def main():
                 T[write, j] = c
             rows.append({
                 "index": write, "class_index": cls_indeks[code], "ebird_code": code,
-                "turkish_name": turkce[code], "file": file,
+                "english_name": english[code], "file": file,
                 "start": f"{start_sn:.1f}", "window_samples": start,
                 "split": split_of[i], "bulasik": contaminated,
                 "target_confidence": f"{guven:.4f}", "best_species": best,
@@ -680,7 +680,7 @@ def main():
             print(f"  {sayac}/{len(dosyaya_gore)} kayit · {write} pencere", flush=True)
 
     # negatifler
-    for path, ofset, split, kategori in neg:
+    for path, ofset, split, category in neg:
         try:
             audio = wav_oku(path)
         except Exception as e:
@@ -696,7 +696,7 @@ def main():
         y[write] = negative_indeks
         rows.append({
             "index": write, "class_index": negative_indeks, "ebird_code": NEGATIVE_CODE,
-            "turkish_name": kategori, "file": os.path.basename(path),
+            "english_name": category, "file": os.path.basename(path),
             "start": f"{ofset / SR:.1f}", "window_samples": ofset,
             "split": split, "bulasik": 0, "target_confidence": "",
             "best_species": "", "best_confidence": "", "recordist": "ESC-50",
@@ -730,18 +730,18 @@ def main():
     with open(csv_compat.resolve(os.path.join(a.out, "classes.csv")), "w", encoding="utf-8",
               newline="") as f:
         w = csv.writer(f)
-        w.writerow(["class_index", "ebird_code", "turkish_name", "birdnet_scientific_name"])
+        w.writerow(["class_index", "ebird_code", "english_name", "birdnet_scientific_name"])
         for k in kodlar:
-            w.writerow([cls_indeks[k], k, turkce[k], birdnet_name[k]])
+            w.writerow([cls_indeks[k], k, english[k], birdnet_name[k]])
         w.writerow([negative_indeks, NEGATIVE_CODE, "negatif / bilinmiyor", ""])
 
-    rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, write,
+    rapor(a, rows, kodlar, english, negative_indeks, sessiz, write,
           record_bazina_dusen, contaminated_dusen)
     return 0
 
 
 def negative_listesi(a, name_cls):
-    """ESC-50 kliplerinden (yol, ofset, bolum, kategori) listesi.
+    """ESC-50 kliplerinden (yol, ofset, bolum, category) listesi.
 
     Bolme ESC-50'nin kendi katmanlarina gore: fold 5 test, fold 4 dogrulama,
     1-3 egitim. Katmanlar zaten ayni Freesound kaydindan gelen klipler ayni
@@ -798,7 +798,7 @@ def negative_listesi(a, name_cls):
     return out
 
 
-def rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, total,
+def rapor(a, rows, kodlar, english, negative_indeks, sessiz, total,
           record_bazina_dusen, contaminated_dusen):
     split_count = defaultdict(int)
     species_split = defaultdict(lambda: defaultdict(int))
@@ -846,7 +846,7 @@ def rapor(a, rows, kodlar, turkce, negative_indeks, sessiz, total,
                  "hedeflemeli, §9i-4):")
     for n, k in zayif[:12]:
         b = species_split[k]
-        row.append(f"  {k:10s} {turkce[k]:26s} {n:5d}  "
+        row.append(f"  {k:10s} {english[k]:26s} {n:5d}  "
                      f"(egitim {b['egitim']}, dog {b['dogrulama']}, test {b['test']}, "
                      f"bulasik {contaminated_count[k]})")
     count = [sum(species_split[k].values()) for k in var]

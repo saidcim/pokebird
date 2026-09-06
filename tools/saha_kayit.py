@@ -158,7 +158,7 @@ def main():
 
         yazar = csv.writer(fcsv)
         yazar.writerow(["duvar_saati", "cihaz_ms", "kip", "ebird_code",
-                        "turkish_name", "guven_yuzde"])
+                        "english_name", "confidence_percent"])
 
         def log_write(text):
             flog.write(text)
