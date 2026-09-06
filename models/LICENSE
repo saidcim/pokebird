@@ -1,0 +1,33 @@
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+(CC BY-NC-SA 4.0)
+
+This license applies to the trained model weights and the training reports in
+this directory, NOT to the rest of the repository. The firmware and the
+training tooling are MIT licensed; see the LICENSE file at the repository root.
+
+Files covered by this license:
+
+    tur_agi_int8.h        species network, INT8 weights
+    ikili_agi_int8.h      bird / not-bird network, INT8 weights
+    rapor.txt             species network training report
+    ikili_rapor.txt       binary network training report
+    esik.txt              measured decision thresholds
+    birlestirme.txt       measured window-voting table
+
+WHY THIS DIRECTORY IS DIFFERENT
+
+These networks were trained on three-second segments selected by BirdNET
+Analyzer, using BirdNET's own predictions as a teacher signal. BirdNET is
+released under CC BY-NC-SA 4.0, so a model distilled from it is plausibly a
+derivative work and inherits the NonCommercial and ShareAlike terms. The
+negative class is drawn from ESC-50, which is CC BY-NC 3.0 and also
+NonCommercial. Rather than guess in the user's favour, this directory is
+licensed to match the most restrictive input.
+
+In practice: personal, educational and research use is fine. Commercial use of
+these weights is not granted here. If you need a commercially usable model,
+retrain from sources you have the rights to; the training pipeline in tools/
+is MIT licensed and does not depend on these files.
+
+Full license text: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+Human-readable summary: https://creativecommons.org/licenses/by-nc-sa/4.0/

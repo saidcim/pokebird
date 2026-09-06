@@ -1,0 +1,13 @@
+Ref,Part,Description,Quantity,Sourcing,Unit Price (USD),Total (USD),Vendor,Link,Notes
+1,RP2350-Touch-LCD-3.49,"Waveshare RP2350B development board with 3.49in 172x640 IPS capacitive touch display",1,Purchase,,,Waveshare,https://www.waveshare.com/rp2350-touch-lcd-3.49.htm,"The whole project runs on this one module. Everything below is already on it."
+2,USB-C cable,"USB-C data cable for flashing and serial debug output",1,Purchase,,,any,,"Must be a data cable, not charge-only. Flashing and the debug console both go over USB CDC."
+3,Li-ion battery,"3.7V Li-ion cell with JST connector for untethered field use",1,Purchase,,,Waveshare,https://www.waveshare.com/rp2350-touch-lcd-3.49.htm,"Some listings of the module include a cell. Only needed to carry the device outdoors; it runs fine on USB power."
+4,RP2350B,"Dual Cortex-M33 @ 150 MHz, 520 KB SRAM, no PSRAM",1,Onboard,,,,,"MCU. The 520 KB SRAM ceiling with no PSRAM is what drives the streaming-mel design."
+5,PY25Q128HA,"16 MB QSPI flash",1,Onboard,,,,,"Holds the firmware and both INT8 networks (291 KB of weights total)."
+6,AXS15231B,"LCD + capacitive touch controller, QSPI display interface",1,Onboard,,,,,"Display on GPIO20-25/34-37, touch on a separate I2C bus (GPIO32/33, addr 0x3B)."
+7,ES8311,"Low-power mono audio codec, I2S master",1,Onboard,,,,,"Drives MCLK/BCLK/WS. Mic data arrives on GPIO2. Control over I2C1 (GPIO6/7)."
+8,MIC1,"Analog MEMS microphone",1,Onboard,,,,,"The only audio input. Sampled at 24 kHz to keep 7-9 kHz songbird calls intact."
+9,NS4150B,"Class-D speaker amplifier",1,Onboard,,,,,"Playback path only; not used by the recognition pipeline."
+10,QMI8658,"6-axis accelerometer + gyroscope",1,Onboard,,,,,"Present on I2C1 but deliberately unused."
+11,PCF85063,"Real-time clock",1,Onboard,,,,,"Present on I2C1 but deliberately unused: no battery backup, so it loses the time."
+12,microSD card,"TF card, any capacity",1,Optional,,,any,,"Card slot is wired (SPI mode, GPIO26-31). Not required to run the device."
